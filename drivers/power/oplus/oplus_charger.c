@@ -269,6 +269,12 @@ static void get_time_interval(void);
 static int aicl_delay_count = 0;
 static bool chg_ctrl_by_sale_mode = false;
 
+static int force_fast_charge = 0;
+module_param(force_fast_charge, int, 0644);
+
+static int ffc_val = 900;
+module_param(ffc_val, int, 0644);
+
 #if IS_ENABLED(CONFIG_OPLUS_CHG_TEST_KIT)
 struct test_kit_typec_port_info g_typec_port_info[] = {
 	{
@@ -6150,7 +6156,11 @@ void oplus_chg_set_input_current_limit(struct oplus_chg_chip *chip)
 	case POWER_SUPPLY_TYPE_UNKNOWN:
 		return;
 	case POWER_SUPPLY_TYPE_USB:
-		current_limit = chip->limits.input_current_usb_ma;
+		if (force_fast_charge > 0) {
+			current_limit = ffc_val;
+		} else {
+			current_limit = chip->limits.input_current_usb_ma;	
+		}
 		break;
 	case POWER_SUPPLY_TYPE_USB_DCP:
 		current_limit = chip->limits.input_current_charger_ma;
