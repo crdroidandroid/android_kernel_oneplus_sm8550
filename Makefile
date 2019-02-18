@@ -1044,6 +1044,7 @@ endif
 
 # Set O3 optimization level for LTO
 KBUILD_LDFLAGS		+= --plugin-opt=O3
+KBUILD_LDFLAGS      += --lto-O3
 endif
 
 ifdef CONFIG_LTO
