@@ -7370,6 +7370,7 @@ static struct platform_driver dwc3_msm_driver = {
 		.pm	= &dwc3_msm_dev_pm_ops,
 		.of_match_table	= of_dwc3_matach,
 		.dev_groups =	dwc3_msm_groups,
+		.probe_type = PROBE_FORCE_SYNCHRONOUS,
 	},
 };
 
