@@ -2291,6 +2291,7 @@ static struct platform_driver gpi_driver = {
 	.driver = {
 		.name = KBUILD_MODNAME,
 		.of_match_table = gpi_of_match,
+		.probe_type = PROBE_FORCE_SYNCHRONOUS,
 	},
 };
 
