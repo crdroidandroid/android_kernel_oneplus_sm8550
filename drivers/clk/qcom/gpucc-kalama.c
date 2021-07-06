@@ -678,6 +678,7 @@ static struct platform_driver gpu_cc_kalama_driver = {
 		.name = "gpu_cc-kalama",
 		.of_match_table = gpu_cc_kalama_match_table,
 		.sync_state = gpu_cc_kalama_sync_state,
+		.probe_type = PROBE_FORCE_SYNCHRONOUS,
 	},
 };
 
