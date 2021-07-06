@@ -653,6 +653,7 @@ static struct platform_driver video_cc_kalama_driver = {
 		.name = "video_cc-kalama",
 		.of_match_table = video_cc_kalama_match_table,
 		.sync_state = video_cc_kalama_sync_state,
+		.probe_type = PROBE_FORCE_SYNCHRONOUS,
 	},
 };
 
