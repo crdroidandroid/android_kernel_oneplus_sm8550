@@ -196,7 +196,7 @@ static void write_device_info(const char *key, const char *value)
 	pstore_write_device_info("\r\n", 2);
 }
 
-static int __init of_device_info_platform_data(struct device_node *node,
+static int of_device_info_platform_data(struct device_node *node,
 	struct device_info_platform_data *pdata)
 {
 	const u32 *addr;
@@ -224,7 +224,7 @@ static int __init of_device_info_platform_data(struct device_node *node,
 	return 0;
 }
 
-static int __init dump_device_info_probe(struct platform_device *pdev)
+static int dump_device_info_probe(struct platform_device *pdev)
 {
 	struct device_info_platform_data *pdata = pdev->dev.platform_data;
 	struct device_info_platform_data of_pdata;
