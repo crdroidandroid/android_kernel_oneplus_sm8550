@@ -20,6 +20,7 @@ android/abi_gki_aarch64_pixel
 android/abi_gki_aarch64_mtktv
 android/abi_gki_aarch64_qcom
 android/abi_gki_aarch64_oplus
+android/abi_gki_aarch64_oplus_internal
 "
 KMI_SYMBOL_LIST_MODULE_GROUPING=0
 KMI_SYMBOL_LIST_ADD_ONLY=1
