@@ -327,11 +327,6 @@ enum arm_smmu_implementation {
 	QCOM_SMMUV500,
 };
 
-struct arm_smmu_impl_def_reg {
-	u32 offset;
-	u32 value;
-};
-
 /*
  * Describes resources required for on/off power operation.
  * Separate reference count is provided for atomic/nonatomic
@@ -710,6 +705,8 @@ static inline void arm_smmu_writeq(struct arm_smmu_device *smmu, int page,
  * Implementation defined space starts after SMMU GR space, so IMPL_DEF page n
  * is page n + 2 in the SMMU register space.
  */
+#define ARM_SMMU_IMPL_DEF0	2
+#define ARM_SMMU_IMPL_DEF4	6
 #define ARM_SMMU_IMPL_DEF5	7
 
 #define ARM_SMMU_CB(s, n)	((s)->numpage + (n))
@@ -737,6 +734,7 @@ struct arm_smmu_device *arm_smmu_impl_init(struct arm_smmu_device *smmu);
 struct arm_smmu_device *nvidia_smmu_impl_init(struct arm_smmu_device *smmu);
 struct arm_smmu_device *qcom_smmu_impl_init(struct arm_smmu_device *smmu);
 struct arm_smmu_device *qsmmuv500_impl_init(struct arm_smmu_device *smmu);
+struct arm_smmu_device *qsmmuv2_impl_init(struct arm_smmu_device *smmu);
 struct arm_smmu_device *qcom_adreno_smmu_impl_init(struct arm_smmu_device *smmu);
 
 void arm_smmu_write_context_bank(struct arm_smmu_device *smmu, int idx);
