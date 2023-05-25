@@ -31,3 +31,5 @@ endif
 endif
 
 obj-$(CONFIG_OPLUS_CHG_TEST_KIT) += test-kit/
+
+KBUILD_CFLAGS += -Wframe-larger-than=8192
