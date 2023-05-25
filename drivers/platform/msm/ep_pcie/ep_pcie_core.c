@@ -3582,19 +3582,20 @@ int ep_pcie_core_get_msi_config(struct ep_pcie_msi_config *cfg, u32 vf_id)
 		ep_pcie_dev.rev, lower, upper, data, vf_id);
 
 	if (ctrl_reg & BIT(16)) {
-
-		if (ep_pcie_dev.active_config)
-			ep_pcie_config_outbound_iatu_entry(&ep_pcie_dev,
-					EP_PCIE_OATU_INDEX_MSI,
-					vf_id,
-					msi->start + (n * 0x8), EP_PCIE_OATU_UPPER,
-					msi->end, lower, upper);
-		else
-			ep_pcie_config_outbound_iatu_entry(&ep_pcie_dev,
-					EP_PCIE_OATU_INDEX_MSI,
-					vf_id,
-					msi->start + (n * 0x8), 0, msi->end,
-					lower, upper);
+		if (ep_pcie_dev.use_iatu_msi) {
+			if (ep_pcie_dev.active_config)
+				ep_pcie_config_outbound_iatu_entry(&ep_pcie_dev,
+						EP_PCIE_OATU_INDEX_MSI,
+						vf_id,
+						msi->start + (n * 0x8), EP_PCIE_OATU_UPPER,
+						msi->end, lower, upper);
+			else
+				ep_pcie_config_outbound_iatu_entry(&ep_pcie_dev,
+						EP_PCIE_OATU_INDEX_MSI,
+						vf_id,
+						msi->start + (n * 0x8), 0, msi->end,
+						lower, upper);
+		}
 
 		if (ep_pcie_dev.active_config || ep_pcie_dev.pcie_edma ||
 			ep_pcie_dev.no_path_from_ipa_to_pcie) {
