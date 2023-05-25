@@ -30,3 +30,5 @@ obj-$(CONFIG_TOUCHPANEL_SYNAPTICS) += Synaptics/
 #obj-$(CONFIG_TOUCHPANEL_SAMSUNG) += Samsung/
 #obj-$(CONFIG_TOUCHPANEL_ILITEK) += ilitek/
 #obj-$(CONFIG_TOUCHPANEL_ST) += St/
+
+KBUILD_CFLAGS += -Wframe-larger-than=4096
