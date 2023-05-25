@@ -31,3 +31,5 @@ endif
 endif
 
 obj-$(CONFIG_OPLUS_DYNAMIC_CONFIG) += config/
+
+KBUILD_CFLAGS += -Wframe-larger-than=8192
