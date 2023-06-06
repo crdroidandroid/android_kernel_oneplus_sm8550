@@ -17,7 +17,6 @@
 #include <linux/list.h>
 #include <linux/slab.h>
 #include <linux/swap.h>
-#include <linux/spinlock.h>
 #include <linux/sched/signal.h>
 #include <uapi/linux/sched/types.h>
 
@@ -26,11 +25,12 @@
 static LIST_HEAD(pool_list);
 static DEFINE_MUTEX(pool_list_lock);
 
+atomic64_t qcom_dma_heap_pool = ATOMIC64_INIT(0);
+EXPORT_SYMBOL(qcom_dma_heap_pool);
+
 void dynamic_page_pool_add(struct dynamic_page_pool *pool, struct page *page)
 {
-	unsigned long flags;
-
-	spin_lock_irqsave(&pool->lock, flags);
+	mutex_lock(&pool->mutex);
 	if (PageHighMem(page)) {
 		list_add_tail(&page->lru, &pool->high_items);
 		pool->high_count++;
@@ -42,7 +42,9 @@ void dynamic_page_pool_add(struct dynamic_page_pool *pool, struct page *page)
 	atomic_inc(&pool->count);
 	mod_node_page_state(page_pgdat(page), NR_KERNEL_MISC_RECLAIMABLE,
 			    1 << pool->order);
-	spin_unlock_irqrestore(&pool->lock, flags);
+	atomic64_add(1 << pool->order, &qcom_dma_heap_pool);
+	mutex_unlock(&pool->mutex);
+
 }
 
 struct page *dynamic_page_pool_remove(struct dynamic_page_pool *pool, bool high)
@@ -61,6 +63,7 @@ struct page *dynamic_page_pool_remove(struct dynamic_page_pool *pool, bool high)
 
 	atomic_dec(&pool->count);
 	list_del(&page->lru);
+	atomic64_sub(1 << pool->order, &qcom_dma_heap_pool);
 	mod_node_page_state(page_pgdat(page), NR_KERNEL_MISC_RECLAIMABLE,
 			    -(1 << pool->order));
 	return page;
@@ -95,7 +98,7 @@ struct dynamic_page_pool *dynamic_page_pool_create(gfp_t gfp_mask, unsigned int 
 	INIT_LIST_HEAD(&pool->high_items);
 	pool->gfp_mask = gfp_mask | __GFP_COMP;
 	pool->order = order;
-	spin_lock_init(&pool->lock);
+	mutex_init(&pool->mutex);
 
 	mutex_lock(&pool_list_lock);
 	list_add(&pool->list, &pool_list);
@@ -110,7 +113,6 @@ void dynamic_page_pool_destroy(struct dynamic_page_pool *pool)
 	LIST_HEAD(pages);
 	int num_pages = 0;
 	int ret = DYNAMIC_POOL_SUCCESS;
-	unsigned long flags;
 
 	/* Remove us from the pool list */
 	mutex_lock(&pool_list_lock);
@@ -118,7 +120,7 @@ void dynamic_page_pool_destroy(struct dynamic_page_pool *pool)
 	mutex_unlock(&pool_list_lock);
 
 	/* Free any remaining pages in the pool */
-	spin_lock_irqsave(&pool->lock, flags);
+	mutex_lock(&pool->mutex);
 	while (true) {
 		if (pool->low_count)
 			page = dynamic_page_pool_remove(pool, false);
@@ -130,7 +132,7 @@ void dynamic_page_pool_destroy(struct dynamic_page_pool *pool)
 		list_add(&page->lru, &pages);
 		num_pages++;
 	}
-	spin_unlock_irqrestore(&pool->lock, flags);
+	mutex_unlock(&pool->mutex);
 
 	if (num_pages && pool->prerelease_callback)
 		ret = pool->prerelease_callback(pool, &pages, num_pages);
@@ -166,18 +168,16 @@ static int dynamic_page_pool_do_shrink(struct dynamic_page_pool *pool, gfp_t gfp
 		return dynamic_page_pool_total(pool, high);
 
 	while (freed < nr_to_scan) {
-		unsigned long flags;
-
-		spin_lock_irqsave(&pool->lock, flags);
+		mutex_lock(&pool->mutex);
 		if (pool->low_count) {
 			page = dynamic_page_pool_remove(pool, false);
 		} else if (high && pool->high_count) {
 			page = dynamic_page_pool_remove(pool, true);
 		} else {
-			spin_unlock_irqrestore(&pool->lock, flags);
+			mutex_unlock(&pool->mutex);
 			break;
 		}
-		spin_unlock_irqrestore(&pool->lock, flags);
+		mutex_unlock(&pool->mutex);
 		list_add(&page->lru, &pages);
 		freed += (1 << pool->order);
 	}

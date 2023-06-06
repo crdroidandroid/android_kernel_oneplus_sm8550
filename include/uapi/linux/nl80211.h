@@ -6341,6 +6341,9 @@ enum nl80211_feature_flags {
  * @NL80211_EXT_FEATURE_RADAR_BACKGROUND: Device supports background radar/CAC
  *	detection.
  *
+ * @NL80211_EXT_FEATURE_AUTH_TX_RANDOM_TA: Device supports randomized TA
+ *	for authentication frames in @NL80211_CMD_FRAME.
+ *
  * @NL80211_EXT_FEATURE_POWERED_ADDR_CHANGE: Device can perform a MAC address
  *	change without having to bring the underlying network device down
  *	first. For example, in station mode this can be used to vary the
@@ -6417,6 +6420,7 @@ enum nl80211_ext_feature_index {
 	NL80211_EXT_FEATURE_FILS_CRYPTO_OFFLOAD,
 	NL80211_EXT_FEATURE_RADAR_BACKGROUND,
 	NL80211_EXT_FEATURE_POWERED_ADDR_CHANGE,
+	NL80211_EXT_FEATURE_AUTH_TX_RANDOM_TA,
 	NL80211_EXT_FEATURE_RESERVED_DO_NOT_USE_2 = 63,
 	NL80211_EXT_FEATURE_RESERVED_DO_NOT_USE_3 = 64,
 	NL80211_EXT_FEATURE_RESERVED_DO_NOT_USE_4 = 65,

@@ -19696,6 +19696,12 @@ int cfg80211_external_auth_request(struct net_device *dev,
 	if (!wdev->conn_owner_nlportid)
 		return -EINVAL;
 
+	if (!is_zero_ether_addr(params->tx_addr) &&
+	    !ether_addr_equal(params->tx_addr, wdev_address(wdev)) &&
+	    !wiphy_ext_feature_isset(&rdev->wiphy,
+				     NL80211_EXT_FEATURE_AUTH_TX_RANDOM_TA))
+		return -EINVAL;
+
 	msg = nlmsg_new(NLMSG_DEFAULT_SIZE, gfp);
 	if (!msg)
 		return -ENOMEM;
@@ -19711,7 +19717,9 @@ int cfg80211_external_auth_request(struct net_device *dev,
 			params->action) ||
 	    nla_put(msg, NL80211_ATTR_BSSID, ETH_ALEN, params->bssid) ||
 	    nla_put(msg, NL80211_ATTR_SSID, params->ssid.ssid_len,
-		    params->ssid.ssid))
+		    params->ssid.ssid) ||
+	    (!is_zero_ether_addr(params->tx_addr) &&
+	     nla_put(msg, NL80211_ATTR_MAC, ETH_ALEN, params->tx_addr)))
 		goto nla_put_failure;
 
 	genlmsg_end(msg, hdr);

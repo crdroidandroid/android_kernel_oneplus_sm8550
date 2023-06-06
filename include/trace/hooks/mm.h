@@ -17,6 +17,7 @@
 #define _TRACE_HOOK_MM_H
 
 #include <trace/hooks/vendor_hooks.h>
+#include <linux/mm.h>
 #include <linux/rwsem.h>
 
 #ifdef __GENKSYMS__

@@ -9,7 +9,9 @@
 #include <trace/hooks/sched.h>
 #include <walt.h>
 #include "trace.h"
-
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_TASK_SCHED)
+#include <../kernel/oplus_cpu/sched/task_sched/task_sched_info.h>
+#endif
 #ifdef CONFIG_HOTPLUG_CPU
 
 /* if a cpu is halting */
@@ -311,6 +313,9 @@ static int halt_cpus(struct cpumask *cpus)
 	wake_up_process(walt_drain_thread);
 
 out:
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_TASK_SCHED)
+	update_cpus_isolate_info(cpus, cpu_isolate);
+#endif
 	trace_halt_cpus(cpus, start_time, 1, ret);
 
 	return ret;
@@ -343,6 +348,9 @@ static int start_cpus(struct cpumask *cpus)
 		walt_smp_call_newidle_balance(cpu);
 	}
 
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_TASK_SCHED)
+        update_cpus_isolate_info(cpus, cpu_unisolate);
+#endif
 	trace_halt_cpus(cpus, start_time, 0, 0);
 
 	return 0;
@@ -506,10 +514,10 @@ unlock:
 }
 
 static void android_rvh_set_cpus_allowed_by_task(void *unused,
-						 const struct cpumask *cpu_valid_mask,
-						 const struct cpumask *new_mask,
-						 struct task_struct *p,
-						 unsigned int *dest_cpu)
+						    const struct cpumask *cpu_valid_mask,
+						    const struct cpumask *new_mask,
+						    struct task_struct *p,
+						    unsigned int *dest_cpu)
 {
 	cpumask_t allowed_cpus;
 
