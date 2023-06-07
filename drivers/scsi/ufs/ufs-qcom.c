@@ -4650,9 +4650,13 @@ static void ufs_qcom_event_notify(struct ufs_hba *hba,
 	struct ufs_qcom_host *host = ufshcd_get_variant(hba);
 	struct phy *phy = host->generic_phy;
 	u32 reg = *(u32 *)data;
+	bool ber_th_exceeded;
+	bool evt_valid;
+
+	ber_th_exceeded = false;
+	evt_valid = true;
+
 	recordUniproErr(&signalCtrl, reg, evt);
-	bool ber_th_exceeded = false;
-	bool evt_valid = true;
 
 	switch (evt) {
 	case UFS_EVT_PA_ERR:
