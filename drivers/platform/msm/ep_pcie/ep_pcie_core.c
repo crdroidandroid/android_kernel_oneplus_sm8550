@@ -3801,6 +3801,9 @@ static int ep_pcie_core_wakeup_host_internal(enum ep_pcie_event event)
 {
 	struct ep_pcie_dev_t *dev = &ep_pcie_dev;
 
+	if (atomic_read(&dev->host_wake_pending))
+		return 0;
+
 	if (!atomic_read(&dev->perst_deast)) {
 		if (event == EP_PCIE_EVENT_INVALID) {
 			EP_PCIE_DBG(dev, "PCIe V%d: Wake from DMA Call Back\n", dev->rev);
