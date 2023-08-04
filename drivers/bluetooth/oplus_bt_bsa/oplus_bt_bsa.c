@@ -70,7 +70,7 @@ static struct genl_family oplus_bt_bsa_genl_family = {
 	.n_ops = ARRAY_SIZE(oplus_bt_bsa_genl_ops),
 };
 
-static int oplus_switch_to_high() {
+static int oplus_switch_to_high(void) {
 	if (!bsa_pinctl || !pinctrl_state_high) {
 		printk(KERN_ERR "%s, oplus_bt_bsa, pinctrl is NULL\n",  __func__);
 		return -ENOENT;
@@ -81,7 +81,7 @@ static int oplus_switch_to_high() {
 	return 0;
 }
 
-static int oplus_switch_to_low() {
+static int oplus_switch_to_low(void) {
 	if (!bsa_pinctl || !pinctrl_state_low) {
 		printk(KERN_ERR "%s, oplus_bt_bsa, pinctrl is NULL\n",  __func__);
 		return -ENOENT;

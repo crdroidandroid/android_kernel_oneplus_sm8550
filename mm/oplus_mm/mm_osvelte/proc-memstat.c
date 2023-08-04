@@ -25,7 +25,7 @@
 #include "sys-memstat.h"
 #include "logger.h"
 
-static is_ashmem_file(struct file *file)
+static bool is_ashmem_file(struct file *file)
 {
 	return false;
 }

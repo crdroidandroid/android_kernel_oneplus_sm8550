@@ -698,7 +698,7 @@ static int read_data_from_share_mem(struct sensor_fb_cxt *sensor_fb_cxt)
 }
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0))
-static int reserve_fb_share_mem()
+static int reserve_fb_share_mem(void)
 {
 	int rc = 0;
 	size_t smem_size = 0;
@@ -1024,7 +1024,7 @@ static int sensor_fb_notifier(struct notifier_block *nb,
 #elif IS_ENABLED(CONFIG_OPLUS_SENSOR_DRM_PANEL_NOTIFY)
 void ssc_fb_set_screen_status(int status)
 {
-	static screen_status = SCREEN_INIT;
+	static int screen_status = SCREEN_INIT;
 	struct sensor_fb_cxt *sns_cxt = g_sensor_fb_cxt;
 
 	if (status == SCREEN_ON && screen_status != SCREEN_ON) {

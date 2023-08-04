@@ -787,7 +787,7 @@ static int user_binder_stats_add_intreresting_uid(struct binder_stats_user_conte
 	return ret;
 }
 
-static int set_driver_binder_stats_srvmgr_init() {
+static int set_driver_binder_stats_srvmgr_init(void) {
 	BINDER_STATS_LOGI("BDS_MGR task_tgid_nr:%d\n", task_tgid_nr(current));
 	g_binder_stats_driver.srvmgr_tgid = task_tgid_nr(current);
 	return 0;
