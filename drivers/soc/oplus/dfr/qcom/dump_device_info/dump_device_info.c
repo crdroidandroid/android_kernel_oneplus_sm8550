@@ -132,7 +132,7 @@ static int persistent_ram_buffer_map(phys_addr_t start, phys_addr_t size,
 	return 0;
 }
 
-static void persistent_ram_init()
+static void persistent_ram_init(void)
 {
 	struct persistent_ram_buffer *buffer = device_info_ramzone.buffer;
 	size_t size = device_info_ramzone.device_info_size;
@@ -178,7 +178,7 @@ static const char *get_machine_name(void)
 	return "unknown";
 }
 
-static void board_hw_info_init()
+static void board_hw_info_init(void)
 {
 	scnprintf(pcb_version, sizeof(pcb_version), "%d", get_PCB_Version());
 	scnprintf(project_version, sizeof(project_version), "%d", get_project());

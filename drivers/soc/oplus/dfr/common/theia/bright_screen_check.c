@@ -100,7 +100,7 @@ static void dump_freeze_log(void)
 	send_bright_screen_dcs_msg();
 }
 
-static bool is_bright_last_stage_skip()
+static bool is_bright_last_stage_skip(void)
 {
 	int i = 0, nLen;
 	char stage[64] = {0};;
@@ -118,7 +118,7 @@ static bool is_bright_last_stage_skip()
 	return false;
 }
 
-static bool is_bright_contain_skip_stage()
+static bool is_bright_contain_skip_stage(void)
 {
 	char stages[512] = {0};
 	int i = 0, nArrayLen;
@@ -135,7 +135,7 @@ static bool is_bright_contain_skip_stage()
 	return false;
 }
 
-static bool is_need_skip()
+static bool is_need_skip(void)
 {
 	if (is_bright_last_stage_skip())
 		return true;
