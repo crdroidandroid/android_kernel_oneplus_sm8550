@@ -86,7 +86,7 @@ static int oplus_qpnp_pon_wd_config(bool enable)
 	}
 }
 
-static int oplus_pon_pbs_int_cfg() {
+static int oplus_pon_pbs_int_cfg(void) {
 	int rc = 0;
 
 	if (!sys_reset_dev)
