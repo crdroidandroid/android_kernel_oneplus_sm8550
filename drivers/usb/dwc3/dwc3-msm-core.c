@@ -109,6 +109,11 @@
 
 #define EXTRA_INP_SS_DISABLE	BIT(5)
 
+#ifdef OPLUS_FEATURE_CHG_BASIC
+#define USB3_PRI_LINK_REGS_LLUCTL(n)	(0xd024 + ((n) * 0x80))
+#define FORCE_GEN1_MASK			BIT(10)
+#endif
+
 /* QSCRATCH_GENERAL_CFG register bit offset */
 #define PIPE_UTMI_CLK_SEL	BIT(0)
 #define PIPE3_PHYSTATUS_SW	BIT(3)
@@ -622,6 +627,28 @@ struct dwc3_msm {
 
 /* unfortunately, dwc3 core doesn't manage multiple dwc3 instances for trace */
 void *dwc_trace_ipc_log_ctxt;
+
+#ifdef OPLUS_FEATURE_CHG_BASIC
+static bool (*oplus_ignore_none_role)(void);
+void oplus_dwc3_config_ssr_pfunc(bool (*pfunc)(void))
+{
+	oplus_ignore_none_role = pfunc;
+}
+EXPORT_SYMBOL(oplus_dwc3_config_ssr_pfunc);
+
+static bool oplus_dwc3_get_ssr_status(void)
+{
+	bool ret = false;
+
+	if (oplus_ignore_none_role == NULL) {
+		ret = false;
+	} else {
+		ret = oplus_ignore_none_role();
+	}
+
+	return ret;
+}
+#endif
 
 static void dwc3_pwr_event_handler(struct dwc3_msm *mdwc);
 
@@ -4866,6 +4893,18 @@ static int dwc3_msm_set_role(struct dwc3_msm *mdwc, enum usb_role role)
 	dbg_log_string("cur_role:%s new_role:%s refcnt:%d\n", usb_role_string(cur_role),
 				usb_role_string(role), mdwc->refcnt_dp_usb);
 
+#ifdef OPLUS_FEATURE_CHG_BASIC
+	dev_err(mdwc->dev,
+		"%s: cur_role:%s new_role:%s\n",
+		__func__,usb_role_string(cur_role),usb_role_string(role));
+
+	if (oplus_dwc3_get_ssr_status() == true && role == USB_ROLE_NONE) {
+		pr_err("%s !!!ignore none if ssr crash\n");
+		mutex_unlock(&mdwc->role_switch_mutex);
+		return 0;
+	}
+#endif
+
 	/*
 	 * For boot up without USB cable connected case, don't check
 	 * previous role value to allow resetting USB controller and
@@ -6154,6 +6193,10 @@ static int dwc3_msm_probe(struct platform_device *pdev)
 		return 0;
 	}
 
+#ifndef OPLUS_FEATURE_CHG_BASIC
+	dwc3_ext_event_notify(mdwc);
+#endif
+
 	if (of_property_read_bool(node, "qcom,msm-probe-core-init"))
 		dwc3_ext_event_notify(mdwc);
 
@@ -6512,6 +6555,9 @@ static int dwc3_otg_start_host(struct dwc3_msm *mdwc, int on)
 	int ret = 0;
 	struct dwc3 *dwc = platform_get_drvdata(mdwc->dwc3);
 	u32 reg;
+#ifdef OPLUS_FEATURE_CHG_BASIC
+	u32 val;
+#endif
 
 	if (on) {
 		dev_dbg(mdwc->dev, "%s: turn on host\n", __func__);
@@ -6594,6 +6640,15 @@ static int dwc3_otg_start_host(struct dwc3_msm *mdwc, int on)
 
 		dwc3_msm_write_reg_field(mdwc->base, DWC3_GUSB3PIPECTL(0),
 				DWC3_GUSB3PIPECTL_SUSPHY, 1);
+
+#ifdef OPLUS_FEATURE_CHG_BASIC
+		/* disable host gen2 */
+		if (mdwc->ss_phy->flags & PHY_HOST_MODE){
+			dwc3_msm_write_reg_field(mdwc->base, USB3_PRI_LINK_REGS_LLUCTL(0), FORCE_GEN1_MASK, 1);
+			val = dwc3_msm_read_reg_field(mdwc->base, USB3_PRI_LINK_REGS_LLUCTL(0), FORCE_GEN1_MASK);
+			dev_info(mdwc->dev, "Turn on host: FORCE_GEN1_MASK = %d", val);
+		}
+#endif
 
 		/* Reduce the U3 exit handshake timer from 8us to approximately
 		 * 300ns to avoid lfps handshake interoperability issues
