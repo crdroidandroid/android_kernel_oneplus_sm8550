@@ -3,7 +3,7 @@
  * drivers/mmc/host/sdhci-msm.c - Qualcomm SDHCI Platform driver
  *
  * Copyright (c) 2013-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/module.h>
@@ -25,12 +25,12 @@
 #include <linux/interrupt.h>
 #include <linux/of.h>
 #include <linux/reset.h>
+#include <linux/mmc/sdio.h>
+#include <linux/mmc/host.h>
 #include <linux/clk/qcom.h>
 #include <linux/nvmem-consumer.h>
 #include <linux/ipc_logging.h>
 #include <linux/pinctrl/qcom-pinctrl.h>
-
-#include <trace/hooks/mmc.h>
 
 #include "sdhci-pltfm.h"
 #include "cqhci.h"
@@ -469,7 +469,7 @@ struct sdhci_msm_host {
 #ifdef CONFIG_MMC_CRYPTO
 	void __iomem *ice_mem;	/* MSM ICE mapped address (if available) */
 #endif
-#if (IS_ENABLED(CONFIG_QTI_HW_KEY_MANAGER) || IS_ENABLED(CONFIG_QTI_HW_KEY_MANAGER_V1))
+#if IS_ENABLED(CONFIG_QTI_HW_KEY_MANAGER)
 	void __iomem *ice_hwkm_mem;
 #endif
 	int pwr_irq;		/* power irq */
@@ -1852,7 +1852,6 @@ static int sdhci_msm_dt_parse_vreg_info(struct device *dev,
 	snprintf(prop_name, MAX_PROP_SIZE, "%s-supply", vreg_name);
 	if (!of_parse_phandle(np, prop_name, 0)) {
 		dev_info(dev, "No vreg data found for %s\n", vreg_name);
-		ret = -ENOENT;
 		return ret;
 	}
 
@@ -2480,8 +2479,7 @@ static int sdhci_msm_setup_vreg(struct sdhci_msm_host *msm_host,
 
 	/* Disable always_on regulator during reboot/shutdown */
 	if (mmc->card &&
-		mmc->card->ext_csd.power_off_notification == EXT_CSD_NO_POWER_NOTIFICATION
-		&& mmc->caps & MMC_CAP_NONREMOVABLE)
+		mmc->card->ext_csd.power_off_notification == EXT_CSD_NO_POWER_NOTIFICATION)
 		return ret;
 
 	if (!enable && !(mmc->caps & MMC_CAP_NONREMOVABLE)) {
@@ -2974,7 +2972,7 @@ static int sdhci_msm_ice_init(struct sdhci_msm_host *msm_host,
 	struct mmc_host *mmc = msm_host->mmc;
 	struct device *dev = mmc_dev(mmc);
 	struct resource *ice_base_res;
-#if (IS_ENABLED(CONFIG_QTI_HW_KEY_MANAGER) || IS_ENABLED(CONFIG_QTI_HW_KEY_MANAGER_V1))
+#if IS_ENABLED(CONFIG_QTI_HW_KEY_MANAGER)
 	struct resource *ice_hwkm_res;
 #endif
 	int err;
@@ -3002,7 +3000,7 @@ static int sdhci_msm_ice_init(struct sdhci_msm_host *msm_host,
 	}
 	cq_host->ice_mmio = msm_host->ice_mem;
 
-#if (IS_ENABLED(CONFIG_QTI_HW_KEY_MANAGER) || IS_ENABLED(CONFIG_QTI_HW_KEY_MANAGER_V1))
+#if IS_ENABLED(CONFIG_QTI_HW_KEY_MANAGER)
 	ice_hwkm_res = platform_get_resource_byname(msm_host->pdev,
 						    IORESOURCE_MEM,
 						    "cqhci_ice_hwkm");
@@ -3276,13 +3274,6 @@ static void sdhci_msm_set_timeout(struct sdhci_host *host, struct mmc_command *c
 		host->data_timeout = 22LL * NSEC_PER_SEC;
 }
 
-void sdhci_msm_cqe_sdhci_dumpregs(struct mmc_host *mmc)
-{
-	struct sdhci_host *host = mmc_priv(mmc);
-
-	sdhci_dumpregs(host);
-}
-
 static const struct cqhci_host_ops sdhci_msm_cqhci_ops = {
 	.enable		= sdhci_msm_cqe_enable,
 	.disable	= sdhci_msm_cqe_disable,
@@ -3290,7 +3281,6 @@ static const struct cqhci_host_ops sdhci_msm_cqhci_ops = {
 #ifdef CONFIG_MMC_CRYPTO
 	.program_key	= sdhci_msm_program_key,
 #endif
-	.dumpregs	= sdhci_msm_cqe_sdhci_dumpregs,
 };
 
 static int sdhci_msm_cqe_add_host(struct sdhci_host *host,
@@ -3494,8 +3484,8 @@ static void sdhci_msm_registers_restore(struct sdhci_host *host)
 			host->ioaddr + msm_offset->core_pwrctl_mask);
 
 	if (cq_host)
-		cqhci_writel(cq_host, msm_host->cqe_regs.cqe_vendor_cfg1 &
-				~CMDQ_SEND_STATUS_TRIGGER, CQHCI_VENDOR_CFG1);
+		cqhci_writel(cq_host, msm_host->cqe_regs.cqe_vendor_cfg1,
+				CQHCI_VENDOR_CFG1);
 
 	if ((ios.timing == MMC_TIMING_UHS_SDR50 &&
 		host->flags & SDHCI_SDR50_NEEDS_TUNING) ||
@@ -4898,6 +4888,127 @@ static void sdhci_msm_set_rumi_bus_mode(struct sdhci_host *host)
 	}
 }
 
+/*add for non standard SDIO slave*/
+#define SDIO_RESET_CCCR_ABORT_WRITE_AGR (0x80000000 | SDIO_CCCR_ABORT << 9 | 0x08)
+#define SDIO_RESET_CCCR_ABORT_READ_AGR (SDIO_CCCR_ABORT << 9)
+
+static inline bool sdhci_data_line_cmd(struct mmc_command *cmd)
+{
+	return cmd->data || cmd->flags & MMC_RSP_BUSY;
+}
+
+static bool sdhci_needs_reset(struct sdhci_host *host, struct mmc_request *mrq)
+{
+	return (!(host->flags & SDHCI_DEVICE_DEAD) &&
+		((mrq->cmd && mrq->cmd->error) ||
+		 (mrq->sbc && mrq->sbc->error) ||
+		 (mrq->data && mrq->data->stop && mrq->data->stop->error) ||
+		 (host->quirks & SDHCI_QUIRK_RESET_AFTER_REQUEST)));
+}
+
+static void sdhci_del_timer(struct sdhci_host *host, struct mmc_request *mrq)
+{
+	if (sdhci_data_line_cmd(mrq->cmd))
+		del_timer(&host->data_timer);
+	else
+		del_timer(&host->timer);
+}
+
+static void __sdhci_finish_mrq(struct sdhci_host *host, struct mmc_request *mrq)
+{
+	int i;
+
+	if (host->cmd && host->cmd->mrq == mrq)
+		host->cmd = NULL;
+
+	if (host->data_cmd && host->data_cmd->mrq == mrq)
+		host->data_cmd = NULL;
+
+	if (host->deferred_cmd && host->deferred_cmd->mrq == mrq)
+		host->deferred_cmd = NULL;
+
+	if (host->data && host->data->mrq == mrq)
+		host->data = NULL;
+
+	if (sdhci_needs_reset(host, mrq))
+		host->pending_reset = true;
+
+	for (i = 0; i < SDHCI_MAX_MRQS; i++) {
+		if (host->mrqs_done[i] == mrq) {
+			WARN_ON(1);
+			return;
+		}
+	}
+
+	for (i = 0; i < SDHCI_MAX_MRQS; i++) {
+		if (!host->mrqs_done[i]) {
+			host->mrqs_done[i] = mrq;
+			break;
+		}
+	}
+
+	WARN_ON(i >= SDHCI_MAX_MRQS);
+
+	sdhci_del_timer(host, mrq);
+
+}
+
+static void sdhci_finish_mrq(struct sdhci_host *host, struct mmc_request *mrq)
+{
+	__sdhci_finish_mrq(host, mrq);
+
+	queue_work(host->complete_wq, &host->complete_work);
+}
+
+static char filter_enable;
+
+static void sdhci_request_explorer(struct mmc_host *mmc, struct mmc_request *mrq)
+{
+	struct sdhci_host *host;
+
+	host = mmc_priv(mmc);
+	if (filter_enable == 1) {
+		if (mrq->cmd->opcode == MMC_GO_IDLE_STATE) {
+			mrq->cmd->error = -ENOMEDIUM;
+			sdhci_finish_mrq(host, mrq);
+			return;
+		}
+
+		if ((mrq->cmd->opcode == SD_IO_RW_DIRECT)  && (mrq->cmd->arg == SDIO_RESET_CCCR_ABORT_WRITE_AGR || mrq->cmd->arg == SDIO_RESET_CCCR_ABORT_READ_AGR)) {
+			mrq->cmd->error = -ENOMEDIUM;
+			sdhci_finish_mrq(host, mrq);
+			return;
+		}
+	}
+	sdhci_request(mmc, mrq);
+
+}
+
+static void sdhci_init_card(struct mmc_host *mmc, struct mmc_card *card)
+{
+	pr_debug("init non standard SDIO card\n");
+	if (card->type == MMC_TYPE_SDIO) {
+		get_device(&card->dev);
+		/* need add dts */
+		card->quirks |= MMC_QUIRK_NONSTD_SDIO;
+		card->cccr.multi_block = 1;
+		card->cccr.wide_bus = 1;
+		card->cis.vendor = 0x1919;
+		card->cis.device = 0x9066;
+		card->cis.blksize = 512;
+		/* host clock */
+		card->cis.max_dtr = 50000000;
+		card->ocr = 0x80;
+	}
+}
+
+static void get_filter_enable(struct mmc_host *host)
+{
+	struct device *dev = host->parent;
+	if (device_property_read_bool(dev, "filter-enable"))
+		filter_enable = 1;
+}
+
 static u32 is_bootdevice_sdhci = SDHCI_BOOT_DEVICE;
 
 static int sdhci_qcom_read_boot_config(struct platform_device *pdev)
@@ -4926,11 +5037,6 @@ static int sdhci_qcom_read_boot_config(struct platform_device *pdev)
 	nvmem_cell_put(cell);
 
 	return is_bootdevice_sdhci;
-}
-
-static void sdhci_msm_set_sdio_pm_flag(void *unused, struct mmc_host *host)
-{
-	host->pm_flags &= ~MMC_PM_WAKE_SDIO_IRQ;
 }
 
 static int sdhci_msm_probe(struct platform_device *pdev)
@@ -4987,6 +5093,7 @@ static int sdhci_msm_probe(struct platform_device *pdev)
 	ret = mmc_of_parse(host->mmc);
 	if (ret)
 		goto pltfm_free;
+	get_filter_enable(host->mmc);
 
 	if (pdev->dev.of_node) {
 		ret = of_alias_get_id(pdev->dev.of_node, "sdhc");
@@ -5274,6 +5381,12 @@ static int sdhci_msm_probe(struct platform_device *pdev)
 	/* Initialize sysfs entries */
 	sdhci_msm_init_sysfs_gating_qos(dev);
 
+	if (filter_enable == 1) {
+		host->mmc_host_ops.init_card = sdhci_init_card;
+		host->mmc_host_ops.request = sdhci_request_explorer;
+		host->flags = SDHCI_SIGNALING_180;
+	}
+
 	if (of_property_read_bool(node, "supports-cqe"))
 		ret = sdhci_msm_cqe_add_host(host, pdev);
 	else
@@ -5297,9 +5410,6 @@ static int sdhci_msm_probe(struct platform_device *pdev)
 
 	pm_runtime_mark_last_busy(&pdev->dev);
 	pm_runtime_put_autosuspend(&pdev->dev);
-
-	if (msm_host->mmc->card && mmc_card_sdio(msm_host->mmc->card))
-		register_trace_android_vh_mmc_sdio_pm_flag_set(sdhci_msm_set_sdio_pm_flag, NULL);
 
 	return 0;
 

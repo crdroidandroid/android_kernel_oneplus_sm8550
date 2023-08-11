@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2017-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022-2023, Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #define pr_fmt(msg) "slatecom: %s: " msg, __func__
@@ -23,7 +23,7 @@
 #include <linux/suspend.h>
 #include <linux/ipc_logging.h>
 #include "slatecom.h"
-#include <linux/soc/qcom/slatecom_interface.h>
+#include "slatecom_interface.h"
 
 #define SLATE_SPI_WORD_SIZE (0x04)
 #define SLATE_SPI_READ_LEN (0x04)
@@ -43,7 +43,6 @@
 #define HED_EVENT_SIZE_LEN (0x02)
 #define HED_EVENT_DATA_STRT_LEN (0x05)
 #define CMA_BFFR_POOL_SIZE (128*1024)
-#define TX_AHB_BUF_SIZE 1024
 
 #define SLATE_OK_SLP_RBSC      BIT(24)
 #define SLATE_OK_SLP_S2R       BIT(25)
@@ -179,8 +178,6 @@ static int slatecom_reg_read_internal(void *handle, uint8_t reg_start_addr,
 	uint32_t num_regs, void *read_buf);
 static int slatecom_force_resume(void *handle);
 
-struct subsys_state_ops state_ops;
-
 static struct spi_device *get_spi_device(void)
 {
 	struct slate_spi_priv *slate_spi = container_of(slate_com_drv,
@@ -193,13 +190,6 @@ static void augmnt_fifo(uint8_t *data, int pos)
 {
 	data[pos] = '\0';
 }
-
-void slatecom_state_init(void (*fn1)(bool), void (*fn2)(bool))
-{
-	state_ops.set_dsp_state = fn1;
-	state_ops.set_bt_state = fn2;
-}
-EXPORT_SYMBOL(slatecom_state_init);
 
 static void send_input_events(struct work_struct *work)
 {
@@ -542,22 +532,22 @@ static void send_back_notification(uint32_t slav_status_reg,
 		}
 
 		if (slav_status_reg & BIT(26)) {
-			pr_err("Slate DSP DOWN\n", __func__);
-			state_ops.set_dsp_state(false);
+			pr_debug("Slate DSP DOWN\n", __func__);
+			set_slate_dsp_state(false);
 		} else if (slav_status_reg & BIT(30)) {
 			if (!(slav_status_reg & BIT(26))) {
-				pr_err("Slate DSP UP\n", __func__);
-				state_ops.set_dsp_state(true);
+				pr_debug("Slate DSP UP\n", __func__);
+				set_slate_dsp_state(true);
 			}
 		}
 
 		if (slav_status_reg & BIT(25)) {
-			pr_err("Slate BT DOWN\n", __func__);
-			state_ops.set_bt_state(false);
+			pr_debug("Slate BT DOWN\n", __func__);
+			set_slate_bt_state(false);
 		} else if (slav_status_reg & BIT(30)) {
 			if (!(slav_status_reg & BIT(25))) {
-				pr_err("Slate BT UP\n", __func__);
-				state_ops.set_bt_state(true);
+				pr_debug("Slate BT UP\n", __func__);
+				set_slate_bt_state(true);
 			}
 		}
 
@@ -644,9 +634,9 @@ static void slate_irq_tasklet_hndlr_l(void)
 	g_slav_status_reg = slave_status_reg;
 }
 
-static int wakeup_ahb_read(void *handle)
+static void wakeup_ahb_read(void *handle)
 {
-	uint8_t *tx_ahb_buf = NULL;
+	uint8_t tx_ahb_buf[1024] = {0};
 	uint8_t *rx_ahb_buf = fxd_mem_buffer;
 	uint32_t ahb_addr = 0x200E1800;
 	uint32_t txn_len;
@@ -654,9 +644,6 @@ static int wakeup_ahb_read(void *handle)
 	int ret = 0;
 
 	pr_err("slatecom AHB read to resume\n");
-	tx_ahb_buf = kmalloc(TX_AHB_BUF_SIZE, GFP_KERNEL | GFP_ATOMIC);
-	if (!tx_ahb_buf)
-		return -ENOMEM;
 	txn_len = 8;
 	cmnd |= SLATE_SPI_AHB_READ_CMD;
 	memcpy(tx_ahb_buf, &cmnd, sizeof(cmnd));
@@ -665,8 +652,6 @@ static int wakeup_ahb_read(void *handle)
 	ret = slatecom_transfer(handle, tx_ahb_buf, rx_ahb_buf, txn_len, SPI_FREQ_1MHZ, false);
 	if (ret)
 		pr_err("slatecom_transfer fail with error %d\n", ret);
-	kfree(tx_ahb_buf);
-	return ret;
 }
 
 /* Returns 1, if the slate spi is active */

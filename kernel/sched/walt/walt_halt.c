@@ -9,7 +9,17 @@
 #include <trace/hooks/sched.h>
 #include <walt.h>
 #include "trace.h"
-
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_TASK_SCHED)
+#include <../kernel/oplus_cpu/sched/task_sched/task_sched_info.h>
+#endif
+#ifdef CONFIG_OPLUS_ADD_CORE_CTRL_MASK
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_FRAME_BOOST)
+#include <../kernel/oplus_cpu/sched/frame_boost/frame_group.h>
+#endif
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_ASSIST)
+#include <../kernel/oplus_cpu/sched/sched_assist/sa_fair.h>
+#endif
+#endif /* CONFIG_OPLUS_ADD_CORE_CTRL_MASK */
 #ifdef CONFIG_HOTPLUG_CPU
 
 /* if a cpu is halting */
@@ -285,9 +295,7 @@ static int halt_cpus(struct cpumask *cpus)
 
 	for_each_cpu(cpu, cpus) {
 
-		if ((cpumask_empty(system_32bit_el0_cpumask()) &&
-			(cpu == cpumask_first(cpu_possible_mask))) ||
-		    (cpu == cpumask_first(system_32bit_el0_cpumask()))) {
+		if (cpu == cpumask_first(system_32bit_el0_cpumask())) {
 			ret = -EINVAL;
 			goto out;
 		}
@@ -311,6 +319,9 @@ static int halt_cpus(struct cpumask *cpus)
 	wake_up_process(walt_drain_thread);
 
 out:
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_TASK_SCHED)
+	update_cpus_isolate_info(cpus, cpu_isolate);
+#endif
 	trace_halt_cpus(cpus, start_time, 1, ret);
 
 	return ret;
@@ -343,6 +354,9 @@ static int start_cpus(struct cpumask *cpus)
 		walt_smp_call_newidle_balance(cpu);
 	}
 
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_TASK_SCHED)
+        update_cpus_isolate_info(cpus, cpu_unisolate);
+#endif
 	trace_halt_cpus(cpus, start_time, 0, 0);
 
 	return 0;
@@ -506,10 +520,10 @@ unlock:
 }
 
 static void android_rvh_set_cpus_allowed_by_task(void *unused,
-						 const struct cpumask *cpu_valid_mask,
-						 const struct cpumask *new_mask,
-						 struct task_struct *p,
-						 unsigned int *dest_cpu)
+						    const struct cpumask *cpu_valid_mask,
+						    const struct cpumask *new_mask,
+						    struct task_struct *p,
+						    unsigned int *dest_cpu)
 {
 	cpumask_t allowed_cpus;
 
@@ -566,17 +580,8 @@ static void android_rvh_is_cpu_allowed(void *unused, struct task_struct *p, int 
 	}
 }
 
-static int walt_halt_hp_online_teardown(unsigned int cpu)
-{
-	if (cpu == cpumask_first(cpu_possible_mask))
-		return -EINVAL;
-
-	return 0;
-}
-
 void walt_halt_init(void)
 {
-	int ret;
 	struct sched_param param = { .sched_priority = MAX_RT_PRIO-1 };
 
 	walt_drain_thread = kthread_run(try_drain_rqs, &drain_data, "halt_drain_rqs");
@@ -587,19 +592,15 @@ void walt_halt_init(void)
 
 	sched_setscheduler_nocheck(walt_drain_thread, SCHED_FIFO, &param);
 
-	/*
-	 * register hotplug callback only for symmetric system (all or none
-	 * of the cores supporting 32bit).
-	 */
-	if (cpumask_empty(system_32bit_el0_cpumask()) ||
-		    (cpumask_weight(cpu_possible_mask) ==
-			     cpumask_weight(system_32bit_el0_cpumask()))) {
-		ret = cpuhp_setup_state(CPUHP_ANDROID_RESERVED_4, "walt-halt:online",
-					NULL, walt_halt_hp_online_teardown);
-		if (ret < 0)
-			pr_err("halt: error registering cpuhp callback\n");
-	}
+#ifdef CONFIG_OPLUS_ADD_CORE_CTRL_MASK
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_FRAME_BOOST)
+	init_fbg_halt_mask(&__cpu_halt_mask);
+#endif
 
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_ASSIST)
+	init_ux_halt_mask(&__cpu_halt_mask);
+#endif
+#endif /* CONFIG_OPLUS_ADD_CORE_CTRL_MASK */
 	register_trace_android_rvh_get_nohz_timer_target(android_rvh_get_nohz_timer_target, NULL);
 	register_trace_android_rvh_set_cpus_allowed_by_task(
 						android_rvh_set_cpus_allowed_by_task, NULL);

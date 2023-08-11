@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
- * Copyright (c) 2022-2023, Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #ifndef _DT_BINDINGS_CLK_QCOM_GCC_SDXPINN_H
@@ -155,8 +155,6 @@
 #define GCC_EMAC1_CC_SGMIIPHY_TX_CLK_SRC	145
 #define GCC_EMAC1_SGMIIPHY_MAC_RCLK_SRC		146
 #define GCC_EMAC1_SGMIIPHY_MAC_TCLK_SRC		147
-#define GCC_TLMM_125_CLK_SRC			148
-#define GCC_TLMM_125_CLK			149
 
 /* GCC resets */
 #define GCC_EMAC0_BCR				0
@@ -187,6 +185,5 @@
 #define GCC_USB3_PHY_BCR			25
 #define GCC_USB3PHY_PHY_BCR			26
 #define GCC_USB_PHY_CFG_AHB2PHY_BCR		27
-#define GCC_EMAC0_RGMII_CLK_ARES		28
 
 #endif

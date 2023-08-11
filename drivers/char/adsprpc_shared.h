@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (c) 2012-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022-2023, Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
  */
 #ifndef ADSPRPC_SHARED_H
 #define ADSPRPC_SHARED_H
@@ -491,8 +491,6 @@ enum fastrpc_control_type {
 /* Clean process on DSP */
 	FASTRPC_CONTROL_DSPPROCESS_CLEAN	=	6,
 	FASTRPC_CONTROL_RPC_POLL = 7,
-	FASTRPC_CONTROL_ASYNC_WAKE = 8,
-	FASTRPC_CONTROL_NOTIF_WAKE = 9,
 };
 
 struct fastrpc_ctrl_latency {
@@ -891,7 +889,7 @@ struct fastrpc_channel_ctx {
 	int in_hib;
 	void *handle;
 	uint64_t prevssrcount;
-	int subsystemstate;
+	int issubsystemup;
 	int vmid;
 	struct secure_vm rhvm;
 	void *rh_dump_dev;
@@ -974,7 +972,7 @@ struct fastrpc_mmap {
 	struct timespec64 map_end_time;
 	/* Mapping for fastrpc shell */
 	bool is_filemap;
-	char *servloc_name;			/* Indicate which daemon mapped this */
+	char *servloc_name;
 };
 
 enum fastrpc_perfkeys {
@@ -1075,10 +1073,6 @@ struct fastrpc_file {
 	struct completion work;
 	/* Flag to indicate ram dump collection status*/
 	bool is_ramdump_pend;
-	/* Process kill will wait on bus driver invoke thread to complete its process */
-	struct completion dma_invoke;
-	/* Flag to indicate invoke pending */
-	bool is_dma_invoke_pend;
 	/* Flag to indicate type of process (static, dynamic) */
 	uint32_t proc_flags;
 	/* If set, threads will poll for DSP response instead of glink wait */
@@ -1095,10 +1089,6 @@ struct fastrpc_file {
 	spinlock_t dspsignals_lock;
 	struct mutex signal_create_mutex;
 	struct completion shutdown;
-	/* Flag to indicate notif thread exit requested*/
-	bool exit_notif;
-	/* Flag to indicate async thread exit requested*/
-	bool exit_async;
 };
 
 union fastrpc_ioctl_param {

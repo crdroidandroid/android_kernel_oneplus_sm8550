@@ -15,7 +15,7 @@
 #include <linux/sched.h>
 #include <linux/slab.h>
 #include <linux/wait.h>
-#include <linux/remoteproc/qcom_rproc.h>
+#include <soc/qcom/subsystem_notif.h>
 #include "slate_events_bridge.h"
 #include "slate_events_bridge_rpmsg.h"
 
@@ -363,9 +363,10 @@ void seb_notify_glink_channel_state(bool state)
 	struct seb_priv *dev =
 		container_of(seb_drv, struct seb_priv, lhndl);
 
-	pr_info("%s: glink channel state: %d\n", __func__, state);
+	pr_debug("%s: glink channel state: %d\n", __func__, state);
 	dev->seb_rpmsg = state;
 }
+EXPORT_SYMBOL(seb_notify_glink_channel_state);
 
 void *seb_notif_add_group(const enum event_group_type event_group)
 {
@@ -519,6 +520,7 @@ void seb_rx_msg(void *data, int len)
 		}
 	}
 }
+EXPORT_SYMBOL(seb_rx_msg);
 
 /**
  * ssr_slate_cb(): callback function is called.
@@ -539,10 +541,10 @@ static int ssr_slate_cb(struct notifier_block *this,
 				struct seb_priv, lhndl);
 
 	switch (opcode) {
-	case QCOM_SSR_BEFORE_SHUTDOWN:
+	case SUBSYS_BEFORE_SHUTDOWN:
 		queue_work(dev->seb_wq, &dev->slate_down_work);
 		break;
-	case QCOM_SSR_AFTER_POWERUP:
+	case SUBSYS_AFTER_POWERUP:
 		if (dev->seb_current_state == SEB_STATE_INIT)
 			queue_work(dev->seb_wq, &dev->slate_up_work);
 		break;
@@ -573,7 +575,7 @@ static int slate_ssr_register(struct seb_priv *dev)
 
 	nb = &ssr_slate_nb;
 	dev->slate_subsys_handle =
-			qcom_register_ssr_notifier(SEB_SLATE_SUBSYS, nb);
+			subsys_notif_register_notifier(SEB_SLATE_SUBSYS, nb);
 
 	if (!dev->slate_subsys_handle) {
 		dev->slate_subsys_handle = NULL;
@@ -606,7 +608,7 @@ static int seb_init(struct seb_priv *dev)
 	INIT_WORK(&dev->slate_notify_work, seb_notify_work);
 	INIT_LIST_HEAD(&dev->rx_list);
 	spin_lock_init(&dev->rx_lock);
-	seb_channel_init(&seb_notify_glink_channel_state, &seb_rx_msg);
+
 	return 0;
 }
 

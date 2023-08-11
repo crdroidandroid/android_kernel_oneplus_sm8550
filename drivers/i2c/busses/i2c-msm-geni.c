@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2017-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/clk.h>
@@ -27,7 +27,6 @@
 #include <linux/slab.h>
 #include <soc/qcom/boot_stats.h>
 
-#define SE_GENI_CFG_REG68		(0x210)
 #define SE_I2C_TX_TRANS_LEN		(0x26C)
 #define SE_I2C_RX_TRANS_LEN		(0x270)
 #define SE_I2C_SCL_COUNTERS		(0x278)
@@ -179,15 +178,10 @@ struct geni_i2c_dev {
 	bool is_i2c_hub;
 	bool prev_cancel_pending; //Halt cancel till IOS in good state
 	bool is_i2c_rtl_based; /* doing pending cancel only for rtl based SE's */
-	bool skip_bw_vote; /* Used for PMIC over i2c use case to skip the BW vote */
-	bool bus_recovery_enable; //To be enabled by client if needed
-	atomic_t is_xfer_in_progress; /* Used to maintain xfer inprogress status */
-	bool is_deep_sleep; /* For deep sleep restore the config similar to the probe. */
 };
 
 static struct geni_i2c_dev *gi2c_dev_dbg[MAX_SE];
 static int arr_idx;
-static int geni_i2c_runtime_suspend(struct device *dev);
 
 struct geni_i2c_err_log {
 	int err;
@@ -367,153 +361,6 @@ err_ret:
 	gi2c->err = gi2c_log[err].err;
 }
 
-static void do_reg68_war_for_rtl_se(struct geni_i2c_dev *gi2c)
-{
-	u32 status;
-
-	//Add REG68 WAR if stretch bit is set
-	status = geni_read_reg(gi2c->base, SE_GENI_M_CMD0);
-	GENI_SE_DBG(gi2c->ipcl, false, gi2c->dev,
-		"%s: SE_GENI_M_CMD0:0x%x\n", __func__,  status);
-
-	//BIT(2) - STOP/STRETCH set then configure REG68 register
-	if ((status & 0x4) && gi2c->is_i2c_rtl_based) {
-		status = geni_read_reg(gi2c->base, SE_GENI_CFG_REG68);
-		GENI_SE_DBG(gi2c->ipcl, false, gi2c->dev,
-			"%s: Before WAR REG68:0x%x\n", __func__, status);
-		if (status & 0x20) {
-			//Toggle Bit#4, Bit#5 of REG68 to disable/enable stretch
-			geni_write_reg(0x00100110, gi2c->base,
-							SE_GENI_CFG_REG68);
-		} else {
-			//Restore FW to suggested value i.e. 0x00100120
-			geni_write_reg(0x00100120, gi2c->base,
-							SE_GENI_CFG_REG68);
-		}
-		status = geni_read_reg(gi2c->base, SE_GENI_CFG_REG68);
-		GENI_SE_DBG(gi2c->ipcl, false, gi2c->dev,
-				"%s: After WAR REG68:0x%x\n", __func__, status);
-	}
-}
-
-/**
- * geni_i2c_stop_with_cancel(): stops GENI SE with cancel command.
- * @gi2c:	I2C dev handle
- *
- * This is a generic function to stop serial engine, to be called as required.
- *
- * Return: 0 if Success, non zero value if failed.
- */
-static int geni_i2c_stop_with_cancel(struct geni_i2c_dev *gi2c)
-{
-	int timeout = 0;
-
-	reinit_completion(&gi2c->xfer);
-	geni_se_cancel_m_cmd(&gi2c->i2c_rsc);
-	timeout = wait_for_completion_timeout(&gi2c->xfer, HZ);
-	if (!timeout) {
-		I2C_LOG_DBG(gi2c->ipcl, true, gi2c->dev,
-				"%s:Cancel failed\n", __func__);
-		reinit_completion(&gi2c->xfer);
-		geni_se_abort_m_cmd(&gi2c->i2c_rsc);
-		timeout = wait_for_completion_timeout(&gi2c->xfer, HZ);
-		if (!timeout) {
-			I2C_LOG_DBG(gi2c->ipcl, true, gi2c->dev,
-					"%s:Abort failed\n", __func__);
-			return !timeout;
-		}
-	}
-
-	return 0;
-}
-
-/**
- * geni_i2c_is_bus_recovery_required: Checks if Bus recovery enabled/required ?
- * @gi2c: Handle of the I2C device
- *
- * Return: TRUE if SDA is stuck LOW due to some issue else false.
- *
- */
-static bool geni_i2c_is_bus_recovery_required(struct geni_i2c_dev *gi2c)
-{
-	u32 geni_ios = readl_relaxed(gi2c->base + SE_GENI_IOS);
-
-	/*
-	 * SE_GENI_IOS will show I2C CLK/SDA line status, BIT 0 is SDA and
-	 * BIT 1 is clk status. SE_GENI_IOS register set when CLK/SDA line
-	 * is pulled high.
-	 */
-	return (((geni_ios & 1) == 0) && (gi2c->err == -EPROTO ||
-					gi2c->err == -EBUSY ||
-					gi2c->err == -ETIMEDOUT));
-}
-
-/**
- * geni_i2c_bus_recovery(): Function to recover i2c bus when required
- * @gi2c:	I2C device handle
- *
- * Use this function only when bus is bad for some reason and need to
- * reset the slave to bring slave into proper state. This should put
- * bus into proper state once executed successfully.
- *
- * Return: Success OR Respective error code/value.
- */
-static int geni_i2c_bus_recovery(struct geni_i2c_dev *gi2c)
-{
-	int timeout = 0;
-	u32 m_param = 0, m_cmd = 0;
-
-	//Must be enabled by client "only" if required.
-	if (gi2c->bus_recovery_enable &&
-		geni_i2c_is_bus_recovery_required(gi2c)) {
-		GENI_SE_ERR(gi2c->ipcl, false, gi2c->dev,
-			"SDA Line stuck\n", gi2c->err);
-	} else {
-		GENI_SE_DBG(gi2c->ipcl, false, gi2c->dev,
-			"Bus Recovery not required/enabled\n");
-		return 0;
-	}
-
-	I2C_LOG_DBG(gi2c->ipcl, false, gi2c->dev, "%s: start recovery\n",
-								__func__);
-	//BUS_CLEAR
-	reinit_completion(&gi2c->xfer);
-	m_cmd = I2C_BUS_CLEAR;
-	geni_se_setup_m_cmd(&gi2c->i2c_rsc, m_cmd, m_param);
-	timeout = wait_for_completion_timeout(&gi2c->xfer, HZ);
-	if (!timeout) {
-		geni_i2c_err(gi2c, GENI_TIMEOUT);
-		gi2c->cur = NULL;
-		timeout = geni_i2c_stop_with_cancel(gi2c);
-		if (timeout) {
-			I2C_LOG_DBG(gi2c->ipcl, true, gi2c->dev,
-				"%s: Bus clear Failed\n", __func__);
-			return timeout;
-		}
-	}
-	I2C_LOG_DBG(gi2c->ipcl, false, gi2c->dev,
-		"%s: BUS_CLEAR success\n", __func__);
-
-	//BUS_STOP
-	reinit_completion(&gi2c->xfer);
-	m_cmd = I2C_STOP_ON_BUS;
-	geni_se_setup_m_cmd(&gi2c->i2c_rsc, m_cmd, m_param);
-	timeout = wait_for_completion_timeout(&gi2c->xfer, HZ);
-	if (!timeout) {
-		geni_i2c_err(gi2c, GENI_TIMEOUT);
-		gi2c->cur = NULL;
-		timeout = geni_i2c_stop_with_cancel(gi2c);
-		if (timeout) {
-			I2C_LOG_DBG(gi2c->ipcl, true, gi2c->dev,
-				"%s:Bus Stop Failed\n", __func__);
-			return timeout;
-		}
-	}
-	I2C_LOG_DBG(gi2c->ipcl, false, gi2c->dev,
-		"%s: success\n", __func__);
-	return 0;
-}
-
 static int do_pending_cancel(struct geni_i2c_dev *gi2c)
 {
 	int timeout = 0;
@@ -525,28 +372,16 @@ static int do_pending_cancel(struct geni_i2c_dev *gi2c)
 
 	geni_ios = geni_read_reg(gi2c->base, SE_GENI_IOS);
 	if ((geni_ios & 0x3) != 0x3) {
-		/* Try to restore IOS with FORCE_DEFAULT */
-		GENI_SE_ERR(gi2c->ipcl, true, gi2c->dev,
-			"%s: IOS:0x%x, bad state\n", __func__, geni_ios);
-
-		geni_write_reg(FORCE_DEFAULT,
-			gi2c->base, GENI_FORCE_DEFAULT_REG);
-		geni_ios = geni_read_reg(gi2c->base, SE_GENI_IOS);
-		if ((geni_ios & 0x3) != 0x3) {
-			GENI_SE_ERR(gi2c->ipcl, true, gi2c->dev,
-				"%s: IOS:0x%x, Fix from Slave side\n",
-				__func__, geni_ios);
-			return -EINVAL;
-		}
-		GENI_SE_ERR(gi2c->ipcl, true, gi2c->dev,
-			"%s: IOS:0x%x restored properly\n", __func__, geni_ios);
+		I2C_LOG_DBG(gi2c->ipcl, true, gi2c->dev,
+			"%s: Can't do pending cancel, IOS bad state: 0x%x\n",
+			__func__, geni_ios);
+		return -EINVAL;
 	}
 
 	if (gi2c->se_mode == GSI_ONLY) {
 		dmaengine_terminate_all(gi2c->tx_c);
 		gi2c->cfg_sent = 0;
 	} else {
-		do_reg68_war_for_rtl_se(gi2c);
 		reinit_completion(&gi2c->xfer);
 		geni_se_cancel_m_cmd(&gi2c->i2c_rsc);
 		timeout = wait_for_completion_timeout(&gi2c->xfer, HZ);
@@ -571,7 +406,7 @@ static int geni_i2c_prepare(struct geni_i2c_dev *gi2c)
 {
 	if (gi2c->se_mode == UNINITIALIZED) {
 		int proto = geni_se_read_proto(&gi2c->i2c_rsc);
-		u32 se_mode, geni_se_hw_param_2;
+		u32 se_mode;
 
 		if (proto != GENI_SE_I2C) {
 			dev_err(gi2c->dev, "Invalid proto %d\n", proto);
@@ -609,15 +444,6 @@ static int geni_i2c_prepare(struct geni_i2c_dev *gi2c)
 					"i2c fifo/se-dma mode. fifo depth:%d\n",
 					gi2c_tx_depth);
 		}
-
-		if (!gi2c->is_i2c_hub) {
-			/* Check if SE is RTL based SE */
-			geni_se_hw_param_2 = readl_relaxed(gi2c->base + SE_HW_PARAM_2);
-			if (geni_se_hw_param_2 & GEN_HW_FSM_I2C) {
-				gi2c->is_i2c_rtl_based  = true;
-				dev_info(gi2c->dev, "%s: RTL based SE\n", __func__);
-			}
-		}
 	}
 	return 0;
 }
@@ -633,9 +459,6 @@ static irqreturn_t geni_i2c_irq(int irq, void *dev)
 	u32 dma = readl_relaxed(gi2c->base + SE_GENI_DMA_MODE_EN);
 	struct i2c_msg *cur = gi2c->cur;
 
-	I2C_LOG_DBG(gi2c->ipcl, false, gi2c->dev,
-		"%s: m_irq_status:0x%x\n", __func__, m_stat);
-
 	if (!cur) {
 		geni_i2c_se_dump_dbg_regs(&gi2c->i2c_rsc, gi2c->base, gi2c->ipcl);
 		I2C_LOG_ERR(gi2c->ipcl, false, gi2c->dev, "Spurious irq\n");
@@ -643,12 +466,9 @@ static irqreturn_t geni_i2c_irq(int irq, void *dev)
 	}
 
 	if ((m_stat & M_CMD_FAILURE_EN) ||
-		(dm_rx_st & (DM_I2C_CB_ERR)) ||
-		(m_stat & M_CMD_CANCEL_EN) ||
-		(m_stat & M_CMD_ABORT_EN) ||
-		(m_stat & M_GP_IRQ_1_EN) ||
-		(m_stat & M_GP_IRQ_3_EN) ||
-		(m_stat & M_GP_IRQ_4_EN)) {
+		    (dm_rx_st & (DM_I2C_CB_ERR)) ||
+		    (m_stat & M_CMD_CANCEL_EN) ||
+		    (m_stat & M_CMD_ABORT_EN)) {
 
 		if (m_stat & M_GP_IRQ_1_EN)
 			geni_i2c_err(gi2c, I2C_NACK);
@@ -662,6 +482,8 @@ static irqreturn_t geni_i2c_irq(int irq, void *dev)
 			geni_i2c_err(gi2c, GENI_ILLEGAL_CMD);
 		if (m_stat & M_CMD_ABORT_EN)
 			geni_i2c_err(gi2c, GENI_ABORT_DONE);
+		if (m_stat & M_GP_IRQ_0_EN)
+			geni_i2c_err(gi2c, GP_IRQ0);
 
 		if (!dma)
 			writel_relaxed(0, (gi2c->base +
@@ -761,11 +583,11 @@ static void gi2c_ev_cb(struct dma_chan *ch, struct msm_gpi_cb const *cb_str,
 			geni_i2c_err(gi2c, I2C_BUS_PROTO);
 		if (m_stat & M_GP_IRQ_4_EN)
 			geni_i2c_err(gi2c, I2C_ARB_LOST);
+		complete(&gi2c->xfer);
 		break;
 	default:
 		break;
 	}
-	complete(&gi2c->xfer);
 	if (cb_str->cb_event != MSM_GPI_QUP_NOTIFY)
 		I2C_LOG_ERR(gi2c->ipcl, true, gi2c->dev,
 				"GSI QN err:0x%x, status:0x%x, err:%d\n",
@@ -1338,13 +1160,11 @@ static int geni_i2c_xfer(struct i2c_adapter *adap,
 	u32 geni_ios = 0;
 
 	gi2c->err = 0;
-	atomic_set(&gi2c->is_xfer_in_progress, 1);
 
 	/* Client to respect system suspend */
 	if (!pm_runtime_enabled(gi2c->dev)) {
 		I2C_LOG_ERR(gi2c->ipcl, false, gi2c->dev,
 			"%s: System suspended\n", __func__);
-		atomic_set(&gi2c->is_xfer_in_progress, 0);
 		return -EACCES;
 	}
 
@@ -1356,7 +1176,6 @@ static int geni_i2c_xfer(struct i2c_adapter *adap,
 			pm_runtime_put_noidle(gi2c->dev);
 			/* Set device in suspended since resume failed */
 			pm_runtime_set_suspended(gi2c->dev);
-			atomic_set(&gi2c->is_xfer_in_progress, 0);
 			return ret;
 		}
 	}
@@ -1367,7 +1186,6 @@ static int geni_i2c_xfer(struct i2c_adapter *adap,
 		if (ret) {
 			pm_runtime_mark_last_busy(gi2c->dev);
 			pm_runtime_put_autosuspend(gi2c->dev);
-			atomic_set(&gi2c->is_xfer_in_progress, 0);
 			return ret; //Don't perform xfer is cancel failed
 		}
 	}
@@ -1378,7 +1196,6 @@ static int geni_i2c_xfer(struct i2c_adapter *adap,
 			"IO lines in bad state, Power the slave\n");
 		pm_runtime_mark_last_busy(gi2c->dev);
 		pm_runtime_put_autosuspend(gi2c->dev);
-		atomic_set(&gi2c->is_xfer_in_progress, 0);
 		return -ENXIO;
 	}
 
@@ -1396,7 +1213,6 @@ static int geni_i2c_xfer(struct i2c_adapter *adap,
 		if (ret) {
 			I2C_LOG_ERR(gi2c->ipcl, true, gi2c->dev,
 				"%s I2C prepare failed: %d\n", __func__, ret);
-			atomic_set(&gi2c->is_xfer_in_progress, 0);
 			return ret;
 		}
 
@@ -1404,7 +1220,6 @@ static int geni_i2c_xfer(struct i2c_adapter *adap,
 		if (ret) {
 			I2C_LOG_ERR(gi2c->ipcl, true, gi2c->dev,
 				"%s lock failed: %d\n", __func__, ret);
-			atomic_set(&gi2c->is_xfer_in_progress, 0);
 			return ret;
 		}
 		I2C_LOG_DBG(gi2c->ipcl, false, gi2c->dev,
@@ -1461,10 +1276,6 @@ static int geni_i2c_xfer(struct i2c_adapter *adap,
 				goto geni_i2c_txn_ret;
 			}
 		}
-
-		I2C_LOG_DBG(gi2c->ipcl, false, gi2c->dev,
-				"%s: stretch:%d, m_param:0x%x\n",
-				__func__, stretch, m_param);
 
 		if (msgs[i].flags & I2C_M_RD) {
 			I2C_LOG_DBG(gi2c->ipcl, false, gi2c->dev,
@@ -1533,7 +1344,7 @@ static int geni_i2c_xfer(struct i2c_adapter *adap,
 			geni_ios = geni_read_reg(gi2c->base, SE_GENI_IOS);
 			if ((geni_ios & 0x3) != 0x3) { //SCL:b'1, SDA:b'0
 				I2C_LOG_DBG(gi2c->ipcl, true, gi2c->dev,
-					"%s: IO lines not good: 0x%x\n",
+					"%s: IO lines not in good state: 0x%x\n",
 					__func__, geni_ios);
 				/* doing pending cancel only rtl based SE's */
 				if (gi2c->is_i2c_rtl_based) {
@@ -1541,36 +1352,9 @@ static int geni_i2c_xfer(struct i2c_adapter *adap,
 					goto geni_i2c_txn_ret;
 				}
 			}
-		} else {
-			if (msgs[i].flags & I2C_M_RD)
-				I2C_LOG_DBG(gi2c->ipcl, true, gi2c->dev,
-				"%s: Read operation completed for len:%d\n",
-				__func__, msgs[i].len);
-			else
-				I2C_LOG_DBG(gi2c->ipcl, true, gi2c->dev,
-				"%s:Write operation completed for len:%d\n",
-				__func__,  msgs[i].len);
 		}
 
 		if (gi2c->err) {
-			if (gi2c->is_i2c_rtl_based) {
-				/* WAR: Set flag to mark cancel pending if IOS bad */
-				geni_ios = geni_read_reg(gi2c->base, SE_GENI_IOS);
-				if ((geni_ios & 0x3) != 0x3) { //SCL:b'1, SDA:b'0
-					I2C_LOG_DBG(gi2c->ipcl, true, gi2c->dev,
-						"%s: IO lines not in good state\n",
-						__func__);
-					gi2c->prev_cancel_pending = true;
-					goto geni_i2c_txn_ret;
-				}
-
-				/* EBUSY set by ARB_LOST error condition */
-				if (gi2c->err == -EBUSY) {
-					I2C_LOG_DBG(gi2c->ipcl, true, gi2c->dev,
-						"%s:run reg68 war\n", __func__);
-					do_reg68_war_for_rtl_se(gi2c);
-				}
-			}
 			reinit_completion(&gi2c->xfer);
 			geni_se_cancel_m_cmd(&gi2c->i2c_rsc);
 			timeout = wait_for_completion_timeout(&gi2c->xfer, HZ);
@@ -1605,9 +1389,6 @@ static int geni_i2c_xfer(struct i2c_adapter *adap,
 		if (gi2c->err) {
 			I2C_LOG_ERR(gi2c->ipcl, true, gi2c->dev,
 				"i2c error :%d\n", gi2c->err);
-			if (geni_i2c_bus_recovery(gi2c))
-				GENI_SE_ERR(gi2c->ipcl, true, gi2c->dev,
-				"%s:Bus Recovery failed\n", __func__);
 			break;
 		}
 	}
@@ -1619,13 +1400,134 @@ geni_i2c_txn_ret:
 		pm_runtime_mark_last_busy(gi2c->dev);
 		pm_runtime_put_autosuspend(gi2c->dev);
 	}
-	atomic_set(&gi2c->is_xfer_in_progress, 0);
 	gi2c->cur = NULL;
 	gi2c->err = 0;
 	I2C_LOG_DBG(gi2c->ipcl, false, gi2c->dev,
 			"i2c txn ret:%d\n", ret);
 	return ret;
 }
+
+/*OPLUS_FEATURE_CHG_BASIC qcom case 06374203 Solve smbus I2C communication exception start*/
+#if IS_ENABLED(CONFIG_I2C_SLAVE_QCOM)
+/*OPLUS_FEATURE_CHG_BASIC qcom case 06374203 Solve smbus I2C communication exception end*/
+/**
+ * i2c_slave_xfer: SMbus transfer function.
+ * @adap: I2C driver adapter.
+ * @addr: Slave address.
+ * @flags: i2c client flag.
+ * @read_write: Read/Write flag.
+ * @command: SMbus command code.
+ * @xfer_type: read/write transfer type.
+ * @data: Pointer to client data.
+ *
+ * This function will transfer SMbus command using
+ * geni i2c transfer function.
+ *
+ * Return: 0 for success, Negative number for error condition.
+ */
+static int geni_i2c_smbus_xfer(struct i2c_adapter *adap, u16 addr,
+			       unsigned short flags, char read_write,
+			       u8 command, int xfer_type, union i2c_smbus_data *data)
+{
+	struct geni_i2c_dev *gi2c = i2c_get_adapdata(adap);
+	struct i2c_msg msgs;
+	u8 buf[I2C_SMBUS_BLOCK_MAX];
+	int ret = 0, i;
+
+	msgs.addr = addr;
+	msgs.buf = buf;
+	msgs.flags = read_write;
+
+	if (read_write == I2C_SMBUS_READ) {
+		switch (xfer_type) {
+		case I2C_SMBUS_BYTE_DATA:
+			msgs.len = I2C_SMBUS_BYTE;
+			ret = geni_i2c_xfer(adap, &msgs, 1);
+			if (ret < 0) {
+				I2C_LOG_ERR(gi2c->ipcl, false, gi2c->dev,
+					    "i2c read byte failed ret:%d\n", ret);
+				return ret;
+			}
+			data->byte = buf[0];
+			break;
+
+		case I2C_SMBUS_WORD_DATA:
+			msgs.len = I2C_SMBUS_BYTE_DATA;
+			ret = geni_i2c_xfer(adap, &msgs, 1);
+			if (ret < 0) {
+				I2C_LOG_ERR(gi2c->ipcl, false, gi2c->dev,
+					    "i2c read word failed ret:%d\n", ret);
+				return ret;
+			}
+			data->word = (buf[0] | (buf[1] << 8));
+			break;
+
+		case I2C_SMBUS_BLOCK_DATA:
+			msgs.len = I2C_SMBUS_BLOCK_MAX;
+			ret = geni_i2c_xfer(adap, &msgs, 1);
+			if (ret < 0) {
+				I2C_LOG_ERR(gi2c->ipcl, false, gi2c->dev,
+					    "i2c read block failed ret:%d\n", ret);
+				return ret;
+			}
+			data->block[0] = msgs.len;
+			for (i = 0; i < msgs.len; i++)
+				data->block[i + 1] = buf[i];
+			break;
+
+		default:
+			I2C_LOG_ERR(gi2c->ipcl, false, gi2c->dev, "Invalid xfer type\n");
+			return -EINVAL;
+		}
+	} else if (read_write == I2C_SMBUS_WRITE) {
+		switch (xfer_type) {
+		case I2C_SMBUS_BYTE_DATA:
+			msgs.len = I2C_SMBUS_BYTE;
+			buf[0] = data->byte;
+			ret = geni_i2c_xfer(adap, &msgs, 1);
+			if (ret < 0) {
+				I2C_LOG_ERR(gi2c->ipcl, false, gi2c->dev,
+					    "i2c write byte failed ret:%d\n", ret);
+				return ret;
+			}
+			break;
+
+		case I2C_SMBUS_WORD_DATA:
+			msgs.len = I2C_SMBUS_BYTE_DATA;
+			buf[0] = (uint8_t)(data->word & 0xFF);
+			buf[1] = (uint8_t)(data->word >> 8);
+			ret = geni_i2c_xfer(adap, &msgs, 1);
+			if (ret < 0) {
+				I2C_LOG_ERR(gi2c->ipcl, false, gi2c->dev,
+					    "i2c write word failed ret:%d\n", ret);
+				return ret;
+			}
+			break;
+
+		case I2C_SMBUS_BLOCK_DATA:
+			if (data->block[0] > I2C_SMBUS_BLOCK_MAX)
+				data->block[0] = I2C_SMBUS_BLOCK_MAX;
+
+			for (i = 0; i < data->block[0]; i++)
+				buf[i] = data->block[i + 1];
+
+			msgs.len = data->block[0];
+			ret = geni_i2c_xfer(adap, &msgs, 1);
+			if (ret < 0) {
+				I2C_LOG_ERR(gi2c->ipcl, false, gi2c->dev,
+					    "i2c write block failed ret:%d\n", ret);
+				return ret;
+			}
+			break;
+
+		default:
+			I2C_LOG_ERR(gi2c->ipcl, false, gi2c->dev, "Invalid xfer type\n");
+			return -EINVAL;
+		}
+	}
+	return 0;
+}
+#endif /*OPLUS_FEATURE_CHG_BASIC qcom case 06374203 Solve smbus I2C communication exception*/
 
 static u32 geni_i2c_func(struct i2c_adapter *adap)
 {
@@ -1635,6 +1537,11 @@ static u32 geni_i2c_func(struct i2c_adapter *adap)
 static const struct i2c_algorithm geni_i2c_algo = {
 	.master_xfer	= geni_i2c_xfer,
 	.functionality	= geni_i2c_func,
+/*OPLUS_FEATURE_CHG_BASIC qcom case 06374203 Solve smbus I2C communication exception start*/
+#if IS_ENABLED(CONFIG_I2C_SLAVE_QCOM)
+	.smbus_xfer	= geni_i2c_smbus_xfer,
+#endif
+/*OPLUS_FEATURE_CHG_BASIC qcom case 06374203 Solve smbus I2C communication exception end*/
 };
 
 #if I2C_HUB_DEF
@@ -1695,10 +1602,6 @@ static int geni_i2c_probe(struct platform_device *pdev)
 		gi2c->first_xfer_done = false;
 		dev_info(&pdev->dev, "LE-VM usecase\n");
 	}
-
-	if (of_property_read_bool(pdev->dev.of_node, "qcom,leica-used-i2c"))
-		gi2c->skip_bw_vote = true;
-
 	gi2c->i2c_rsc.dev = dev;
 	gi2c->i2c_rsc.wrapper = dev_get_drvdata(dev->parent);
 	gi2c->i2c_rsc.base = gi2c->base;
@@ -1712,15 +1615,20 @@ static int geni_i2c_probe(struct platform_device *pdev)
 	if (of_property_read_u32(pdev->dev.of_node, "qcom,clk-freq-out",
 				&gi2c->clk_freq_out))
 		gi2c->clk_freq_out = KHz(400);
+
 	dev_info(&pdev->dev, "Bus frequency is set to %dHz.\n",
 						gi2c->clk_freq_out);
-	gi2c->is_deep_sleep = false;
 
 	ret = geni_i2c_clk_map_idx(gi2c);
 	if (ret) {
 		dev_err(gi2c->dev, "Invalid clk frequency %d KHz: %d\n",
 				gi2c->clk_freq_out, ret);
 		return ret;
+	}
+
+	if (of_property_read_bool(pdev->dev.of_node, "qcom,rtl_se")) {
+		gi2c->is_i2c_rtl_based  = true;
+		dev_info(&pdev->dev, "%s: RTL based SE\n", __func__);
 	}
 
 	/*
@@ -1773,15 +1681,9 @@ static int geni_i2c_probe(struct platform_device *pdev)
 			}
 			gi2c->i2c_rsc.icc_paths[GENI_TO_CORE].avg_bw = GENI_DEFAULT_BW;
 			gi2c->i2c_rsc.icc_paths[CPU_TO_GENI].avg_bw = GENI_DEFAULT_BW;
-
-			/* For I2C HUB, we don't have HW reg to identify RTL/SW base SE.
-			 * Hence setting flag for all I2C HUB instances.
-			 */
-			gi2c->is_i2c_rtl_based  = true;
-			dev_info(gi2c->dev, "%s: RTL based SE\n", __func__);
 		} else {
 			ret = geni_se_common_resources_init(&gi2c->i2c_rsc,
-					GENI_DEFAULT_BW, GENI_DEFAULT_BW,
+					I2C_CORE2X_VOTE, APPS_PROC_TO_QUP_VOTE,
 					(DEFAULT_SE_CLK * DEFAULT_BUS_WIDTH));
 			if (ret) {
 				dev_err(&pdev->dev, "%s: Error - resources_init ret:%d\n",
@@ -1807,12 +1709,6 @@ static int geni_i2c_probe(struct platform_device *pdev)
 	if (of_property_read_bool(pdev->dev.of_node, "qcom,shared")) {
 		gi2c->is_shared = true;
 		dev_info(&pdev->dev, "Multi-EE usecase\n");
-	}
-
-	//Strictly only for debug, it's client/slave device decision for an SE.
-	if (of_property_read_bool(pdev->dev.of_node, "qcom,bus-recovery")) {
-		gi2c->bus_recovery_enable  = true;
-		dev_dbg(&pdev->dev, "%s:I2C Bus recovery enabled\n", __func__);
 	}
 
 	ret = dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(64));
@@ -1843,7 +1739,6 @@ static int geni_i2c_probe(struct platform_device *pdev)
 		return ret;
 	}
 
-	atomic_set(&gi2c->is_xfer_in_progress, 0);
 	snprintf(boot_marker, sizeof(boot_marker),
 				"M - DRIVER GENI_I2C_%d Ready", gi2c->adap.nr);
 	place_marker(boot_marker);
@@ -1857,33 +1752,6 @@ static int geni_i2c_remove(struct platform_device *pdev)
 	struct geni_i2c_dev *gi2c = platform_get_drvdata(pdev);
 	int i;
 
-	if (atomic_read(&gi2c->is_xfer_in_progress)) {
-		I2C_LOG_ERR(gi2c->ipcl, true, gi2c->dev,
-			    "%s: Xfer is in progress\n", __func__);
-		return -EBUSY;
-	}
-
-	if (!pm_runtime_status_suspended(gi2c->dev)) {
-		if (geni_i2c_runtime_suspend(gi2c->dev))
-			I2C_LOG_ERR(gi2c->ipcl, true, gi2c->dev,
-				    "%s: runtime suspend failed\n", __func__);
-	}
-
-	if (gi2c->se_mode == GSI_ONLY) {
-		if (gi2c->tx_c) {
-			I2C_LOG_ERR(gi2c->ipcl, true, gi2c->dev,
-				    "%s: clearing tx dma resource\n", __func__);
-			dma_release_channel(gi2c->tx_c);
-		}
-		if (gi2c->rx_c) {
-			I2C_LOG_ERR(gi2c->ipcl, true, gi2c->dev,
-				    "%s: clearing rx dma resource\n", __func__);
-			dma_release_channel(gi2c->rx_c);
-		}
-	}
-
-	pm_runtime_put_noidle(gi2c->dev);
-	pm_runtime_set_suspended(gi2c->dev);
 	pm_runtime_disable(gi2c->dev);
 	i2c_del_adapter(&gi2c->adap);
 
@@ -1901,12 +1769,6 @@ static int geni_i2c_resume_early(struct device *device)
 	struct geni_i2c_dev *gi2c = dev_get_drvdata(device);
 
 	I2C_LOG_DBG(gi2c->ipcl, false, gi2c->dev, "%s ret=%d\n", __func__, true);
-#ifdef CONFIG_DEEPSLEEP
-	if (pm_suspend_via_firmware()) {
-		gi2c->se_mode = UNINITIALIZED;
-		gi2c->is_deep_sleep = true;
-	}
-#endif
 	return 0;
 }
 
@@ -1916,43 +1778,6 @@ static int geni_i2c_hib_resume_noirq(struct device *device)
 
 	I2C_LOG_DBG(gi2c->ipcl, false, gi2c->dev, "%s\n", __func__);
 	gi2c->se_mode = UNINITIALIZED;
-	return 0;
-}
-
-static int geni_i2c_gpi_suspend_resume(struct geni_i2c_dev *gi2c, bool is_suspend)
-{
-	int tx_ret = 0;
-
-	/* Do dma operations only for tx channel here, as it takes care of rx channel
-	 * also internally from the GPI driver functions. if we call for both channels,
-	 * will see channels in wrong state due to double operations.
-	 */
-	if (gi2c->tx_c) {
-		if (is_suspend) {
-			tx_ret = dmaengine_pause(gi2c->tx_c);
-		} else {
-			/* For deep sleep need to restore the config similar to the probe,
-			 * hence using MSM_GPI_DEEP_SLEEP_INIT flag, in gpi_resume it wil
-			 * do similar to the probe. After this we should set this flag to
-			 * MSM_GPI_DEFAULT, means gpi probe state is restored.
-			 */
-			if (gi2c->is_deep_sleep)
-				gi2c->tx_ev.cmd = MSM_GPI_DEEP_SLEEP_INIT;
-
-			tx_ret = dmaengine_resume(gi2c->tx_c);
-			if (gi2c->is_deep_sleep) {
-				gi2c->tx_ev.cmd = MSM_GPI_DEFAULT;
-				gi2c->is_deep_sleep = false;
-			}
-		}
-
-		if (tx_ret) {
-			I2C_LOG_ERR(gi2c->ipcl, true, gi2c->dev,
-				    "%s failed: tx:%d status:%d\n",
-				__func__, tx_ret, is_suspend);
-			return -EINVAL;
-		}
-	}
 	return 0;
 }
 
@@ -1969,43 +1794,8 @@ static int geni_i2c_runtime_suspend(struct device *dev)
 	if (gi2c->se_mode == FIFO_SE_DMA)
 		disable_irq(gi2c->irq);
 
-	if (gi2c->skip_bw_vote) {
-		if (gi2c->is_shared) {
-			/* Do not unconfigure GPIOs if shared se */
-			geni_se_common_clks_off(gi2c->i2c_rsc.clk,
-					gi2c->m_ahb_clk, gi2c->s_ahb_clk);
-		} else if (!gi2c->is_le_vm) {
-			geni_se_resources_off(&gi2c->i2c_rsc);
-		}
-
-		goto skip_bw_vote;
-	}
-
-	if (gi2c->se_mode == GSI_ONLY) {
-		if (!gi2c->is_le_vm) {
-			ret = geni_i2c_gpi_suspend_resume(gi2c, true);
-			if (ret) {
-				I2C_LOG_ERR(gi2c->ipcl, false, gi2c->dev,
-					    "%s: failing at geni_i2c_gpi_suspend_resume ret: %d\n"
-					    , __func__, ret);
-				return ret;
-			}
-		}
-	}
-
-	if (gi2c->is_le_vm && gi2c->first_xfer_done) {
+	if (gi2c->is_le_vm && gi2c->first_xfer_done)
 		geni_i2c_unlock_bus(gi2c);
-
-		if (gi2c->se_mode == GSI_ONLY) {
-			ret = geni_i2c_gpi_suspend_resume(gi2c, true);
-			if (ret) {
-				I2C_LOG_ERR(gi2c->ipcl, false, gi2c->dev,
-					    "%s: failing at geni_i2c_gpi_suspend_resume ret: %d\n"
-					    , __func__, ret);
-				return ret;
-			}
-		}
-	}
 	else if (gi2c->is_shared) {
 		/* Do not unconfigure GPIOs if shared se */
 		geni_se_common_clks_off(gi2c->i2c_rsc.clk, gi2c->m_ahb_clk, gi2c->s_ahb_clk);
@@ -2021,7 +1811,6 @@ static int geni_i2c_runtime_suspend(struct device *dev)
 			"%s failing at geni_icc_disable ret=%d\n", __func__, ret);
 	}
 
-skip_bw_vote:
 	if (gi2c->is_i2c_hub)
 		clk_disable_unprepare(gi2c->core_clk);
 
@@ -2042,9 +1831,6 @@ static int geni_i2c_runtime_resume(struct device *dev)
 	}
 
 	if (!gi2c->is_le_vm) {
-		if (gi2c->skip_bw_vote)
-			goto skip_bw_vote;
-
 		ret = geni_icc_enable(&gi2c->i2c_rsc);
 		if (ret) {
 			I2C_LOG_DBG(gi2c->ipcl, false, gi2c->dev,
@@ -2064,7 +1850,6 @@ static int geni_i2c_runtime_resume(struct device *dev)
 			gi2c->i2c_rsc.icc_paths[CPU_TO_GENI].avg_bw,
 			gi2c->i2c_rsc.icc_paths[GENI_TO_DDR].avg_bw);
 
-skip_bw_vote:
 		if (gi2c->is_i2c_hub) {
 			ret = clk_prepare_enable(gi2c->core_clk);
 			if (ret) {
@@ -2088,15 +1873,6 @@ skip_bw_vote:
 		if (gi2c->se_mode == FIFO_SE_DMA)
 			enable_irq(gi2c->irq);
 
-		if (gi2c->se_mode == GSI_ONLY) {
-			ret = geni_i2c_gpi_suspend_resume(gi2c, false);
-			if (ret) {
-				I2C_LOG_ERR(gi2c->ipcl, false, gi2c->dev,
-					    "%s: failing at geni_i2c_gpi_suspend_resume ret:%d\n"
-					    , __func__, ret);
-				return ret;
-			}
-		}
 	} else if (gi2c->is_le_vm && gi2c->first_xfer_done) {
 		/*
 		 * For le-vm we are doing resume operations during
@@ -2111,16 +1887,6 @@ skip_bw_vote:
 		if (ret) {
 			dev_err(gi2c->dev, "I2C prepare failed:%d\n", ret);
 			return ret;
-		}
-
-		if (gi2c->se_mode == GSI_ONLY) {
-			ret = geni_i2c_gpi_suspend_resume(gi2c, false);
-			if (ret) {
-				I2C_LOG_ERR(gi2c->ipcl, false, gi2c->dev,
-					    "%s: failing at geni_i2c_gpi_suspend_resume ret: %d\n"
-					    , __func__, ret);
-				return ret;
-			}
 		}
 
 		ret = geni_i2c_lock_bus(gi2c);
@@ -2140,18 +1906,6 @@ static int geni_i2c_suspend_late(struct device *device)
 {
 	struct geni_i2c_dev *gi2c = dev_get_drvdata(device);
 	int ret;
-
-	if (atomic_read(&gi2c->is_xfer_in_progress)) {
-		if (!pm_runtime_status_suspended(gi2c->dev)) {
-			I2C_LOG_ERR(gi2c->ipcl, true, gi2c->dev,
-				    ":%s: runtime PM is active\n", __func__);
-			return -EBUSY;
-		}
-		I2C_LOG_ERR(gi2c->ipcl, true, gi2c->dev,
-			    "%s System suspend not allowed while xfer in progress\n",
-			    __func__);
-		return -EBUSY;
-	}
 
 	/* Make sure no transactions are pending */
 	ret = i2c_trylock_bus(&gi2c->adap, I2C_LOCK_SEGMENT);

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /* Copyright (c) 2013-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022-2023, Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/err.h>
@@ -21,10 +21,14 @@
 #include <trace/events/rproc_qcom.h>
 
 /* Macros */
+#define MEMSHARE_DEV_NAME "memshare"
 static unsigned long(attrs);
 
 static struct qmi_handle *mem_share_svc_handle;
+static struct workqueue_struct *mem_share_svc_workqueue;
 static uint64_t bootup_request;
+
+static struct device *memshare_dev[MAX_CLIENTS];
 
 /* Memshare Driver Structure */
 struct memshare_driver {
@@ -84,6 +88,7 @@ static void free_client(int id)
 	memblock[id].guarantee = 0;
 	memblock[id].sequence_id = -1;
 	memblock[id].memory_type = MEMORY_CMA;
+
 }
 
 static void fill_alloc_response(struct mem_alloc_generic_resp_msg_v01 *resp,
@@ -102,6 +107,7 @@ static void fill_alloc_response(struct mem_alloc_generic_resp_msg_v01 *resp,
 		resp->resp.result = QMI_RESULT_FAILURE_V01;
 		resp->resp.error = QMI_ERR_NO_MEMORY_V01;
 	}
+
 }
 
 static void initialize_client(void)
@@ -468,6 +474,7 @@ static void handle_free_generic_req(struct qmi_handle *handle,
 	if (rc < 0)
 		dev_err(memsh_drv->dev,
 		"memshare_free: error sending the free response: %d\n", rc);
+
 }
 
 static void handle_query_size_req(struct qmi_handle *handle,
@@ -563,8 +570,8 @@ static struct qmi_msg_handler qmi_memshare_handlers[] = {
 };
 
 int memshare_alloc(struct device *dev,
-		   unsigned int block_size,
-		   struct mem_blocks *pblk)
+					unsigned int block_size,
+					struct mem_blocks *pblk)
 {
 	dev_dbg(memsh_drv->dev,
 		"memshare: allocation request for size: %d", block_size);
@@ -588,10 +595,17 @@ static void memshare_init_worker(struct work_struct *work)
 {
 	int rc;
 
+	mem_share_svc_workqueue =
+		create_singlethread_workqueue("mem_share_svc");
+	if (!mem_share_svc_workqueue)
+		return;
+
 	mem_share_svc_handle = kzalloc(sizeof(struct qmi_handle),
 					  GFP_KERNEL);
-	if (!mem_share_svc_handle)
+	if (!mem_share_svc_handle) {
+		destroy_workqueue(mem_share_svc_workqueue);
 		return;
+	}
 
 	rc = qmi_handle_init(mem_share_svc_handle,
 		sizeof(struct qmi_elem_info),
@@ -600,7 +614,7 @@ static void memshare_init_worker(struct work_struct *work)
 		dev_err(memsh_drv->dev,
 			"memshare: Creating mem_share_svc qmi handle failed\n");
 		kfree(mem_share_svc_handle);
-		mem_share_svc_handle = NULL;
+		destroy_workqueue(mem_share_svc_workqueue);
 		return;
 	}
 	rc = qmi_add_server(mem_share_svc_handle, MEM_SHARE_SERVICE_SVC_ID,
@@ -608,11 +622,9 @@ static void memshare_init_worker(struct work_struct *work)
 	if (rc < 0) {
 		dev_err(memsh_drv->dev,
 			"memshare: Registering mem share svc failed %d\n", rc);
-		if (mem_share_svc_handle) {
-			qmi_handle_release(mem_share_svc_handle);
-			kfree(mem_share_svc_handle);
-			mem_share_svc_handle = NULL;
-		}
+		qmi_handle_release(mem_share_svc_handle);
+		kfree(mem_share_svc_handle);
+		destroy_workqueue(mem_share_svc_workqueue);
 		return;
 	}
 	dev_dbg(memsh_drv->dev, "memshare: memshare_init successful\n");
@@ -696,9 +708,9 @@ static int memshare_child_probe(struct platform_device *pdev)
 		dev_info(&pdev->dev, "memshare: Continuing with allocation from CMA\n");
 	}
 
-	/*
-	 * Memshare allocation for guaranteed clients
-	 */
+  /*
+   *	Memshare allocation for guaranteed clients
+   */
 	if (memblock[num_clients].guarantee && size > 0) {
 		if (memblock[num_clients].guard_band)
 			size += MEMSHARE_GUARD_BYTES;
@@ -720,6 +732,8 @@ static int memshare_child_probe(struct platform_device *pdev)
 		memblock[num_clients].allotted = 1;
 		shared_hyp_mapping(num_clients);
 	}
+
+	memshare_dev[num_clients] = &pdev->dev;
 
 	memsh_child[num_clients] = drv;
 	num_clients++;
@@ -776,11 +790,10 @@ static int memshare_remove(struct platform_device *pdev)
 	if (!memsh_drv)
 		return 0;
 
-	if (mem_share_svc_handle) {
-		qmi_handle_release(mem_share_svc_handle);
-		kfree(mem_share_svc_handle);
-		mem_share_svc_handle = NULL;
-	}
+	flush_workqueue(mem_share_svc_workqueue);
+	qmi_handle_release(mem_share_svc_handle);
+	kfree(mem_share_svc_handle);
+	destroy_workqueue(mem_share_svc_workqueue);
 	return 0;
 }
 
@@ -796,7 +809,7 @@ static struct platform_driver memshare_pdriver = {
 	.probe          = memshare_probe,
 	.remove         = memshare_remove,
 	.driver = {
-		.name   = "memshare",
+		.name   = MEMSHARE_DEV_NAME,
 		.of_match_table = memshare_match_table,
 	},
 };

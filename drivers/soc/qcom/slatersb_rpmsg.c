@@ -11,15 +11,6 @@
 #include "slatersb_rpmsg.h"
 
 static struct slatersb_rpmsg_dev *pdev;
-struct rsb_channel_ops rsb_ops;
-
-
-void slatersb_channel_init(void (*fn1)(bool), void (*fn2)(void *data, int len))
-{
-	rsb_ops.glink_channel_state = fn1;
-	rsb_ops.rx_msg = fn2;
-}
-EXPORT_SYMBOL(slatersb_channel_init);
 
 int slatersb_rpmsg_tx_msg(void  *msg, size_t len)
 {
@@ -61,7 +52,7 @@ static int slatersb_rpmsg_probe(struct rpmsg_device  *rpdev)
 	dev_set_drvdata(&rpdev->dev, pdev);
 
 	/* send a callback to slate-rsb driver*/
-	rsb_ops.glink_channel_state(true);
+	slatersb_notify_glink_channel_state(true);
 	if (pdev->message == NULL)
 		ret = slatersb_rpmsg_tx_msg(msg, 0);
 	return 0;
@@ -72,7 +63,7 @@ static void slatersb_rpmsg_remove(struct rpmsg_device *rpdev)
 	pdev->chnl_state = false;
 	pdev->message = NULL;
 	dev_dbg(&rpdev->dev, "rpmsg client driver is removed\n");
-	rsb_ops.glink_channel_state(false);
+	slatersb_notify_glink_channel_state(false);
 	dev_set_drvdata(&rpdev->dev, NULL);
 }
 
@@ -84,7 +75,7 @@ static int slatersb_rpmsg_cb(struct rpmsg_device *rpdev,
 
 	if (!dev)
 		return -ENODEV;
-	rsb_ops.rx_msg(data, len);
+	slatersb_rx_msg(data, len);
 	return 0;
 }
 

@@ -269,8 +269,6 @@ struct slimbus_power_resp_msg_v01 {
 	struct qmi_response_type_v01 resp;
 };
 
-static int qcom_slim_ngd_runtime_suspend(struct device *device);
-
 static struct qmi_elem_info slimbus_select_inst_req_msg_v01_ei[] = {
 	{
 		.data_type  = QMI_UNSIGNED_4_BYTE,
@@ -616,6 +614,7 @@ static void qcom_slim_ngd_tx_msg_dma_cb(void *args)
 	if (ctrl->capability_timeout) {
 		ctrl->capability_timeout = false;
 		SLIM_WARN(ctrl, "Timedout due to delayed interrupt\n");
+		desc->comp = NULL;
 		return;
 	}
 	spin_lock_irqsave(&ctrl->tx_buf_lock, flags);
@@ -1086,6 +1085,12 @@ static int qcom_slim_ngd_xfer_msg(struct slim_controller *sctrl,
 	mutex_lock(&ctrl->tx_lock);
 	ret = qcom_slim_ngd_tx_msg_post(ctrl, pbuf, txn->rl);
 	if (ret) {
+//#ifdef OPLUS_ARCH_EXTENDS
+		if (usr_msg) {
+			pr_err("%s: qcom_slim_ngd_tx_msg_post failed, ret = %d \n", __func__, ret);
+			txn->comp = NULL;
+		}
+//#endif /* OPLUS_ARCH_EXTENDS */
 		mutex_unlock(&ctrl->tx_lock);
 		return ret;
 	}
@@ -1094,6 +1099,9 @@ static int qcom_slim_ngd_xfer_msg(struct slim_controller *sctrl,
 	if (!timeout) {
 		SLIM_WARN(ctrl, "TX timed out:MC:0x%x,mt:0x%x", txn->mc,
 					txn->mt);
+//#ifdef OPLUS_ARCH_EXTENDS
+		pr_err("%s: TX timed out:MC:0x%x,mt:0x%x \n", __func__, txn->mc, txn->mt);
+//#endif /* OPLUS_ARCH_EXTENDS */
 		mutex_unlock(&ctrl->tx_lock);
 		ctrl->capability_timeout = true;
 		return -ETIMEDOUT;
@@ -1104,6 +1112,10 @@ static int qcom_slim_ngd_xfer_msg(struct slim_controller *sctrl,
 		if (!timeout) {
 			SLIM_WARN(ctrl, "TX usr_msg timed out:MC:0x%x,mt:0x%x",
 				txn->mc, txn->mt);
+//#ifdef OPLUS_ARCH_EXTENDS
+			pr_err("%s: TX usr_msg timed out:MC:0x%x,mt:0x%x \n", __func__, txn->mc, txn->mt);
+			txn->comp = NULL;
+//#endif /* OPLUS_ARCH_EXTENDS */
 			mutex_unlock(&ctrl->tx_lock);
 			return -ETIMEDOUT;
 		}
@@ -1371,24 +1383,6 @@ static int qcom_slim_ngd_disable_stream(struct slim_stream_runtime *rt)
 	}
 
 	SLIM_INFO(dev, "%s End ret %d\n", __func__, ret);
-	return ret;
-}
-
-static int qcom_ngd_set_suspend(struct slim_controller *ctrl)
-{
-	struct qcom_slim_ngd_ctrl *dev =
-		container_of(ctrl, struct qcom_slim_ngd_ctrl, ctrl);
-	int ret = 0;
-
-	ret = qcom_slim_ngd_runtime_suspend(dev->ctrl.dev);
-	if (ret) {
-		SLIM_INFO(dev, "%s: Failed to suspend:%d\n", __func__, ret);
-		return ret;
-	}
-
-	pm_runtime_disable(dev->ctrl.dev);
-	pm_runtime_set_suspended(dev->ctrl.dev);
-	pm_runtime_enable(dev->ctrl.dev);
 	return ret;
 }
 
@@ -2114,7 +2108,6 @@ static int qcom_slim_ngd_ctrl_probe(struct platform_device *pdev)
 	ctrl->ctrl.a_framer = &ctrl->framer;
 	ctrl->ctrl.clkgear = SLIM_MAX_CLK_GEAR;
 	ctrl->ctrl.get_laddr = qcom_slim_ngd_get_laddr;
-	ctrl->ctrl.suspend_slimbus = qcom_ngd_set_suspend;
 	ctrl->ctrl.enable_stream = qcom_slim_ngd_enable_stream;
 	ctrl->ctrl.disable_stream = qcom_slim_ngd_disable_stream;
 	ctrl->ctrl.xfer_msg = qcom_slim_ngd_xfer_msg;

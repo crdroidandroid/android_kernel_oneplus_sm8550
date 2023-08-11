@@ -29,10 +29,6 @@ struct qcom_glink_pipe {
 struct qcom_glink;
 extern const struct dev_pm_ops glink_native_pm_ops;
 
-#if defined(CONFIG_DEEPSLEEP) && defined(CONFIG_RPMSG_QCOM_GLINK_RPM)
-int glink_rpm_resume_noirq(struct device *dev);
-#endif
-
 struct qcom_glink *qcom_glink_native_probe(struct device *dev,
 					   unsigned long features,
 					   struct qcom_glink_pipe *rx,
@@ -42,7 +38,4 @@ int qcom_glink_native_start(struct qcom_glink *glink);
 void qcom_glink_native_remove(struct qcom_glink *glink);
 
 void qcom_glink_native_unregister(struct qcom_glink *glink);
-
-void *qcom_glink_prepare_da_for_cpu(u64 da, size_t len);
-
 #endif

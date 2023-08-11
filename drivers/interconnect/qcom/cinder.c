@@ -50,7 +50,6 @@ static struct qcom_icc_qosbox alm_sys_tcu_qos = {
 	.config = &(struct qos_config) {
 		.prio = 6,
 		.urg_fwd = 0,
-		.prio_fwd_disable = 1,
 	},
 };
 
@@ -84,7 +83,6 @@ static struct qcom_icc_qosbox qnm_ecpri_dma_qos = {
 	.config = &(struct qos_config) {
 		.prio = 0,
 		.urg_fwd = 0,
-		.prio_fwd_disable = 1,
 	},
 };
 
@@ -106,7 +104,6 @@ static struct qcom_icc_qosbox qnm_fec_2_gemnoc_qos = {
 	.config = &(struct qos_config) {
 		.prio = 0,
 		.urg_fwd = 0,
-		.prio_fwd_disable = 1,
 	},
 };
 
@@ -128,7 +125,6 @@ static struct qcom_icc_qosbox qnm_pcie_qos = {
 	.config = &(struct qos_config) {
 		.prio = 0,
 		.urg_fwd = 0,
-		.prio_fwd_disable = 1,
 	},
 };
 
@@ -151,8 +147,7 @@ static struct qcom_icc_qosbox qnm_snoc_gc_qos = {
 	.offsets = { 0xb5000 },
 	.config = &(struct qos_config) {
 		.prio = 0,
-		.urg_fwd = 0,
-		.prio_fwd_disable = 1,
+		.urg_fwd = 1,
 	},
 };
 
@@ -173,8 +168,7 @@ static struct qcom_icc_qosbox qnm_snoc_sf_qos = {
 	.offsets = { 0xb6000 },
 	.config = &(struct qos_config) {
 		.prio = 0,
-		.urg_fwd = 0,
-		.prio_fwd_disable = 1,
+		.urg_fwd = 1,
 	},
 };
 
@@ -220,7 +214,6 @@ static struct qcom_icc_qosbox qhm_gic_qos = {
 	.config = &(struct qos_config) {
 		.prio = 0,
 		.urg_fwd = 0,
-		.prio_fwd_disable = 1,
 	},
 };
 
@@ -242,7 +235,6 @@ static struct qcom_icc_qosbox qhm_qdss_bam_qos = {
 	.config = &(struct qos_config) {
 		.prio = 0,
 		.urg_fwd = 0,
-		.prio_fwd_disable = 1,
 	},
 };
 
@@ -264,7 +256,6 @@ static struct qcom_icc_qosbox qhm_qpic_qos = {
 	.config = &(struct qos_config) {
 		.prio = 0,
 		.urg_fwd = 0,
-		.prio_fwd_disable = 1,
 	},
 };
 
@@ -286,7 +277,6 @@ static struct qcom_icc_qosbox qhm_qspi_qos = {
 	.config = &(struct qos_config) {
 		.prio = 0,
 		.urg_fwd = 0,
-		.prio_fwd_disable = 1,
 	},
 };
 
@@ -308,7 +298,6 @@ static struct qcom_icc_qosbox qhm_qup0_qos = {
 	.config = &(struct qos_config) {
 		.prio = 0,
 		.urg_fwd = 0,
-		.prio_fwd_disable = 1,
 	},
 };
 
@@ -330,7 +319,6 @@ static struct qcom_icc_qosbox qhm_qup1_qos = {
 	.config = &(struct qos_config) {
 		.prio = 0,
 		.urg_fwd = 0,
-		.prio_fwd_disable = 1,
 	},
 };
 
@@ -430,7 +418,6 @@ static struct qcom_icc_qosbox qxm_crypto_qos = {
 	.config = &(struct qos_config) {
 		.prio = 0,
 		.urg_fwd = 0,
-		.prio_fwd_disable = 1,
 	},
 };
 
@@ -452,7 +439,6 @@ static struct qcom_icc_qosbox qxm_ecpri_gsi_qos = {
 	.config = &(struct qos_config) {
 		.prio = 2,
 		.urg_fwd = 0,
-		.prio_fwd_disable = 1,
 	},
 };
 
@@ -474,7 +460,6 @@ static struct qcom_icc_qosbox qxm_pimem_qos = {
 	.config = &(struct qos_config) {
 		.prio = 0,
 		.urg_fwd = 0,
-		.prio_fwd_disable = 1,
 	},
 };
 
@@ -496,7 +481,6 @@ static struct qcom_icc_qosbox xm_ecpri_dma_qos = {
 	.config = &(struct qos_config) {
 		.prio = 2,
 		.urg_fwd = 0,
-		.prio_fwd_disable = 1,
 	},
 };
 
@@ -518,7 +502,6 @@ static struct qcom_icc_qosbox xm_gic_qos = {
 	.config = &(struct qos_config) {
 		.prio = 0,
 		.urg_fwd = 0,
-		.prio_fwd_disable = 1,
 	},
 };
 
@@ -540,7 +523,6 @@ static struct qcom_icc_qosbox xm_pcie_qos = {
 	.config = &(struct qos_config) {
 		.prio = 2,
 		.urg_fwd = 0,
-		.prio_fwd_disable = 1,
 	},
 };
 
@@ -562,7 +544,6 @@ static struct qcom_icc_qosbox xm_qdss_etr0_qos = {
 	.config = &(struct qos_config) {
 		.prio = 0,
 		.urg_fwd = 0,
-		.prio_fwd_disable = 1,
 	},
 };
 
@@ -584,7 +565,6 @@ static struct qcom_icc_qosbox xm_qdss_etr1_qos = {
 	.config = &(struct qos_config) {
 		.prio = 0,
 		.urg_fwd = 0,
-		.prio_fwd_disable = 1,
 	},
 };
 
@@ -606,7 +586,6 @@ static struct qcom_icc_qosbox xm_sdc_qos = {
 	.config = &(struct qos_config) {
 		.prio = 0,
 		.urg_fwd = 0,
-		.prio_fwd_disable = 1,
 	},
 };
 
@@ -628,7 +607,6 @@ static struct qcom_icc_qosbox xm_usb3_qos = {
 	.config = &(struct qos_config) {
 		.prio = 0,
 		.urg_fwd = 0,
-		.prio_fwd_disable = 1,
 	},
 };
 

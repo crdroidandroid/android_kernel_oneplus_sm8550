@@ -3,7 +3,6 @@
  * Copyright (C) 2006-2007 Adam Belay <abelay@novell.com>
  * Copyright (C) 2009 Intel Corporation
  * Copyright (c) 2012-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/cpu.h>
@@ -348,8 +347,7 @@ static void update_cpu_history(struct lpm_cpu *cpu_gov)
 	u64 measured_us = ktime_to_us(cpu_gov->dev->last_residency_ns);
 	struct cpuidle_state *target;
 
-	if (sleep_disabled || prediction_disabled || idx < 0 ||
-	    idx > cpu_gov->drv->state_count - 1)
+	if (prediction_disabled || idx < 0 || idx > cpu_gov->drv->state_count - 1)
 		return;
 
 	target = &cpu_gov->drv->states[idx];
@@ -484,18 +482,17 @@ static void ipi_entry(void *ignore, const char *unused)
 static inline s64 get_cpus_qos(const struct cpumask *mask)
 {
 	int cpu;
-	u64 n, latency = PM_QOS_CPU_LATENCY_DEFAULT_VALUE;
+	s64 n, latency = PM_QOS_CPU_LATENCY_DEFAULT_VALUE * NSEC_PER_USEC;
 
 	for_each_cpu(cpu, mask) {
 		if (!check_cpu_isactive(cpu))
 			continue;
 		n = cpuidle_governor_latency_req(cpu);
-		do_div(n, NSEC_PER_USEC);
 		if (n < latency)
 			latency = n;
 	}
 
-	return latency * NSEC_PER_USEC;
+	return latency;
 }
 
 /**
@@ -531,14 +528,6 @@ static int start_prediction_timer(struct lpm_cpu *cpu_gov, int duration_us)
 	return htime;
 }
 
-void unregister_cluster_governor_ops(struct cluster_governor *ops)
-{
-	if (ops != cluster_gov_ops)
-		return;
-
-	cluster_gov_ops = NULL;
-}
-
 void register_cluster_governor_ops(struct cluster_governor *ops)
 {
 	if (!ops)
@@ -559,7 +548,7 @@ static int lpm_select(struct cpuidle_driver *drv, struct cpuidle_device *dev,
 		      bool *stop_tick)
 {
 	struct lpm_cpu *cpu_gov = this_cpu_ptr(&lpm_cpu_data);
-	uint64_t latency_req = get_cpus_qos(cpumask_of(dev->cpu));
+	s64 latency_req = get_cpus_qos(cpumask_of(dev->cpu));
 	ktime_t delta_tick;
 	u64 reason = 0;
 	uint64_t duration_ns, htime = 0;
@@ -581,7 +570,7 @@ static int lpm_select(struct cpuidle_driver *drv, struct cpuidle_device *dev,
 	for (i = drv->state_count - 1; i > 0; i--) {
 		struct cpuidle_state *s = &drv->states[i];
 
-		if (dev->states_usage[i].disable) {
+		if (i && dev->states_usage[i].disable) {
 			reason |= UPDATE_REASON(i, LPM_SELECT_STATE_DISABLED);
 			continue;
 		}

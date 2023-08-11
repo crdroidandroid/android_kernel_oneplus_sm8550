@@ -58,7 +58,7 @@ enum mon_type {
 	NUM_MON_TYPES
 };
 
-#define SAMPLING_VOTER	max(num_possible_cpus(), 8U)
+#define SAMPLING_VOTER	(num_possible_cpus())
 #define NUM_FP_VOTERS	(SAMPLING_VOTER + 1)
 
 enum memlat_type {
@@ -1913,6 +1913,11 @@ module_init(qcom_memlat_init);
 #else
 arch_initcall(qcom_memlat_init);
 #endif
+static __exit void qcom_memlat_exit(void)
+{
+	platform_driver_unregister(&qcom_memlat_driver);
+}
+module_exit(qcom_memlat_exit);
 
 MODULE_DESCRIPTION("QCOM MEMLAT Driver");
 MODULE_LICENSE("GPL v2");

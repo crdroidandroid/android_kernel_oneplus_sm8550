@@ -461,6 +461,7 @@
   dev_pm_opp_of_cpumask_remove_table
   dev_pm_opp_of_find_icc_paths
   dev_pm_opp_of_register_em
+  dev_pm_opp_remove
   dev_pm_opp_of_remove_table
   dev_pm_opp_put
   dev_pm_opp_put_clkname
@@ -587,8 +588,13 @@
   drm_bridge_chain_enable
   drm_bridge_chain_post_disable
   drm_bridge_chain_pre_enable
+  drm_client_buffer_vmap
+  drm_client_framebuffer_create
+  drm_client_framebuffer_delete
   drm_client_init
+  drm_client_modeset_commit
   drm_client_modeset_commit_locked
+  drm_client_modeset_probe
   drm_client_register
   drm_connector_list_update
   drm_crtc_vblank_reset
@@ -627,6 +633,7 @@
   drm_mode_convert_umode
   drm_mode_create_dp_colorspace_property
   drm_mode_create_tile_group
+  drm_mode_destroy
   drm_mode_is_420_only
   drm_mode_match
   drm_mode_prune_invalid
@@ -1210,19 +1217,30 @@
   mmc_cqe_request_done
   mmc_execute_tuning
   mmc_get_ext_csd
+  mmc_get_card
+  mmc_hs200_tuning
+  mmc_issue_type
   mmc_of_parse
   __mmc_poll_for_busy
   mmc_prepare_busy_cmd
+  mmc_put_card
   mmc_regulator_get_supply
   mmc_regulator_set_ocr
   mmc_regulator_set_vqmmc
   mmc_retune_hold
   mmc_retune_release
   mmc_select_card
+  mmc_select_bus_width
+  mmc_select_hs
+  mmc_select_hs400
+  mmc_select_hs_ddr
+  mmc_select_timing
+  mmc_send_status
   mmc_send_tuning
   mmc_set_bus_mode
   mmc_set_bus_width
   mmc_set_clock
+  mmc_set_initial_state
   mmc_set_timing
   mmc_wait_for_cmd
   mmput

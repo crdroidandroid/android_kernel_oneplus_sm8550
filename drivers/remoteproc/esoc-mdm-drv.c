@@ -600,11 +600,7 @@ struct mdm_drv_data sdx_lemur = {
 };
 
 struct mdm_drv_data sdx_pinn = {
-	.fw = "sdx75m/xbl_s.melf",
-};
-
-struct mdm_drv_data sdx_baagha = {
-	.fw = "sdx35m/xbl.elf",
+	.fw = "sdx75m/xbl.elf",
 };
 
 struct esoc_compat compat_table[] = {
@@ -627,10 +623,6 @@ struct esoc_compat compat_table[] = {
 	{
 		.name = "SDXPINN",
 		.data = &sdx_pinn,
-	},
-	{
-		.name = "SDXBAAGHA",
-		.data = &sdx_baagha,
 	},
 };
 

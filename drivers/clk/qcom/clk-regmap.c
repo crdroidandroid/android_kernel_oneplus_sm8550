@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (c) 2014, 2019-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2022-2023, Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/device.h>
@@ -331,19 +331,3 @@ void clk_runtime_put_regmap(struct clk_regmap *rclk)
 		pm_runtime_put_sync(rclk->dev);
 }
 EXPORT_SYMBOL(clk_runtime_put_regmap);
-
-void clk_restore_critical_clocks(struct device *dev)
-{
-	struct qcom_cc_desc *desc = dev_get_drvdata(dev);
-	struct regmap *regmap = dev_get_regmap(dev, NULL);
-	struct critical_clk_offset *cclks = desc->critical_clk_en;
-	int i;
-
-	if (!regmap)
-		return;
-
-	for (i = 0; i < desc->num_critical_clk; i++)
-		regmap_update_bits(regmap, cclks[i].offset, cclks[i].mask,
-					 cclks[i].mask);
-}
-EXPORT_SYMBOL(clk_restore_critical_clocks);

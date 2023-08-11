@@ -5,7 +5,6 @@
  * Copyright (C) 2016 Linaro Ltd
  * Copyright (C) 2015 Sony Mobile Communications Inc
  * Copyright (c) 2012-2013, 2020-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/firmware.h>
@@ -18,11 +17,9 @@
 #include <linux/slab.h>
 #include <linux/soc/qcom/mdt_loader.h>
 #include <linux/soc/qcom/smem.h>
-#include <linux/devcoredump.h>
 #include <trace/hooks/remoteproc.h>
 #include <trace/events/rproc_qcom.h>
 
-#include "remoteproc_elf_helpers.h"
 #include "remoteproc_internal.h"
 #include "qcom_common.h"
 
@@ -42,6 +39,12 @@
 #define MD_REGION_VALID		('V' << 24 | 'A' << 16 | 'L' << 8 | 'I' << 0)
 #define MD_SS_ENCR_DONE		('D' << 24 | 'O' << 16 | 'N' << 8 | 'E' << 0)
 #define MD_SS_ENABLED		('E' << 24 | 'N' << 16 | 'B' << 8 | 'L' << 0)
+
+#ifdef OPLUS_FEATURE_MODEM_MINIDUMP
+//Add for customized subsystem ramdump to skip generate dump cause by SAU
+bool SKIP_GENERATE_RAMDUMP = false;
+EXPORT_SYMBOL(SKIP_GENERATE_RAMDUMP);
+#endif
 
 /**
  * struct minidump_region - Minidump region
@@ -143,8 +146,7 @@ static int qcom_add_minidump_segments(struct rproc *rproc, struct minidump_subsy
 	int seg_cnt, i;
 	dma_addr_t da;
 	size_t size;
-	char *name, *dbg_buf_name = "md_dbg_buf";
-	int len = strlen(dbg_buf_name);
+	char *name;
 
 	if (WARN_ON(!list_empty(&rproc->dump_segments))) {
 		dev_err(&rproc->dev, "dump segment list already populated\n");
@@ -167,13 +169,6 @@ static int qcom_add_minidump_segments(struct rproc *rproc, struct minidump_subsy
 			}
 			da = le64_to_cpu(region.address);
 			size = le32_to_cpu(region.size);
-			if (le32_to_cpu(subsystem->encryption_status) != MD_SS_ENCR_DONE) {
-				if (!i && len < MAX_REGION_NAME_LENGTH &&
-				    !strcmp(name, dbg_buf_name))
-					rproc_coredump_add_custom_segment(rproc, da, size, dumpfn,
-									  name);
-				break;
-			}
 			rproc_coredump_add_custom_segment(rproc, da, size, dumpfn, name);
 		}
 	}
@@ -182,114 +177,7 @@ static int qcom_add_minidump_segments(struct rproc *rproc, struct minidump_subsy
 	return 0;
 }
 
-static void qcom_rproc_minidump(struct rproc *rproc, struct device *md_dev)
-{
-	struct rproc_dump_segment *segment;
-	void *shdr;
-	void *ehdr;
-	size_t data_size;
-	size_t strtbl_size = 0;
-	size_t strtbl_index = 1;
-	size_t offset;
-	void *data;
-	u8 class = rproc->elf_class;
-	int shnum;
-	unsigned int dump_conf = rproc->dump_conf;
-	char *str_tbl = "STR_TBL";
-
-	if (list_empty(&rproc->dump_segments) ||
-	    dump_conf == RPROC_COREDUMP_DISABLED)
-		return;
-
-	if (class == ELFCLASSNONE) {
-		dev_err(&rproc->dev, "Elf class is not set\n");
-		return;
-	}
-
-	/*
-	 * We allocate two extra section headers. The first one is null.
-	 * Second section header is for the string table. Also space is
-	 * allocated for string table.
-	 */
-	data_size = elf_size_of_hdr(class) + 2 * elf_size_of_shdr(class);
-	shnum = 2;
-
-	/* the extra byte is for the null character at index 0 */
-	strtbl_size += strlen(str_tbl) + 2;
-
-	list_for_each_entry(segment, &rproc->dump_segments, node) {
-		data_size += elf_size_of_shdr(class);
-		strtbl_size += strlen(segment->priv) + 1;
-		data_size += segment->size;
-		shnum++;
-	}
-
-	data_size += strtbl_size;
-
-	data = vmalloc(data_size);
-	if (!data)
-		return;
-
-	ehdr = data;
-	memset(ehdr, 0, elf_size_of_hdr(class));
-	/* e_ident field is common for both elf32 and elf64 */
-	elf_hdr_init_ident(ehdr, class);
-	elf_hdr_set_e_type(class, ehdr, ET_CORE);
-	elf_hdr_set_e_machine(class, ehdr, rproc->elf_machine);
-	elf_hdr_set_e_version(class, ehdr, EV_CURRENT);
-	elf_hdr_set_e_entry(class, ehdr, rproc->bootaddr);
-	elf_hdr_set_e_shoff(class, ehdr, elf_size_of_hdr(class));
-	elf_hdr_set_e_ehsize(class, ehdr, elf_size_of_hdr(class));
-	elf_hdr_set_e_shentsize(class, ehdr, elf_size_of_shdr(class));
-	elf_hdr_set_e_shnum(class, ehdr, shnum);
-	elf_hdr_set_e_shstrndx(class, ehdr, 1);
-
-	/*
-	 * The zeroth index of the section header is reserved and is rarely used.
-	 * Set the section header as null (SHN_UNDEF) and move to the next one.
-	 */
-	shdr = data + elf_hdr_get_e_shoff(class, ehdr);
-	memset(shdr, 0, elf_size_of_shdr(class));
-	shdr += elf_size_of_shdr(class);
-
-	/* Initialize the string table. */
-	offset = elf_hdr_get_e_shoff(class, ehdr) +
-		 elf_size_of_shdr(class) * elf_hdr_get_e_shnum(class, ehdr);
-	memset(data + offset, 0, strtbl_size);
-
-	/* Fill in the string table section header. */
-	memset(shdr, 0, elf_size_of_shdr(class));
-	elf_shdr_set_sh_type(class, shdr, SHT_STRTAB);
-	elf_shdr_set_sh_offset(class, shdr, offset);
-	elf_shdr_set_sh_size(class, shdr, strtbl_size);
-	elf_shdr_set_sh_entsize(class, shdr, 0);
-	elf_shdr_set_sh_flags(class, shdr, 0);
-	elf_shdr_set_sh_name(class, shdr, elf_strtbl_add(str_tbl, ehdr, class, &strtbl_index));
-	offset += elf_shdr_get_sh_size(class, shdr);
-	shdr += elf_size_of_shdr(class);
-
-	list_for_each_entry(segment, &rproc->dump_segments, node) {
-		memset(shdr, 0, elf_size_of_shdr(class));
-		elf_shdr_set_sh_type(class, shdr, SHT_PROGBITS);
-		elf_shdr_set_sh_offset(class, shdr, offset);
-		elf_shdr_set_sh_addr(class, shdr, segment->da);
-		elf_shdr_set_sh_size(class, shdr, segment->size);
-		elf_shdr_set_sh_entsize(class, shdr, 0);
-		elf_shdr_set_sh_flags(class, shdr, SHF_WRITE);
-		elf_shdr_set_sh_name(class, shdr,
-				     elf_strtbl_add(segment->priv, ehdr, class, &strtbl_index));
-
-		/* No need to copy segments for inline dumps */
-		segment->dump(rproc, segment, data + offset, 0, segment->size);
-		offset += elf_shdr_get_sh_size(class, shdr);
-		shdr += elf_size_of_shdr(class);
-	}
-
-	dev_coredumpv(md_dev, data, data_size, GFP_KERNEL);
-}
-
-void qcom_minidump(struct rproc *rproc, struct device *md_dev,
-				unsigned int minidump_id, rproc_dumpfn_t dumpfn)
+void qcom_minidump(struct rproc *rproc, unsigned int minidump_id, rproc_dumpfn_t dumpfn)
 {
 	int ret;
 	struct minidump_subsystem *subsystem;
@@ -304,6 +192,15 @@ void qcom_minidump(struct rproc *rproc, struct device *md_dev,
 		return;
 	}
 
+	#ifdef OPLUS_FEATURE_MODEM_MINIDUMP
+	 //Add for customized subsystem ramdump to skip generate dump cause by SAU
+	 if (SKIP_GENERATE_RAMDUMP) {
+		dev_err(&rproc->dev, "Skip ramdump cuase by ap normal trigger.\n");
+	 	SKIP_GENERATE_RAMDUMP = false;
+	 	goto clean_minidump;;
+	 }
+	#endif
+
 	/* Get subsystem table of contents using the minidump id */
 	subsystem = &toc->subsystems[minidump_id];
 
@@ -314,11 +211,24 @@ void qcom_minidump(struct rproc *rproc, struct device *md_dev,
 	if (subsystem->regions_baseptr == 0 ||
 	    le32_to_cpu(subsystem->status) != 1 ||
 	    le32_to_cpu(subsystem->enabled) != MD_SS_ENABLED) {
+
+		#ifdef OPLUS_FEATURE_MODEM_MINIDUMP
+			dev_err(&rproc->dev, "qcom_minidump: modem minidump_subsystem->status is 0x%x\n",
+				(unsigned int)le32_to_cpu(subsystem->status));
+			dev_err(&rproc->dev, "qcom_minidump: modem minidump_subsystem->enabled is 0x%x\n",
+				(unsigned int)le32_to_cpu(subsystem->enabled));
+			dev_err(&rproc->dev, "qcom_minidump: modem minidump_subsystem->regions_baseptr is 0x%x\n",
+				(unsigned int)subsystem->regions_baseptr);
+			dev_err(&rproc->dev, "Continuing with full SSR dump\n");
+		#endif
+
 		return rproc_coredump(rproc);
 	}
 
-	if (le32_to_cpu(subsystem->encryption_status) != MD_SS_ENCR_DONE)
-		dev_err(&rproc->dev, "encryption_status != MD_SS_ENCR_DONE\n");
+	if (le32_to_cpu(subsystem->encryption_status) != MD_SS_ENCR_DONE) {
+		dev_err(&rproc->dev, "Minidump not ready, skipping\n");
+		return;
+	}
 
 	rproc_coredump_cleanup(rproc);
 
@@ -329,10 +239,9 @@ void qcom_minidump(struct rproc *rproc, struct device *md_dev,
 	}
 
 	if (rproc->elf_class == ELFCLASS64)
-		qcom_rproc_minidump(rproc, md_dev);
+		rproc_coredump_using_sections(rproc);
 	else
 		rproc_coredump(rproc);
-
 clean_minidump:
 	qcom_minidump_cleanup(rproc);
 }
@@ -758,6 +667,7 @@ void qcom_add_ssr_subdev(struct rproc *rproc, struct qcom_rproc_ssr *ssr,
 	timer_setup(&ssr->timer, ssr_notif_timeout_handler, 0);
 
 	ssr->info = info;
+	ssr->is_notified = false;
 	ssr->subdev.prepare = ssr_notify_prepare;
 	ssr->subdev.start = ssr_notify_start;
 	ssr->subdev.stop = ssr_notify_stop;

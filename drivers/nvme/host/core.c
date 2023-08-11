@@ -2108,6 +2108,14 @@ static int nvme_report_zones(struct gendisk *disk, sector_t sector,
 #define nvme_report_zones	NULL
 #endif /* CONFIG_BLK_DEV_ZONED */
 
+// Temp add to avoid "ERROR: modpost: "blkdev_compat_ptr_ioctl" \
+// [drivers/nvme/host/nvme-core.ko] undefined!"
+int blkdev_compat_ptr_ioctl(struct block_device *bdev, fmode_t mode,
+			unsigned cmd, unsigned long arg)
+{
+	return 0;
+}
+
 static const struct block_device_operations nvme_bdev_ops = {
 	.owner		= THIS_MODULE,
 	.ioctl		= nvme_ioctl,

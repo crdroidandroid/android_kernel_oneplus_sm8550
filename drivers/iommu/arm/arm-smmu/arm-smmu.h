@@ -25,6 +25,7 @@
 #include <linux/spinlock.h>
 #include <linux/types.h>
 #include <linux/qcom-iommu-util.h>
+
 #include <linux/qcom-io-pgtable.h>
 
 /* Configuration registers */
@@ -380,7 +381,6 @@ struct arm_smmu_device {
 #define ARM_SMMU_OPT_NO_ASID_RETENTION	(1 << 3)
 #define ARM_SMMU_OPT_DISABLE_ATOS	(1 << 4)
 #define ARM_SMMU_OPT_CONTEXT_FAULT_RETRY	(1 << 5)
-#define ARM_SMMU_OPT_MULTI_MATCH_HANDOFF_SMR	(1 << 6)
 	u32				options;
 	enum arm_smmu_arch_version	version;
 	enum arm_smmu_implementation	model;
@@ -511,7 +511,7 @@ struct arm_smmu_domain {
 	 */
 	spinlock_t			iotlb_gather_lock;
 	struct page			*freelist;
-	bool				deferred_flush;
+	bool				deferred_sync;
 
 	struct iommu_debug_attachment	*logger;
 	struct iommu_domain		domain;

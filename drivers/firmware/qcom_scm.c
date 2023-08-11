@@ -542,25 +542,6 @@ void qcom_scm_set_download_mode(enum qcom_download_mode mode, phys_addr_t tcsr_b
 }
 EXPORT_SYMBOL(qcom_scm_set_download_mode);
 
-int qcom_scm_get_download_mode(unsigned int *mode, phys_addr_t tcsr_boot_misc)
-{
-	int ret = -EINVAL;
-	struct device *dev = __scm ? __scm->dev : NULL;
-
-	if (tcsr_boot_misc || (__scm && __scm->dload_mode_addr)) {
-		ret = qcom_scm_io_readl(tcsr_boot_misc ? : __scm->dload_mode_addr, mode);
-	} else {
-		dev_err(dev,
-			"No available mechanism for getting download mode\n");
-	}
-
-	if (ret)
-		dev_err(dev, "failed to get download mode: %d\n", ret);
-
-	return ret;
-}
-EXPORT_SYMBOL(qcom_scm_get_download_mode);
-
 int qcom_scm_config_cpu_errata(void)
 {
 	struct qcom_scm_desc desc = {
@@ -2249,7 +2230,6 @@ int qcom_scm_tsens_reinit(int *tsens_ret)
 	struct qcom_scm_desc desc = {
 		.svc = QCOM_SCM_SVC_TSENS,
 		.cmd = QCOM_SCM_TSENS_INIT_ID,
-		.owner = ARM_SMCCC_OWNER_SIP
 	};
 	struct qcom_scm_res res;
 
@@ -2858,7 +2838,9 @@ static int qcom_scm_probe(struct platform_device *pdev)
 		}
 	}
 
+#if IS_ENABLED(CONFIG_QCOM_SCM_QCPE)
 	__qcom_scm_init();
+#endif
 	__get_convention();
 
 	scm->restart_nb.notifier_call = qcom_scm_do_restart;
@@ -2941,7 +2923,9 @@ subsys_initcall(qcom_scm_init);
 #if IS_MODULE(CONFIG_QCOM_SCM)
 static void __exit qcom_scm_exit(void)
 {
+#if IS_ENABLED(CONFIG_QCOM_SCM_QCPE)
 	__qcom_scm_qcpe_exit();
+#endif
 	platform_driver_unregister(&qcom_scm_driver);
 	qtee_shmbridge_driver_exit();
 }

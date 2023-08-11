@@ -10,6 +10,12 @@ config QCOM_GDSC
 config QCOM_RPMCC
 	bool
 
+config OPLUS_POWERINFO_STANDBY_DEBUG
+	bool "powerinfo standby config"
+	default n
+	help
+	  Select this config to enable powerinfo standby debug
+
 menuconfig COMMON_CLK_QCOM
 	tristate "Support for Qualcomm's clock controllers"
 	depends on OF
@@ -1071,22 +1077,4 @@ config SA_DEBUGCC_410M
 	  Say Y if you want to support the debug clocks such as
 	  clock measurement functionality.
 
-config SDX_DEBUGCC_BAAGHA
-	tristate "SDXBAAGHA Debug Clock Controller"
-	select SDX_GCC_BAAGHA
-	help
-	  Support for the debug clock controller on Qualcomm Technologies, Inc
-	  SDXBAAGHA devices.
-	  Say Y if you want to support the debug clocks such as
-	  clock measurement functionality.
-
 endif
-
-config VIRTIO_CLK
-	tristate "Virtio clock driver"
-	depends on VIRTIO
-	help
-	  This is the virtual clock driver for virtio. It can be used on
-	  Qualcomm Technologies, Inc automotive virtual machine.
-	  Say Y if you want to use pass through peripheral devices such as UART,
-	  SPI, I2C, USB etc.

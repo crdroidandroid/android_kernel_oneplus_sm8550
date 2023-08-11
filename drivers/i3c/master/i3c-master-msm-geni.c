@@ -25,7 +25,6 @@
 #include <linux/irq.h>
 #include <linux/pm_wakeup.h>
 #include <linux/workqueue.h>
-#include <soc/qcom/boot_stats.h>
 
 #define SE_I3C_SCL_HIGH			0x268
 #define SE_I3C_TX_TRANS_LEN		0x26C
@@ -2076,7 +2075,7 @@ static int i3c_geni_rsrcs_init(struct geni_i3c_dev *gi3c,
 
 	//1.GENI_TO_CORE  2.CPU_TO_GENI  3.GENI_TO_DDR
 	ret = geni_se_common_resources_init(&gi3c->se,
-			GENI_DEFAULT_BW, GENI_DEFAULT_BW,
+			I3C_CORE2X_VOTE, APPS_PROC_TO_QUP_VOTE,
 			(DEFAULT_SE_CLK * DEFAULT_BUS_WIDTH));
 	if (ret) {
 		I3C_LOG_DBG(gi3c->ipcl, false, gi3c->se.dev,
@@ -2259,11 +2258,6 @@ static int geni_i3c_probe(struct platform_device *pdev)
 	u32 proto, tx_depth;
 	int ret;
 	u32 se_mode, geni_ios;
-	char boot_marker[50];
-
-	snprintf(boot_marker, sizeof(boot_marker),
-			"M - I3C GENI Probe start");
-	place_marker(boot_marker);
 
 	gi3c = devm_kzalloc(&pdev->dev, sizeof(*gi3c), GFP_KERNEL);
 	if (!gi3c)
@@ -2421,10 +2415,6 @@ static int geni_i3c_probe(struct platform_device *pdev)
 	INIT_WORK(&gi3c->hj_wd, geni_i3c_hotjoin);
 	gi3c->hj_wq = alloc_workqueue("%s", 0, 0, dev_name(gi3c->se.dev));
 	geni_i3c_enable_hotjoin_irq(gi3c, true);
-
-	snprintf(boot_marker, sizeof(boot_marker),
-		"M - I3C GENI driver_0x%x Complete", gi3c->se.base);
-	place_marker(boot_marker);
 
 	I3C_LOG_ERR(gi3c->ipcl, true, gi3c->se.dev, "I3C probed:%d\n", ret);
 	return ret;

@@ -1,5 +1,4 @@
 build.config.msm.kalama
-build.config.msm.kalama.le
 build.config.msm.cinder
 build.config.msm.kalama.vm
 build.config.msm.gen3auto
@@ -11,4 +10,3 @@ build.config.msm.sdxbaagha
 build.config.msm.bengal
 build.config.msm.sa410m
 build.config.msm.monaco
-build.config.msm.kona

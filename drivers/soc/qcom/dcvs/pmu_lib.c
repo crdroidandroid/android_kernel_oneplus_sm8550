@@ -269,7 +269,7 @@ static int __qcom_pmu_read(int cpu, u32 event_id, u64 *pmu_data, bool local)
 	if (!qcom_pmu_inited)
 		return -ENODEV;
 
-	if (!event_id || !pmu_data || !cpumask_test_cpu(cpu, cpu_possible_mask))
+	if (!event_id || !pmu_data || cpu >= num_possible_cpus())
 		return -EINVAL;
 
 	cpu_data = per_cpu(cpu_ev_data, cpu);
@@ -306,7 +306,7 @@ int __qcom_pmu_read_all(int cpu, struct qcom_pmu_data *data, bool local)
 	if (!qcom_pmu_inited)
 		return -ENODEV;
 
-	if (!data || !cpumask_test_cpu(cpu, cpu_possible_mask))
+	if (!data || cpu >= num_possible_cpus())
 		return -EINVAL;
 
 	cpu_data = per_cpu(cpu_ev_data, cpu);
@@ -345,7 +345,7 @@ static struct event_data *get_event(u32 event_id, int cpu)
 	if (!qcom_pmu_inited)
 		return ERR_PTR(-EPROBE_DEFER);
 
-	if (!event_id || !cpumask_test_cpu(cpu, cpu_possible_mask))
+	if (!event_id || cpu >= num_possible_cpus())
 		return ERR_PTR(-EINVAL);
 
 	cpu_data = per_cpu(cpu_ev_data, cpu);
@@ -881,8 +881,8 @@ int rimps_pmu_init(struct scmi_device *sdev)
 		return -EINVAL;
 
 	ops = sdev->handle->devm_protocol_get(sdev, SCMI_PMU_PROTOCOL, &ph);
-	if (IS_ERR(ops))
-		return PTR_ERR(ops);
+	if (!ops)
+		return -EINVAL;
 
 	/*
 	 * If communication with cpucp doesn't succeed here the device memory
@@ -907,7 +907,7 @@ static int configure_pmu_event(u32 event_id, int amu_id, int cid, int cpu)
 	struct cpu_data *cpu_data;
 	struct event_data *event;
 
-	if (!event_id || !cpumask_test_cpu(cpu, cpu_possible_mask))
+	if (!event_id || cpu >= num_possible_cpus())
 		return -EINVAL;
 
 	cpu_data = per_cpu(cpu_ev_data, cpu);
@@ -968,11 +968,9 @@ static int init_pmu_events(struct device *dev)
 			return -EINVAL;
 
 		for_each_cpu(cpu, to_cpumask(&cpus)) {
-			if (cpumask_test_cpu(cpu, cpu_possible_mask)) {
-				ret = configure_pmu_event(event_id, amu_id, cid, cpu);
-				if (ret < 0)
-					return ret;
-			}
+			ret = configure_pmu_event(event_id, amu_id, cid, cpu);
+			if (ret < 0)
+				return ret;
 		}
 
 		if (is_cid_valid(cid)) {

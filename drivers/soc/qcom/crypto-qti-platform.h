@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
- * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #ifndef _CRYPTO_QTI_PLATFORM_H
@@ -23,12 +23,12 @@ int crypto_qti_derive_raw_secret_platform(
 				unsigned int wrapped_key_size, u8 *secret,
 				unsigned int secret_size);
 
-#if (IS_ENABLED(CONFIG_QTI_HW_KEY_MANAGER) || IS_ENABLED(CONFIG_QTI_HW_KEY_MANAGER_V1))
+#if IS_ENABLED(CONFIG_QTI_HW_KEY_MANAGER)
 void crypto_qti_disable_platform(void);
 #else
 static inline void crypto_qti_disable_platform(void)
 {}
-#endif /* CONFIG_QTI_HW_KEY_MANAGER || CONFIG_QTI_HW_KEY_MANAGER_V1*/
+#endif /* CONFIG_QTI_HW_KEY_MANAGER */
 #else
 static inline int crypto_qti_program_key(
 				const struct ice_mmio_data *mmio_data,

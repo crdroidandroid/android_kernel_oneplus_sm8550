@@ -14,7 +14,7 @@
  *	- Context fault reporting
  *	- Extended Stream ID (16 bit)
  *
- * Copyright (c) 2021-2023, Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2022, Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #define pr_fmt(fmt) "arm-smmu: " fmt
@@ -95,7 +95,6 @@ static struct arm_smmu_option_prop arm_smmu_options[] = {
 	{ ARM_SMMU_OPT_NO_ASID_RETENTION, "qcom,no-asid-retention" },
 	{ ARM_SMMU_OPT_DISABLE_ATOS, "qcom,disable-atos" },
 	{ ARM_SMMU_OPT_CONTEXT_FAULT_RETRY, "qcom,context-fault-retry" },
-	{ ARM_SMMU_OPT_MULTI_MATCH_HANDOFF_SMR, "qcom,multi-match-handoff-smr" },
 	{ 0, NULL},
 };
 
@@ -107,7 +106,7 @@ static void arm_smmu_destroy_domain_context(struct iommu_domain *domain);
 
 static int arm_smmu_setup_default_domain(struct device *dev,
 				struct iommu_domain *domain);
-static void __arm_smmu_flush_iotlb_all(struct iommu_domain *domain, bool force);
+static void __arm_smmu_qcom_tlb_sync(struct iommu_domain *domain);
 
 static inline int arm_smmu_rpm_get(struct arm_smmu_device *smmu)
 {
@@ -1235,7 +1234,7 @@ static void arm_smmu_tlb_add_walk_page(void *cookie, void *virt)
 	unsigned long flags;
 
 	spin_lock_irqsave(&smmu_domain->iotlb_gather_lock, flags);
-	smmu_domain->deferred_flush = true;
+	smmu_domain->deferred_sync = true;
 	page->freelist = smmu_domain->freelist;
 	smmu_domain->freelist = page;
 	spin_unlock_irqrestore(&smmu_domain->iotlb_gather_lock, flags);
@@ -1247,7 +1246,7 @@ static void arm_smmu_qcom_tlb_add_inv(void *cookie)
 	unsigned long flags;
 
 	spin_lock_irqsave(&smmu_domain->iotlb_gather_lock, flags);
-	smmu_domain->deferred_flush = true;
+	smmu_domain->deferred_sync = true;
 	spin_unlock_irqrestore(&smmu_domain->iotlb_gather_lock, flags);
 }
 
@@ -1255,9 +1254,7 @@ static void arm_smmu_qcom_tlb_sync(void *cookie)
 {
 	struct arm_smmu_domain *smmu_domain = cookie;
 
-	arm_smmu_rpm_get(smmu_domain->smmu);
-	__arm_smmu_flush_iotlb_all(&smmu_domain->domain, false);
-	arm_smmu_rpm_put(smmu_domain->smmu);
+	__arm_smmu_qcom_tlb_sync(&smmu_domain->domain);
 }
 
 static const struct qcom_iommu_pgtable_log_ops arm_smmu_pgtable_log_ops = {
@@ -2186,36 +2183,32 @@ static void arm_smmu_flush_iotlb_all(struct iommu_domain *domain)
 
 	if (smmu_domain->flush_ops) {
 		arm_smmu_rpm_get(smmu);
-		__arm_smmu_flush_iotlb_all(domain, true);
+		smmu_domain->flush_ops->tlb_flush_all(smmu_domain);
 		arm_smmu_rpm_put(smmu);
 	}
 }
 
-/*
- * Caller must call arm_smmu_rpm_get().
- */
-static void __arm_smmu_flush_iotlb_all(struct iommu_domain *domain, bool force)
+/* Caller must call arm_smmu_rpm_get() beforehand. */
+static void __arm_smmu_qcom_tlb_sync(struct iommu_domain *domain)
 {
 	struct arm_smmu_domain *smmu_domain = to_smmu_domain(domain);
+	struct arm_smmu_device *smmu = smmu_domain->smmu;
 	struct page *freelist, *page;
 	unsigned long flags;
 
 	spin_lock_irqsave(&smmu_domain->iotlb_gather_lock, flags);
-	/*
-	 * iommu_flush_iotlb_all currently has 2 users which do not set
-	 * deferred_flush through qcom_iommu_pgtable_ops->tlb_add_inv
-	 * 1) GPU - old implementation uses upstream io-pgtable-arm.c
-	 * 2) fastmap
-	 * once these users have gone away, force parameter can be removed.
-	 */
-	if (!force && !smmu_domain->deferred_flush) {
+	if (!smmu_domain->deferred_sync) {
 		spin_unlock_irqrestore(&smmu_domain->iotlb_gather_lock, flags);
 		return;
 	}
 
-	smmu_domain->flush_ops->tlb_flush_all(smmu_domain);
+	if (smmu->version == ARM_SMMU_V2 ||
+	    smmu_domain->stage == ARM_SMMU_DOMAIN_S1)
+		arm_smmu_tlb_inv_context_s1(smmu_domain);
+	else
+		arm_smmu_tlb_sync_global(smmu);
 
-	smmu_domain->deferred_flush = false;
+	smmu_domain->deferred_sync = false;
 
 	freelist = smmu_domain->freelist;
 	smmu_domain->freelist = NULL;
@@ -2237,7 +2230,9 @@ static void arm_smmu_iotlb_sync(struct iommu_domain *domain,
 	if (!smmu)
 		return;
 
-	arm_smmu_flush_iotlb_all(domain);
+	arm_smmu_rpm_get(smmu);
+	__arm_smmu_qcom_tlb_sync(domain);
+	arm_smmu_rpm_put(smmu);
 }
 
 static phys_addr_t __arm_smmu_iova_to_phys_hard(struct iommu_domain *domain,
@@ -2824,22 +2819,6 @@ static void arm_smmu_device_reset(struct arm_smmu_device *smmu)
 	reg = arm_smmu_gr0_read(smmu, ARM_SMMU_GR0_sGFSR);
 	arm_smmu_gr0_write(smmu, ARM_SMMU_GR0_sGFSR, reg);
 
-#if defined CONFIG_QTI_QUIN_GVM
-	/*
-	 * Reset stream mapping groups for unused sme's: Initial values mark all SMRn as
-	 * invalid and all S2CRn as bypass unless overridden.
-	 */
-	for (i = 0; i < smmu->num_mapping_groups; ++i)
-		if (!smmu->s2crs[i].pinned)
-			arm_smmu_write_sme(smmu, i);
-
-	/* Make sure only unpinned context banks are disabled and clear CB_FSR  */
-	for (i = 0; i < smmu->num_context_banks; ++i)
-		if (!smmu->s2crs[i].pinned) {
-			arm_smmu_write_context_bank(smmu, i);
-			arm_smmu_cb_write(smmu, i, ARM_SMMU_CB_FSR, ARM_SMMU_FSR_FAULT);
-		}
-#else
 	/*
 	 * Reset stream mapping groups: Initial values mark all SMRn as
 	 * invalid and all S2CRn as bypass unless overridden.
@@ -2852,7 +2831,6 @@ static void arm_smmu_device_reset(struct arm_smmu_device *smmu)
 		arm_smmu_write_context_bank(smmu, i);
 		arm_smmu_cb_write(smmu, i, ARM_SMMU_CB_FSR, ARM_SMMU_FSR_FAULT);
 	}
-#endif
 
 	/* Invalidate the TLB, just in case */
 	arm_smmu_gr0_write(smmu, ARM_SMMU_GR0_TLBIALLH, QCOM_DUMMY_VAL);
@@ -2998,9 +2976,7 @@ static int arm_smmu_handoff_cbs(struct arm_smmu_device *smmu)
 
 				smmu->s2crs[i].pinned = true;
 				bitmap_set(smmu->context_map, smmu->s2crs[i].cbndx, 1);
-
-				if (!(smmu->options & ARM_SMMU_OPT_MULTI_MATCH_HANDOFF_SMR))
-					handoff_smrs[index].valid = false;
+				handoff_smrs[index].valid = false;
 
 				break;
 
@@ -3689,7 +3665,7 @@ static int __maybe_unused arm_smmu_runtime_suspend(struct device *dev)
 	return 0;
 }
 
-static int __maybe_unused arm_smmu_pm_resume_common(struct device *dev)
+static int __maybe_unused arm_smmu_pm_resume(struct device *dev)
 {
 	int ret;
 	struct arm_smmu_device *smmu = dev_get_drvdata(dev);
@@ -3713,6 +3689,23 @@ static int __maybe_unused arm_smmu_pm_resume_common(struct device *dev)
 	 * runtime_resume to avoid latency.
 	 */
 	arm_smmu_device_reset(smmu);
+	return ret;
+}
+
+static int __maybe_unused arm_smmu_pm_suspend(struct device *dev)
+{
+	int ret = 0;
+	struct arm_smmu_device *smmu = dev_get_drvdata(dev);
+
+	if (pm_runtime_suspended(dev))
+		goto clk_unprepare;
+
+	ret = arm_smmu_runtime_suspend(dev);
+	if (ret)
+		return ret;
+
+clk_unprepare:
+	clk_bulk_unprepare(smmu->num_clks, smmu->clks);
 	return ret;
 }
 
@@ -3748,7 +3741,7 @@ static int __maybe_unused arm_smmu_pm_restore_early(struct device *dev)
 		smmu_domain->pgtbl_ops = pgtbl_ops;
 		arm_smmu_init_context_bank(smmu_domain, pgtbl_cfg);
 	}
-	arm_smmu_pm_resume_common(dev);
+	arm_smmu_pm_resume(dev);
 	ret = arm_smmu_runtime_suspend(dev);
 	if (ret) {
 		dev_err(dev, "Failed to suspend\n");
@@ -3794,34 +3787,6 @@ static int arm_smmu_pm_prepare(struct device *dev)
 		return 0;
 
 	return (atomic_read(&dev->power.usage_count) == 1) ? -EINPROGRESS : 0;
-}
-
-static int __maybe_unused arm_smmu_pm_suspend(struct device *dev)
-{
-	int ret = 0;
-	struct arm_smmu_device *smmu = dev_get_drvdata(dev);
-
-	if (pm_suspend_via_firmware())
-		arm_smmu_pm_freeze_late(dev);
-
-	if (pm_runtime_suspended(dev))
-		goto clk_unprepare;
-
-	ret = arm_smmu_runtime_suspend(dev);
-	if (ret)
-		return ret;
-
-clk_unprepare:
-	clk_bulk_unprepare(smmu->num_clks, smmu->clks);
-	return ret;
-}
-
-static int __maybe_unused arm_smmu_pm_resume(struct device *dev)
-{
-	if (pm_suspend_via_firmware())
-		return arm_smmu_pm_restore_early(dev);
-	else
-		return arm_smmu_pm_resume_common(dev);
 }
 
 static const struct dev_pm_ops arm_smmu_pm_ops = {

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2015, Sony Mobile Communications Inc.
- * Copyright (c) 2013, 2018-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013, The Linux Foundation. All rights reserved.
  */
 #include <linux/kthread.h>
 #include <linux/module.h>
@@ -20,9 +20,7 @@
 #include <uapi/linux/sched/types.h>
 
 #include "qrtr.h"
-#if IS_ENABLED(CONFIG_QRTR_BPF_FILTER)
-#include "bpf_service.h"
-#endif
+
 #define QRTR_LOG_PAGE_CNT 4
 #define QRTR_INFO(ctx, x, ...)				\
 	ipc_log_string(ctx, x, ##__VA_ARGS__)
@@ -262,16 +260,10 @@ static void qrtr_log_tx_msg(struct qrtr_node *node, struct qrtr_hdr_v1 *hdr,
 				  type, le32_to_cpu(pkt.client.node),
 				  le32_to_cpu(pkt.client.port));
 		else if (type == QRTR_TYPE_HELLO ||
-			 type == QRTR_TYPE_BYE) {
+			 type == QRTR_TYPE_BYE)
 			QRTR_INFO(node->ilc,
 				  "TX CTRL: cmd:0x%x node[0x%x]\n",
 				  type, hdr->src_node_id);
-			if (le32_to_cpu(hdr->dst_node_id) == 0 ||
-			    le32_to_cpu(hdr->dst_node_id) == 3)
-				pr_err("qrtr: Modem QMI Readiness TX cmd:0x%x node[0x%x]\n",
-				       type, hdr->src_node_id);
-		}
-
 		else if (type == QRTR_TYPE_DEL_PROC)
 			QRTR_INFO(node->ilc,
 				  "TX CTRL: cmd:0x%x node[0x%x]\n",
@@ -314,14 +306,10 @@ static void qrtr_log_rx_msg(struct qrtr_node *node, struct sk_buff *skb)
 				  cb->type, le32_to_cpu(pkt.client.node),
 				  le32_to_cpu(pkt.client.port));
 		else if (cb->type == QRTR_TYPE_HELLO ||
-			 cb->type == QRTR_TYPE_BYE) {
+			 cb->type == QRTR_TYPE_BYE)
 			QRTR_INFO(node->ilc,
 				  "RX CTRL: cmd:0x%x node[0x%x]\n",
 				  cb->type, cb->src_node);
-			if (cb->src_node == 0 || cb->src_node == 3)
-				pr_err("qrtr: Modem QMI Readiness RX cmd:0x%x node[0x%x]\n",
-				       cb->type, cb->src_node);
-		}
 	}
 }
 
@@ -1301,6 +1289,39 @@ static void qrtr_hello_work(struct kthread_work *work)
 	qrtr_port_put(ctrl);
 }
 
+#ifdef CONFIG_OPLUS_POWERINFO_STANDBY_DEBUG
+#include <linux/of.h>
+static char * qrtr_get_device_node_name(struct qrtr_endpoint *ep)
+{
+	char prefix_str[] = "qrtr_ws";
+	char middle_str[] = "_";
+	const char *node_name;
+	char *target_name = NULL;
+	int  str_len = 0;
+
+	if(ep->dev==NULL) {
+		pr_info("%s %d : ep->dev is null\n", __func__, __LINE__);
+		dump_stack();
+		return NULL;
+	}
+	if(ep->dev->of_node!=NULL) {
+		node_name = kbasename(ep->dev->of_node->full_name);
+	} else if(ep->dev->kobj.name!=NULL) {
+		node_name = ep->dev->kobj.name;
+	} else {
+		return NULL;
+	}
+	str_len = strlen(prefix_str) + strlen(middle_str)  + strlen(node_name);
+	target_name = (char *)kzalloc(str_len+1, GFP_KERNEL);
+	if(!target_name) {
+		pr_info("%s %d : kzalloc fail\n", __func__, __LINE__);
+		return NULL;
+	}
+	snprintf(target_name, str_len, "%s%s%s", prefix_str, middle_str, node_name);
+	return target_name;
+}
+#endif
+
 /**
  * qrtr_endpoint_register() - register a new endpoint
  * @ep: endpoint to register
@@ -1318,6 +1339,9 @@ int qrtr_endpoint_register(struct qrtr_endpoint *ep, unsigned int net_id,
 	size_t size;
 	struct qrtr_node *node;
 	struct sched_param param = {.sched_priority = 1};
+#ifdef CONFIG_OPLUS_POWERINFO_STANDBY_DEBUG
+	char *dev_name = NULL;
+#endif
 
 	if (!ep || !ep->xmit)
 		return -EINVAL;
@@ -1367,7 +1391,16 @@ int qrtr_endpoint_register(struct qrtr_endpoint *ep, unsigned int net_id,
 	up_write(&qrtr_epts_lock);
 	ep->node = node;
 
+#ifdef CONFIG_OPLUS_POWERINFO_STANDBY_DEBUG
+	dev_name = qrtr_get_device_node_name(ep);
+	if(!dev_name) {
+		dev_name = "qrtr_ws_unknown";
+	}
+	node->ws = wakeup_source_register(NULL, dev_name);
+	pr_info("%s %d : qrtr wakeup source name is %s\n", __func__, __LINE__, dev_name);
+#else
 	node->ws = wakeup_source_register(NULL, "qrtr_ws");
+#endif
 
 	kthread_queue_work(&node->kworker, &node->say_hello);
 	return 0;
@@ -1959,11 +1992,6 @@ static int qrtr_recvmsg(struct socket *sock, struct msghdr *msg,
 	struct qrtr_cb *cb;
 	int copied, rc;
 
-#if IS_ENABLED(CONFIG_QRTR_BPF_FILTER)
-	struct qrtr_sock *ipc = qrtr_sk(sock->sk);
-	struct qrtr_ctrl_pkt pkt = {0,};
-	u32 type;
-#endif
 
 	if (sock_flag(sk, SOCK_ZAPPED))
 		return -EADDRNOTAVAIL;
@@ -1987,41 +2015,6 @@ static int qrtr_recvmsg(struct socket *sock, struct msghdr *msg,
 		goto out;
 	rc = copied;
 
-#if IS_ENABLED(CONFIG_QRTR_BPF_FILTER)
-	if (ipc->us.sq_port == QRTR_PORT_CTRL) {
-		/**
-		 * Load control packet from skb here to know the packet type
-		 * information as packet type on "cb" will be invalid for
-		 * local service.
-		 */
-		skb_copy_bits(skb, 0, &pkt, sizeof(pkt));
-		type = le32_to_cpu(pkt.cmd);
-		/**
-		 * add/remove service information to/from service lookup table
-		 * if the control packet is delivering to QRTR_PORT_CTRL
-		 */
-		if (type == QRTR_TYPE_NEW_SERVER) {
-			/**
-			 * Populate port address on control packet from "cb"
-			 * only for local service because port id will be 0
-			 * while sending NEW_SERVER control packet from local
-			 * service.
-			 */
-			if (le32_to_cpu(pkt.server.node) == qrtr_local_nid)
-				pkt.server.port = cpu_to_le32(cb->src_port);
-			qrtr_service_add(&pkt);
-		} else if (type == QRTR_TYPE_DEL_SERVER) {
-			/* Remove this server from lookup table */
-			qrtr_service_remove(&pkt);
-		} else if (type == QRTR_TYPE_BYE) {
-			/**
-			 * Remove all servers under this node from lookup
-			 * table
-			 */
-			qrtr_service_node_remove(cb->src_node);
-		}
-	}
-#endif
 	if (addr) {
 		/* There is an anonymous 2-byte hole after sq_family,
 		 * make sure to clear it.

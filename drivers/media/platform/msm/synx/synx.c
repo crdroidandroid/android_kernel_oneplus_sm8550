@@ -57,9 +57,9 @@ void synx_external_callback(s32 sync_obj, int status, void *data)
 				goto put_cam_tbl_entry;
 		} else {
 			pr_info("[sess: %u] ext_id %d h_synx %d missing in tbl\n",
-				client->id, sync_obj, bind_data->h_synx);
-			goto fail;
-		}
+			client->id, sync_obj, bind_data->h_synx);
+		goto fail;
+	}
 	}
 
 	pr_debug("[sess: %u] external callback from %d on handle %d\n",

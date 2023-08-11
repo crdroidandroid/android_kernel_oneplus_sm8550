@@ -62,6 +62,10 @@
 #include "qcom_sg_ops.h"
 #include "qcom_system_heap.h"
 
+#ifdef CONFIG_OPLUS_FEATURE_MM_BOOSTPOOL
+#include "mm_boost_pool/oplus_boost_pool.h"
+#endif
+
 #if IS_ENABLED(CONFIG_QCOM_DMABUF_HEAPS_PAGE_POOL_REFILL)
 #define DYNAMIC_POOL_FILL_MARK (100 * SZ_1M)
 #define DYNAMIC_POOL_LOW_MARK_PERCENT 40UL
@@ -69,6 +73,9 @@
 
 #define DYNAMIC_POOL_REFILL_DEFER_WINDOW_MS 10
 #define DYNAMIC_POOL_KTHREAD_NICE_VAL 10
+
+atomic64_t qcom_system_heap_total = ATOMIC64_INIT(0);
+EXPORT_SYMBOL(qcom_system_heap_total);
 
 static int get_dynamic_pool_fillmark(struct dynamic_page_pool *pool)
 {
@@ -157,15 +164,6 @@ static bool __dynamic_pool_zone_watermark_ok(struct zone *z, unsigned int order,
 			continue;
 
 		for (mt = 0; mt < MIGRATE_PCPTYPES; mt++) {
-#ifdef CONFIG_CMA
-			/*
-			 * Note that this check is needed only
-			 * when MIGRATE_CMA < MIGRATE_PCPTYPES.
-			 */
-			if (mt == MIGRATE_CMA)
-				continue;
-#endif
-
 			if (!free_area_empty(area, mt))
 				return true;
 		}
@@ -379,7 +377,12 @@ static void system_heap_buf_free(struct deferred_freelist_item *item,
 				if (compound_order(page) == orders[j])
 					break;
 			}
-			dynamic_page_pool_free(sys_heap->pool_list[j], page);
+#ifdef CONFIG_OPLUS_FEATURE_MM_BOOSTPOOL
+			if (0 == dynamic_boost_pool_free(sys_heap->boost_pool, page, j))
+				continue;
+			else
+#endif
+				dynamic_page_pool_free(sys_heap->pool_list[j], page);
 		}
 	}
 	sg_free_table(table);
@@ -392,6 +395,11 @@ static void system_heap_free(struct qcom_sg_buffer *buffer)
 		      PAGE_ALIGN(buffer->len) / PAGE_SIZE);
 }
 
+inline bool is_system_heap_deferred_free(void (*free)(struct qcom_sg_buffer *buffer))
+{
+	return free == system_heap_free;
+}
+
 struct page *qcom_sys_heap_alloc_largest_available(struct dynamic_page_pool **pools,
 						   unsigned long size,
 						   unsigned int max_order)
@@ -400,19 +408,17 @@ struct page *qcom_sys_heap_alloc_largest_available(struct dynamic_page_pool **po
 	int i;
 
 	for (i = 0; i < NUM_ORDERS; i++) {
-		unsigned long flags;
-
 		if (size <  (PAGE_SIZE << orders[i]))
 			continue;
 		if (max_order < orders[i])
 			continue;
 
-		spin_lock_irqsave(&pools[i]->lock, flags);
+		mutex_lock(&pools[i]->mutex);
 		if (pools[i]->high_count)
 			page = dynamic_page_pool_remove(pools[i], true);
 		else if (pools[i]->low_count)
 			page = dynamic_page_pool_remove(pools[i], false);
-		spin_unlock_irqrestore(&pools[i]->lock, flags);
+		mutex_unlock(&pools[i]->mutex);
 
 		if (!page)
 			page = alloc_pages(pools[i]->gfp_mask, pools[i]->order);
@@ -459,6 +465,11 @@ static struct dma_buf *system_heap_allocate(struct dma_heap *heap,
 
 	INIT_LIST_HEAD(&pages);
 	i = 0;
+
+#ifdef CONFIG_OPLUS_FEATURE_MM_BOOSTPOOL
+	dynamic_boost_pool_alloc_pack(sys_heap->boost_pool, &size_remaining, &max_order, &pages, &i);
+#endif
+
 	while (size_remaining > 0) {
 		/*
 		 * Avoid trying to allocate memory if the process
@@ -519,6 +530,7 @@ static struct dma_buf *system_heap_allocate(struct dma_heap *heap,
 		goto vmperm_release;
 	}
 
+	atomic64_add(dmabuf->size, &qcom_system_heap_total);
 	return dmabuf;
 
 vmperm_release:
@@ -582,6 +594,10 @@ void qcom_system_heap_create(const char *name, const char *system_alias, bool un
 	ret = system_heap_create_refill_worker(sys_heap, name);
 	if (ret)
 		goto free_pools;
+
+#ifdef CONFIG_OPLUS_FEATURE_MM_BOOSTPOOL
+	sys_heap->boost_pool = dynamic_boost_pool_create_pack();
+#endif
 
 	heap = dma_heap_add(&exp_info);
 	if (IS_ERR(heap)) {
