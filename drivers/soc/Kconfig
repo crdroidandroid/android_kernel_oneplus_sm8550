@@ -24,4 +24,37 @@ source "drivers/soc/ux500/Kconfig"
 source "drivers/soc/versatile/Kconfig"
 source "drivers/soc/xilinx/Kconfig"
 
+config OPLUS_SYSTEM_KERNEL
+  bool "config oplus system feature "
+  default y
+  help
+	define this config to add oplus sytstem kernel feature
+
+#ifdef OPLUS_BUG_STABILITY
+source "drivers/soc/oplus/system/Kconfig"
+#endif /* OPLUS_BUG_STABILITY */
+
+#ifdef OPLUS_FEATURE_SENSOR_SMEM
+source "drivers/soc/oplus/sensor/Kconfig"
+#endif /* OPLUS_FEATURE_SENSOR_SMEM */
+
+#ifdef OPLUS_FEATURE_DFT
+source "drivers/soc/oplus/dft/Kconfig"
+#endif /* ifdef OPLUS_FEATURE_DFT */
+
+#ifdef OPLUS_FEATURE_DFR
+source "drivers/soc/oplus/dfr/Kconfig"
+#endif /* OPLUS_FEATURE_DFR */
+
+#ifdef OPLUS_FEATURE_BOOT
+source "drivers/soc/oplus/boot/Kconfig"
+#endif /* OPLUS_FEATURE_BOOT */
+
+#ifdef OPLUS_FEATURE_MDMFEATURE
+source "drivers/soc/oplus/mdmfeature/Kconfig"
+#endif /*OPLUS_FEATURE_MDMFEATURE*/
 endmenu
+
+#ifdef OPLUS_FEATURE_TP_BASIC
+source "drivers/soc/oplus/device_info/Kconfig"
+#endif /* OPLUS_FEATURE_TP_BASIC */
