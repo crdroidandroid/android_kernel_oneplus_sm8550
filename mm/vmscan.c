@@ -1960,14 +1960,14 @@ static __always_inline void update_lru_sizes(struct lruvec *lruvec,
  */
 static bool skip_cma(struct page *page, struct scan_control *sc)
 {
-       return !current_is_kswapd() &&
-                       gfp_migratetype(sc->gfp_mask) != MIGRATE_MOVABLE &&
-                       get_pageblock_migratetype(page) == MIGRATE_CMA;
+	return !current_is_kswapd() &&
+			gfp_migratetype(sc->gfp_mask) != MIGRATE_MOVABLE &&
+			get_pageblock_migratetype(page) == MIGRATE_CMA;
 }
 #else
 static bool skip_cma(struct page *page, struct scan_control *sc)
 {
-       return false;
+	return false;
 }
 #endif
 
@@ -4585,7 +4585,7 @@ static bool sort_page(struct lruvec *lruvec, struct page *page, struct scan_cont
 	}
 
 	/* ineligible */
-	if (zone > sc->reclaim_idx) {
+	if (zone > sc->reclaim_idx || skip_cma(page, sc)) {
 		gen = page_inc_gen(lruvec, page, false);
 		list_move_tail(&page->lru, &lrugen->lists[gen][type][zone]);
 		return true;
