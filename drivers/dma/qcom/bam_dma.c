@@ -90,6 +90,7 @@ static void __ftrace_dbg(struct device *dev, const char *fmt, ...)
 	ftrace_dbg(dev, fmt);		     \
 } while (0)
 #else
+#define DMA_IPC_LOGPAGES 0
 #define DMA_BAM_DBG(ctxt, dev, fmt...) do {  \
 	pr_debug(fmt);			     \
 	ftrace_dbg(dev, fmt);		     \
