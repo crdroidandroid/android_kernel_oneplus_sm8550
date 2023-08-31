@@ -4835,38 +4835,6 @@ void clear_view_touchdown_flag(unsigned int tp_index)
 }
 EXPORT_SYMBOL(clear_view_touchdown_flag);
 
-static oem_verified_boot_state oem_verifiedbootstate =
-	OEM_VERIFIED_BOOT_STATE_LOCKED;
-bool is_oem_unlocked(void)
-{
-	return (oem_verifiedbootstate == OEM_VERIFIED_BOOT_STATE_UNLOCKED);
-}
-EXPORT_SYMBOL(is_oem_unlocked);
-
-#ifndef CONFIG_REMOVE_OPLUS_FUNCTION
-#if IS_MODULE(CONFIG_TOUCHPANEL_OPLUS)
-extern char verified_bootstate[];
-#endif
-int get_oem_verified_boot_state(void)
-{
-#if IS_BUILTIN(CONFIG_TOUCHPANEL_OPLUS)
-    if (strstr(saved_command_line, "androidboot.verifiedbootstate=orange")) {
-        oem_verifiedbootstate = OEM_VERIFIED_BOOT_STATE_UNLOCKED;
-    } else {
-        oem_verifiedbootstate = OEM_VERIFIED_BOOT_STATE_LOCKED;
-    }
-#else
-    if (strstr(verified_bootstate, "orange")) {
-        oem_verifiedbootstate = OEM_VERIFIED_BOOT_STATE_UNLOCKED;
-    } else {
-        oem_verifiedbootstate = OEM_VERIFIED_BOOT_STATE_LOCKED;
-    }
-#endif
-    return 0;
-}
-EXPORT_SYMBOL(get_oem_verified_boot_state);
-#endif
-
 /*******Part4:Extern Function  Area********************************/
 static void lcd_trigger_load_tp_fw(struct work_struct *work)
 {
