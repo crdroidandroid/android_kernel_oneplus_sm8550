@@ -5534,9 +5534,7 @@ CONFIG_DEBUG_KINFO=y
 # CONFIG_ECPRI_DMA is not set
 CONFIG_IPA3=m
 # CONFIG_QPNP_REVID is not set
-CONFIG_EP_PCIE=m
-CONFIG_MSM_MHI_DEV=m
-CONFIG_MSM_MHI_NET_DEV=m
+# CONFIG_EP_PCIE is not set
 # end of Qualcomm technologies inc. MSM specific device drivers
 
 CONFIG_HAVE_CLK=y
