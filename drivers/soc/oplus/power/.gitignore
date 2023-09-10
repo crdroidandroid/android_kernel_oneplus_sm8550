@@ -1,9 +1,0 @@
-#
-# general files
-#
-tags
-*.sh
-
-# cscope files
-cscope.*
-ncscope.*

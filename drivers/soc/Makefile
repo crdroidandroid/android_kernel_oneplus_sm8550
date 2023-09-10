@@ -29,10 +29,6 @@ obj-y				+= ti/
 obj-$(CONFIG_ARCH_U8500)	+= ux500/
 obj-$(CONFIG_PLAT_VERSATILE)	+= versatile/
 obj-y				+= xilinx/
-#ifdef OPLUS_BUG_STABILITY
-obj-$(CONFIG_OPLUS_SYSTEM_KERNEL)	+= oplus/system/
-#endif /* OPLUS_BUG_STABILITY */
-
 #ifdef OPLUS_FEATURE_TP_BASIC
 obj-$(CONFIG_OPLUS_DEVICE_IFNO)  +=  oplus/device_info/
 #endif /* OPLUS_FEATURE_TP_BASIC */

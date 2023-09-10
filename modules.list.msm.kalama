@@ -27,7 +27,6 @@ crypto-qti-hwkm.ko
 dcc_v2.ko
 dcvs_fp.ko
 debug-regulator.ko
-device_info.ko
 dispcc-crow.ko
 dispcc-kalama.ko
 tcsrcc-kalama.ko
@@ -103,16 +102,5 @@ qcom_rimps.ko
 c1dcvs_vendor.ko
 c1dcvs_scmi.ko
 bcl_pmic5.ko
-oplusboot.ko
-oplus_ftm_mode.ko
-buildvariant.ko
-cdt_integrity.ko
-oplus_project.ko
-boot_mode.ko
-bootloader_log.ko
-oplus_phoenix.ko
-oplus_kmsg_wb.ko
-oplus_mdmfeature.ko
-qpnp-power-on.ko
 nvme-core.ko
 nvme.ko
