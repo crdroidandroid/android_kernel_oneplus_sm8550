@@ -30,10 +30,6 @@ config OPLUS_SYSTEM_KERNEL
   help
 	define this config to add oplus sytstem kernel feature
 
-#ifdef OPLUS_BUG_STABILITY
-source "drivers/soc/oplus/system/Kconfig"
-#endif /* OPLUS_BUG_STABILITY */
-
 #ifdef OPLUS_FEATURE_SENSOR_SMEM
 source "drivers/soc/oplus/sensor/Kconfig"
 #endif /* OPLUS_FEATURE_SENSOR_SMEM */
