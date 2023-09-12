@@ -34,16 +34,19 @@ config QPNP_QG
 
 config QPNP_SMB2
 	tristate "SMB2 Battery Charger"
-	depends on MFD_SPMI_PMIC
+	depends on MFD_SPMI_PMIC && IIO
 	help
 	  Say Y to enables support for the SMB2 charging peripheral.
 	  The QPNP SMB2 charger driver supports the charger peripheral
 	  present in the PMICOBALT chip.
-	  The power supply framework is used to communicate battery and
-	  usb properties to userspace and other driver consumers such
+	  The power supply and iio frameworks are used to communicate battery
+	  and usb properties to userspace and other driver consumers such
 	  as fuel gauge, USB, and USB-PD.
 	  VBUS and VCONN regulators are registered for supporting OTG,
 	  and powered Type-C cables respectively.
+
+	  To compile this driver as a module, choose M here: the module
+	  will be called qpnp-smb2-main.
 
 config QPNP_SMB5
 	tristate "SMB5 Battery Charger"
