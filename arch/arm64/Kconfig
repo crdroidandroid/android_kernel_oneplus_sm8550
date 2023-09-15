@@ -2137,6 +2137,26 @@ config DMI
 
 endmenu
 
+# Oplus configuration options
+menu "Oplus configuration options"
+
+config OPLUS_DEVICE_DTBS
+	depends on ARCH_QCOM
+	default n
+	bool "Oplus device DTBs"
+	help
+	  Only include Oplus device specific DTBs to limit the number that
+	  get built during kernel compilation.
+
+config SALAMI_DTB
+	select OPLUS_DEVICE_DTBS
+	default n
+	bool "Oplus salami device DTB"
+	help
+	  Only include Oplus salami device specific device tree.
+
+endmenu
+
 config SYSVIPC_COMPAT
 	def_bool y
 	depends on COMPAT && SYSVIPC
