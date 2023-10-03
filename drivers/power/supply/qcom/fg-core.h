@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Copyright (c) 2016-2021, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #ifndef __FG_CORE_H__
@@ -26,6 +27,7 @@
 #include <linux/types.h>
 #include <linux/uaccess.h>
 #include <linux/pmic-voter.h>
+#include "fg-iio.h"
 
 #define fg_dbg(fg, reason, fmt, ...)			\
 	do {							\
@@ -499,6 +501,101 @@ struct fg_dev {
 	ktime_t			last_delta_temp_time;
 };
 
+/* Other definitions */
+#define SLOPE_LIMIT_COEFF_MAX		31
+#define FG_SRAM_LEN			504
+#define PROFILE_LEN			224
+#define PROFILE_COMP_LEN		148
+#define KI_COEFF_MAX			62200
+#define KI_COEFF_SOC_LEVELS		3
+#define BATT_THERM_NUM_COEFFS		3
+
+/* DT parameters for FG device */
+struct fg_dt_props {
+	bool	force_load_profile;
+	bool	hold_soc_while_full;
+	bool	linearize_soc;
+	bool	auto_recharge_soc;
+	bool    use_esr_sw;
+	bool	disable_esr_pull_dn;
+	bool    disable_fg_twm;
+	int	cutoff_volt_mv;
+	int	empty_volt_mv;
+	int	vbatt_low_thr_mv;
+	int	chg_term_curr_ma;
+	int	chg_term_base_curr_ma;
+	int	sys_term_curr_ma;
+	int	cutoff_curr_ma;
+	int	delta_soc_thr;
+	int	recharge_soc_thr;
+	int	recharge_volt_thr_mv;
+	int	rsense_sel;
+	int	esr_timer_charging[NUM_ESR_TIMERS];
+	int	esr_timer_awake[NUM_ESR_TIMERS];
+	int	esr_timer_asleep[NUM_ESR_TIMERS];
+	int     esr_timer_shutdown[NUM_ESR_TIMERS];
+	int	rconn_mohms;
+	int	esr_clamp_mohms;
+	int	cl_start_soc;
+	int	cl_max_temp;
+	int	cl_min_temp;
+	int	cl_max_cap_inc;
+	int	cl_max_cap_dec;
+	int	cl_max_cap_limit;
+	int	cl_min_cap_limit;
+	int	jeita_hyst_temp;
+	int	batt_temp_delta;
+	int	esr_flt_switch_temp;
+	int	esr_tight_flt_upct;
+	int	esr_broad_flt_upct;
+	int	esr_tight_lt_flt_upct;
+	int	esr_broad_lt_flt_upct;
+	int	esr_flt_rt_switch_temp;
+	int	esr_tight_rt_flt_upct;
+	int	esr_broad_rt_flt_upct;
+	int	slope_limit_temp;
+	int	esr_pulse_thresh_ma;
+	int	esr_meas_curr_ma;
+	int     sync_sleep_threshold_ma;
+	int	bmd_en_delay_ms;
+	int	ki_coeff_full_soc_dischg;
+	int	ki_coeff_hi_chg;
+	int     jeita_thresholds[NUM_JEITA_LEVELS];
+	int     ki_coeff_soc[KI_COEFF_SOC_LEVELS];
+	int     ki_coeff_low_dischg[KI_COEFF_SOC_LEVELS];
+	int     ki_coeff_med_dischg[KI_COEFF_SOC_LEVELS];
+	int     ki_coeff_hi_dischg[KI_COEFF_SOC_LEVELS];
+	int     slope_limit_coeffs[SLOPE_LIMIT_NUM_COEFFS];
+	u8      batt_therm_coeffs[BATT_THERM_NUM_COEFFS];
+};
+
+struct fg_gen3_chip {
+	struct fg_dev		fg;
+	struct fg_dt_props	dt;
+	struct iio_channel	*batt_id_chan;
+	struct iio_channel	*die_temp_chan;
+	struct iio_dev		*indio_dev;
+	struct iio_chan_spec	*iio_chan;
+	struct iio_channel	*int_iio_chans;
+	struct iio_channel	**ext_iio_chans;
+	struct votable		*pl_disable_votable;
+	struct mutex		qnovo_esr_ctrl_lock;
+	struct fg_cyc_ctr_data	cyc_ctr;
+	struct fg_cap_learning	cl;
+	struct fg_ttf		ttf;
+	struct delayed_work	ttf_work;
+	struct delayed_work	pl_enable_work;
+	enum slope_limit_status	slope_limit_sts;
+	char			batt_profile[PROFILE_LEN];
+	int			esr_timer_charging_default[NUM_ESR_TIMERS];
+	int			ki_coeff_full_soc;
+	bool			ki_coeff_dischg_en;
+	bool			esr_fcc_ctrl_en;
+	bool			esr_flt_cold_temp_en;
+	bool			slope_limit_en;
+};
+
+
 /* Debugfs data structures are below */
 
 /* Log buffer */
@@ -527,6 +624,12 @@ struct fg_dbgfs {
 	u32				cnt;
 	u32				addr;
 };
+
+enum pmic_type {
+	PMI8998,
+	PM660,
+};
+
 
 extern int fg_decode_voltage_24b(struct fg_sram_param *sp,
 	enum fg_sram_param_id id, int val);
@@ -608,4 +711,15 @@ extern int fg_lerp(const struct fg_pt *pts, size_t tablesize, s32 input,
 void fg_stay_awake(struct fg_dev *fg, int awake_reason);
 void fg_relax(struct fg_dev *fg, int awake_reason);
 extern int fg_dma_mem_req(struct fg_dev *fg, bool request);
+
+/* IIO channel functions */
+bool is_chan_valid(struct fg_gen3_chip *chip,
+	enum fg_gen3_ext_iio_channels chan);
+int fg_gen3_read_iio_chan(struct fg_gen3_chip *chip,
+	enum fg_gen3_ext_iio_channels chan, int *val);
+int fg_gen3_write_iio_chan(struct fg_gen3_chip *chip,
+	enum fg_gen3_ext_iio_channels chan, int val);
+int fg_gen3_read_int_iio_chan(struct iio_channel *iio_chan_list, int chan_id,
+	int *val);
+
 #endif

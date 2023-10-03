@@ -35,11 +35,15 @@ config QPNP_QG
 config QPNP_FG_GEN3
 	tristate "QPNP GEN3 fuel gauge driver"
 	depends on MFD_SPMI_PMIC
+	depends on IIO
 	help
 	  Say Y here to enable the GEN3 Fuel Gauge driver. This adds support
 	  for battery fuel gauging and state of charge of battery connected to
 	  the fuel gauge. The state of charge is reported through a BMS power
 	  supply property and also sends uevents when the capacity is updated.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called qpnp-fg-gen3-main.
 
 config QPNP_SMB2
 	tristate "SMB2 Battery Charger"
