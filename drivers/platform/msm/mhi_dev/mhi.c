@@ -39,6 +39,8 @@
 /* Wait time before suspend/resume is complete */
 #define MHI_SUSPEND_MIN			100
 #define MHI_SUSPEND_TIMEOUT		600
+/* Wait time for completion */
+#define DMA_READ_TOUT_MS		3000
 /* Wait time on the device for Host to set BHI_INTVEC */
 #define MHI_BHI_INTVEC_MAX_CNT			200
 #define MHI_BHI_INTVEC_WAIT_MS		50
@@ -270,11 +272,18 @@ void mhi_dev_read_from_host_mhi_dma(struct mhi_dev *mhi, struct mhi_addr *transf
 			mhi->mhi_dma_fun_params,
 			mhi_dev_ring_cache_completion_cb,
 			&ring_req);
-	if (rc)
+	if (rc) {
 		mhi_log(mhi->vf_id, MHI_MSG_ERROR, "error while reading from host:%d\n",
 				rc);
+		WARN_ON(1);
+		return;
+	}
 
-	wait_for_completion(&done);
+	if (!wait_for_completion_timeout(&done, msecs_to_jiffies(DMA_READ_TOUT_MS))) {
+		mhi_log(mhi->vf_id, MHI_MSG_ERROR,
+		"Timeout - DMA is either stuck or taking longer to perform transfer.\n");
+		BUG_ON(1);
+	}
 }
 
 /**
