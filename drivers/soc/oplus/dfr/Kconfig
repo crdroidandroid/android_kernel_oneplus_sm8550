@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: GPL-2.0-only
+# Copyright (C) 2018-2022 Oplus. All rights reserved.
+
+#ifdef OPLUS_FEATURE_DUMP_REASON
+source "drivers/soc/oplus/dfr/qcom/dump_device_info/Kconfig"
+#endif /* OPLUS_FEATURE_DUMP_REASON */
+
+#ifdef OPLUS_FEATURE_DUMP_REASON
+source "drivers/soc/oplus/dfr/qcom/dump_reason/Kconfig"
+#endif /* OPLUS_FEATURE_DUMP_REASON */
+
+#ifdef OPLUS_FEATURE_THEIA
+source "drivers/soc/oplus/dfr/common/theia/Kconfig"
+#endif /* OPLUS_FEATURE_THEIA */
+
+#ifdef OPLUS_FEATURE_LAST_BOOT_REASON
+source "drivers/soc/oplus/dfr/common/last_boot_reason/Kconfig"
+#endif /*OPLUS_FEATURE_LAST_BOOT_REASON*/
