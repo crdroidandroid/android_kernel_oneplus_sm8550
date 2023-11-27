@@ -26,6 +26,8 @@
 #include <linux/android_kabi.h>
 #include <net/regulatory.h>
 
+#define CFG80211_EXTERNAL_AUTH_TA_SUPPORT 1
+
 /**
  * DOC: Introduction
  *
@@ -3849,6 +3851,11 @@ struct cfg80211_pmk_conf {
  *	authentication frames sent or received via cfg80211. The driver
  *	translates the MLD addresses to/from link addresses based on the link
  *	chosen for the authentication.
+ * @tx_addr: Transmit address to use for current external authentication
+ *	request. Only valid for the authentication request event. Driver must
+ *	indicate support for randomizing transmit address of authentication
+ *	frames with %NL80211_EXT_FEATURE_AUTH_TX_RANDOM_TA to fill non-zero
+ *	value in this parameter.
  */
 struct cfg80211_external_auth_params {
 	enum nl80211_external_auth_action action;
@@ -3858,6 +3865,7 @@ struct cfg80211_external_auth_params {
 	u16 status;
 	const u8 *pmkid;
 	u8 mld_addr[ETH_ALEN] __aligned(2);
+	u8 tx_addr[ETH_ALEN] __aligned(2);
 
 	ANDROID_BACKPORT_RESERVED(1);
 	ANDROID_BACKPORT_RESERVED(2);

@@ -1107,6 +1107,12 @@ static int qcom_slim_ngd_xfer_msg(struct slim_controller *sctrl,
 	}
 	ret = qcom_slim_ngd_tx_msg_post(ctrl, pbuf, txn->rl);
 	if (ret) {
+//#ifdef OPLUS_ARCH_EXTENDS
+		if (usr_msg) {
+			pr_err("%s: qcom_slim_ngd_tx_msg_post failed, ret = %d \n", __func__, ret);
+			txn->comp = NULL;
+		}
+//#endif /* OPLUS_ARCH_EXTENDS */
 		mutex_unlock(&ctrl->tx_lock);
 		return ret;
 	}
