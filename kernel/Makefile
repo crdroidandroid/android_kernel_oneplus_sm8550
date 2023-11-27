@@ -160,6 +160,10 @@ $(obj)/kheaders_data.tar.xz: FORCE
 
 clean-files := kheaders_data.tar.xz kheaders.md5
 
+#ifdef OPLUS_FEATURE_THERMAL_HORAE
+obj-$(CONFIG_HORAE_THERMAL_SHELL) += oplus_cpu/thermal/
+#endif /* OPLUS_FEATURE_THERMAL_HORAE */
+
 #
 # ANDROID: GKI: Generate headerfiles required for gki_module.o
 #

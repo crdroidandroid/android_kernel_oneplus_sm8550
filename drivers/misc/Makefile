@@ -66,3 +66,24 @@ obj-$(CONFIG_QPNP_MISC)		+= qpnp-misc.o
 obj-$(CONFIG_PROFILER)		+= profiler.o
 obj-$(CONFIG_QRC)		+= qrc/
 obj-$(CONFIG_HDMI_INPUT_MUX)	+= hdmi_input_mux.o
+
+obj-y	+= tri_state_key/
+
+#ifdef OPLUS_FEATURE_RF_CABLE_DETECT
+oplus_bsp_rfcablemonitor-y           := oplus_rf_cable_monitor.o
+obj-$(CONFIG_OPLUS_RF_CABLE_MONITOR)   += oplus_bsp_rfcablemonitor.o
+#endif /* OPLUS_FEATURE_RF_CABLE_DETECT */
+
+#ifdef OPLUS_FEATURE_SIM_DETECT
+obj-$(CONFIG_SIM_DETECT)	+= sim_detect.o
+#endif
+
+#ifdef OPLUS_FEATURE_SIM_DETECT
+obj-$(CONFIG_OEM_QMI)	+= oem_qmi_client.o
+#endif
+
+obj-$(CONFIG_OPLUS_GPIO) += oplus_gpio.o
+
+#ifdef OPLUS_FEATURE_CHG_BASIC
+obj-$(CONFIG_HAPTIC_FEEDBACK) += aw8697_haptic/
+#endif
