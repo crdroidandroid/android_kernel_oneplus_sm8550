@@ -203,6 +203,7 @@ enum usb_qmi_audio_format {
 
 #define NUM_LOG_PAGES		10
 
+#ifdef OPLUS_FEATURE_CHG_BASIC
 void uaudio_qmi_ctrl_msg_quirk(struct usb_device *dev, unsigned int pipe,
 			   __u8 request, __u8 requesttype, __u16 value,
 			   __u16 index, void *data, __u16 size)
@@ -225,7 +226,7 @@ int uaudio_qmi_ctrl_msg(struct usb_device *dev, unsigned int pipe, __u8 request,
 		    __u8 requesttype, __u16 value, __u16 index, void *data,
 		    __u16 size)
 {
-	int err;
+	int err = 0;
 	void *buf = NULL;
 	int timeout;
 
@@ -243,10 +244,14 @@ int uaudio_qmi_ctrl_msg(struct usb_device *dev, unsigned int pipe, __u8 request,
 	else
 		timeout = USB_CTRL_SET_TIMEOUT;
 
-	err = usb_control_msg(dev, pipe, request, requesttype,
-			      value, index, buf, size, timeout);
-
 	if (size > 0) {
+		err = usb_control_msg(dev, pipe, request, requesttype,
+		      value, index, buf, size, timeout);
+		if (err < 0) {
+			dev_err(&dev->dev, "usb_control_msg returned %d\n", err);
+			kfree(buf);
+			return err;
+		}
 		memcpy(data, buf, size);
 		kfree(buf);
 	}
@@ -330,6 +335,7 @@ static int uaudio_snd_usb_pcm_change_state(struct snd_usb_substream *subs, int s
 
 	return 0;
 }
+#endif
 
 static void uaudio_iommu_unmap(enum mem_type mtype, unsigned long va,
 	size_t iova_size, size_t mapped_iova_size);
@@ -767,6 +773,7 @@ static int prepare_qmi_response(struct snd_usb_substream *subs,
 	memcpy(&resp->std_as_opr_intf_desc, &alts->desc, sizeof(alts->desc));
 	resp->std_as_opr_intf_desc_valid = 1;
 
+#ifdef OPLUS_FEATURE_CHG_BASIC
 	if (subs->data_endpoint) {
 		ep = usb_pipe_endpoint(subs->dev, subs->data_endpoint->pipe);
 		if (!ep) {
@@ -787,6 +794,7 @@ static int prepare_qmi_response(struct snd_usb_substream *subs,
 		}
 		resp->xhci_mem_info.tr_data.pa = dma;
 	}
+#endif
 
 	if (subs->sync_endpoint) {
 		ep = usb_pipe_endpoint(subs->dev, subs->sync_endpoint->pipe);
@@ -1476,15 +1484,20 @@ static int enable_audio_stream(struct snd_usb_substream *subs,
 	_snd_pcm_hw_param_set(&params, SNDRV_PCM_HW_PARAM_RATE,
 			cur_rate, 0);
 
+#ifdef OPLUS_FEATURE_CHG_BASIC
 	if (!chip->intf[0])
 		return -ENODEV;
+#endif
 
 	pm_runtime_barrier(&chip->intf[0]->dev);
 	snd_usb_autoresume(chip);
 
+#ifdef OPLUS_FEATURE_CHG_BASIC
+	dev_err(&subs->dev->dev, "uaudio_snd_usb_pcm_change_state to UAC3_PD_STATE_D0\n");
 	ret = uaudio_snd_usb_pcm_change_state(subs, UAC3_PD_STATE_D0);
 	if (ret < 0)
 		return ret;
+#endif
 
 	fmt = find_format_and_si(&subs->fmt_list, pcm_format, cur_rate,
 			channels, datainterval, subs);
@@ -1539,7 +1552,11 @@ static int enable_audio_stream(struct snd_usb_substream *subs,
 				 BUS_INTERVAL_FULL_SPEED));
 	}
 
+#ifdef OPLUS_FEATURE_CHG_BASIC
 	return ret;
+#else
+	return 0;
+#endif
 }
 
 static void handle_uaudio_stream_req(struct qmi_handle *handle,
