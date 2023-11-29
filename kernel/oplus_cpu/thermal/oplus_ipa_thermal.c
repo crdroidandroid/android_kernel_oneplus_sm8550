@@ -27,7 +27,7 @@ struct oplus_ipa_sensor {
 
 static struct oplus_ipa_sensor ipa_temp_sensor;
 
-static inline int oplus_get_shell_temp()
+static inline int oplus_get_shell_temp(void)
 {
 	return get_current_shell_temp();
 }
