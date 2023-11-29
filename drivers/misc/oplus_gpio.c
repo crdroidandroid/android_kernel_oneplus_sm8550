@@ -151,7 +151,7 @@ struct oplus_gpio_info oplus_gpio_info_table[MAX_GPIOS] = {
 };
 static struct delayed_work recover_work;
 
-static int dual_sim_det_uim2_to_real_sim()
+static int dual_sim_det_uim2_to_real_sim(void)
 {
 	int esim_status = -1;
 
@@ -526,7 +526,7 @@ static const struct file_operations oplus_gpio_fops = {
 
 
 /*extern char *saved_command_line;*/
-static void init_esim_status()
+static void init_esim_status(void)
 {
 	if (strstr("saved_command_line_sandro", "esim.status=1")) {
 		oplus_gpio_info_table[GPIO_TYPE_ESIM].gpio_status = 1;
