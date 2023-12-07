@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2016-2017, 2020-2021, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #define pr_fmt(fmt) "RRADC: %s: " fmt, __func__
@@ -15,6 +16,8 @@
 #include <linux/delay.h>
 #include <linux/qpnp/qpnp-revid.h>
 #include <linux/power_supply.h>
+#include <dt-bindings/iio/qti_power_supply_iio.h>
+#include <linux/iio/consumer.h>
 
 #define FG_ADC_RR_EN_CTL			0x46
 #define FG_ADC_RR_SKIN_TEMP_LSB			0x50
@@ -230,11 +233,11 @@ struct rradc_chip {
 	int volt;
 	struct power_supply		*usb_trig;
 	struct power_supply		*batt_psy;
-	struct power_supply		*bms_psy;
 	struct notifier_block		nb;
 	bool				conv_cbk;
 	bool				rradc_fg_reset_wa;
 	struct work_struct	psy_notify_work;
+	struct iio_channel	**ext_iio_chans;
 };
 
 struct rradc_channels {
@@ -253,6 +256,16 @@ struct rradc_chan_prop {
 	uint32_t			channel_data;
 	int (*scale)(struct rradc_chip *chip, struct rradc_chan_prop *prop,
 					u16 adc_code, int *result);
+};
+
+/* External IIO Channels for rradc.c */
+enum rradc_ext_iio_channels {
+	RRADC_FG_GEN3_FG_RESET_CLOCK,
+};
+
+/* External IIO channels */
+static const char * const rradc_ext_iio_chan_name[] = {
+	[RRADC_FG_GEN3_FG_RESET_CLOCK] = "fg_reset_clock",
 };
 
 static int rradc_masked_write(struct rradc_chip *rr_adc, u16 offset, u8 mask,
@@ -690,15 +703,48 @@ static bool rradc_is_batt_psy_available(struct rradc_chip *chip)
 	return true;
 }
 
-static bool rradc_is_bms_psy_available(struct rradc_chip *chip)
+bool is_chan_valid(struct rradc_chip *chip,
+		enum rradc_ext_iio_channels chan)
 {
-	if (!chip->bms_psy)
-		chip->bms_psy = power_supply_get_by_name("bms");
+	int rc;
 
-	if (!chip->bms_psy)
+	if (IS_ERR(chip->ext_iio_chans[chan]))
 		return false;
 
+	if (!chip->ext_iio_chans[chan]) {
+		chip->ext_iio_chans[chan] = iio_channel_get(chip->dev,
+					rradc_ext_iio_chan_name[chan]);
+		if (IS_ERR(chip->ext_iio_chans[chan])) {
+			rc = PTR_ERR(chip->ext_iio_chans[chan]);
+			if (rc == -EPROBE_DEFER)
+				chip->ext_iio_chans[chan] = NULL;
+
+			pr_err("Failed to get IIO channel %s, rc=%d\n",
+				rradc_ext_iio_chan_name[chan], rc);
+			return false;
+		}
+	}
+
 	return true;
+}
+
+int rradc_write_iio_chan(struct rradc_chip *chip,
+	enum rradc_ext_iio_channels chan, int val)
+{
+	if (is_chan_valid(chip, chan))
+		return iio_write_channel_raw(chip->ext_iio_chans[chan],
+						val);
+
+	return -EINVAL;
+}
+
+static bool rradc_is_bms_psy_available(struct rradc_chip *chip)
+{
+	if (is_chan_valid(chip, RRADC_FG_GEN3_FG_RESET_CLOCK))
+		return true;
+
+	return false;
+
 }
 
 static int rradc_enable_continuous_mode(struct rradc_chip *chip)
@@ -810,14 +856,13 @@ static int rradc_check_status_ready_with_retry(struct rradc_chip *chip,
 	}
 
 	if ((retry_cnt >= FG_RR_CONV_MAX_RETRY_CNT) &&
-		((prop->channel != RR_ADC_DCIN_V) ||
+		((prop->channel != RR_ADC_DCIN_V) &&
 		(prop->channel != RR_ADC_DCIN_I)) &&
 		chip->rradc_fg_reset_wa) {
 		pr_err("rradc is hung, Proceed to recovery\n");
 		if (rradc_is_bms_psy_available(chip)) {
-			rc = power_supply_set_property(chip->bms_psy,
-					POWER_SUPPLY_PROP_FG_RESET_CLOCK,
-					&pval);
+			rc = rradc_write_iio_chan(chip,
+				RRADC_FG_GEN3_FG_RESET_CLOCK, pval.intval);
 			if (rc < 0) {
 				pr_err("Couldn't reset FG clock rc=%d\n", rc);
 				return rc;
@@ -1164,10 +1209,9 @@ static void psy_notify_work(struct work_struct *work)
 			if (rc == -ENODATA) {
 				pr_err("rradc is hung, Proceed to recovery\n");
 				if (rradc_is_bms_psy_available(chip)) {
-					rc = power_supply_set_property
-						(chip->bms_psy,
-						POWER_SUPPLY_PROP_FG_RESET_CLOCK,
-						&pval);
+					rc = rradc_write_iio_chan(chip,
+						RRADC_FG_GEN3_FG_RESET_CLOCK,
+						pval.intval);
 					if (rc < 0)
 						pr_err("Couldn't reset FG clock rc=%d\n",
 								rc);
