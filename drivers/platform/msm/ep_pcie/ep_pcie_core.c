@@ -3801,8 +3801,10 @@ static int ep_pcie_core_wakeup_host_internal(enum ep_pcie_event event)
 {
 	struct ep_pcie_dev_t *dev = &ep_pcie_dev;
 
-	if (atomic_read(&dev->host_wake_pending))
+	if (atomic_read(&dev->host_wake_pending)) {
+		EP_PCIE_DBG(dev, "PCIe V%d: Host wake is already pending, returning\n", dev->rev);
 		return 0;
+	}
 
 	if (!atomic_read(&dev->perst_deast)) {
 		if (event == EP_PCIE_EVENT_INVALID) {
@@ -3811,12 +3813,14 @@ static int ep_pcie_core_wakeup_host_internal(enum ep_pcie_event event)
 		}
 		/*D3 cold handling*/
 		ep_pcie_core_toggle_wake_gpio(true);
+		atomic_set(&dev->host_wake_pending, 1);
 	} else if (dev->l23_ready) {
 		EP_PCIE_DBG(dev,
 			"PCIe V%d: request to assert WAKE# when in D3hot\n",
 			dev->rev);
 		/*D3 hot handling*/
 		ep_pcie_core_issue_inband_pme();
+		atomic_set(&dev->host_wake_pending, 1);
 	} else {
 		/*D0 handling*/
 		EP_PCIE_DBG(dev,
@@ -3825,7 +3829,6 @@ static int ep_pcie_core_wakeup_host_internal(enum ep_pcie_event event)
 	}
 
 
-	atomic_set(&dev->host_wake_pending, 1);
 	EP_PCIE_DBG(dev,
 		"PCIe V%d: Set wake pending : %d and return ; perst is %s de-asserted; D3hot is %s set\n",
 		dev->rev, atomic_read(&dev->host_wake_pending),
