@@ -1743,24 +1743,22 @@ static void mhi_hwc_cb(void *priv, enum mhi_dma_event_type event,
 	u32 mhi_reset;
 	struct mhi_dev *mhi_ctx = (struct mhi_dev *)priv;
 
+	mutex_lock(&mhi_ctx->mhi_lock);
 	switch (event) {
 	case MHI_DMA_EVENT_READY:
-		mutex_lock(&mhi_ctx->mhi_lock);
 		mhi_log(mhi_ctx->vf_id, MHI_MSG_INFO,
 			"HW ch uC is ready event=0x%X\n", event);
 		rc = mhi_hwc_start(mhi_ctx);
 		if (rc) {
 			mhi_log(mhi_ctx->vf_id, MHI_MSG_ERROR,
 				"hwc_init start failed with %d\n", rc);
-			mutex_unlock(&mhi_ctx->mhi_lock);
-			return;
+			goto err;
 		}
 
 		rc = mhi_dev_mmio_get_mhi_state(mhi_ctx, &state, &mhi_reset);
 		if (rc) {
 			mhi_log(mhi_ctx->vf_id, MHI_MSG_ERROR, "get mhi state failed\n");
-			mutex_unlock(&mhi_ctx->mhi_lock);
-			return;
+			goto err;
 		}
 
 		if (state == MHI_DEV_M0_STATE && !mhi_reset) {
@@ -1773,12 +1771,11 @@ static void mhi_hwc_cb(void *priv, enum mhi_dma_event_type event,
 			enable_irq(mhi_ctx->mhi_irq);
 		}
 
-		mutex_unlock(&mhi_ctx->mhi_lock);
 		rc = mhi_enable_int(mhi_ctx);
 		if (rc) {
 			mhi_log(mhi_ctx->vf_id, MHI_MSG_ERROR,
 				"Error configuring interrupts, rc = %d\n", rc);
-			return;
+			goto err;
 		}
 
 		mhi_log(mhi_ctx->vf_id, MHI_MSG_INFO, "Device in M0 State\n");
@@ -1788,7 +1785,7 @@ static void mhi_hwc_cb(void *priv, enum mhi_dma_event_type event,
 		if (rc) {
 			mhi_log(mhi_ctx->vf_id, MHI_MSG_ERROR,
 				"Event HW_ACC_WAKEUP failed with %d\n", rc);
-			return;
+			goto err;
 		}
 		break;
 	default:
@@ -1796,6 +1793,10 @@ static void mhi_hwc_cb(void *priv, enum mhi_dma_event_type event,
 			"HW ch uC unknown event 0x%X\n", event);
 		break;
 	}
+err:
+	mutex_unlock(&mhi_ctx->mhi_lock);
+	return;
+
 }
 
 static int mhi_hwc_chcmd(struct mhi_dev *mhi, uint chid,
