@@ -24,35 +24,6 @@ struct kprobe_data {
 	int xi0;
 };
 
-#ifdef OPLUS_FEATURE_CHG_BASIC
-static int entry_usb_ep_set_maxpacket_limit(struct kretprobe_instance *ri,
-				   struct pt_regs *regs)
-{
-	struct usb_ep *ep = (struct usb_ep *)regs->regs[0];
-	unsigned maxpacket_limit = (unsigned)regs->regs[1];
-
-	struct kprobe_data *data = (struct kprobe_data *)ri->data;
-	data->ep = ep;
-	data->xi0 = (int)maxpacket_limit;
-
-	return 0;
-}
-
-static int exit_usb_ep_set_maxpacket_limit(struct kretprobe_instance *ri,
-				   struct pt_regs *regs)
-{
-	struct kprobe_data *data = (struct kprobe_data *)ri->data;
-
-	if (data->xi0 == 0)
-	{
-	data->ep->maxpacket_limit = 1024;
-	data->ep->maxpacket = 1024;
-	}
-
-	return 0;
-}
-#endif
-
 static unsigned long dwc3_pt_reg(struct pt_regs *regs, int reg)
 {
 #ifdef CONFIG_ARM64
