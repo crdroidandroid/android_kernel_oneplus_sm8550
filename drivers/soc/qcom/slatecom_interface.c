@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2017-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022-2023, Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2024, Qualcomm Innovation Center, Inc. All rights reserved.
  */
 #define pr_fmt(msg) "slatecom_dev:" msg
 
@@ -1269,6 +1269,7 @@ static int ssr_slate_cb(struct notifier_block *this,
 		break;
 	case QCOM_SSR_AFTER_POWERUP:
 		pr_debug("Slate after powerup\n");
+		twm_exit = false;
 		slatee.e_type = SLATE_AFTER_POWER_UP;
 		slatecom_set_spi_state(SLATECOM_SPI_FREE);
 		send_uevent(&slatee);
@@ -1382,7 +1383,6 @@ static int ssr_adsp_cb(struct notifier_block *this,
 bool is_twm_exit(void)
 {
 	if (twm_exit) {
-		twm_exit = false;
 		return true;
 	}
 	return false;
