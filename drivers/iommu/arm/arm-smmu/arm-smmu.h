@@ -543,6 +543,8 @@ struct arm_smmu_domain {
 	enum io_pgtable_fmt		pgtbl_fmt;
 	/* mapping_cfg.atomic indicates that runtime power management should be disabled. */
 	bool				rpm_always_on;
+	/* skip tlb management. */
+	bool skip_tlb_management;
 
 #ifdef CONFIG_ARM_SMMU_CONTEXT_FAULT_RETRY
 	u64				prev_fault_address;
