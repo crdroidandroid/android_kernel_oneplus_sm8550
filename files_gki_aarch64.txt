@@ -1784,7 +1784,6 @@ drivers/usb/typec/mux.c
 drivers/usb/typec/mux.h
 drivers/usb/typec/port-mapper.c
 drivers/usb/typec/tcpm/tcpci.c
-drivers/usb/typec/tcpm/tcpci.h
 drivers/usb/typec/tcpm/tcpm.c
 drivers/usb/typec/ucsi/psy.c
 drivers/usb/typec/ucsi/trace.c
@@ -2250,7 +2249,6 @@ include/asm-generic/bitops/non-atomic.h
 include/asm-generic/bitops/sched.h
 include/asm-generic/bitsperlong.h
 include/asm-generic/bug.h
-include/asm-generic/bugs.h
 include/asm-generic/cacheflush.h
 include/asm-generic/checksum.h
 include/asm-generic/compat.h
@@ -3579,6 +3577,7 @@ include/linux/usb/quirks.h
 include/linux/usb/r8152.h
 include/linux/usb/role.h
 include/linux/usb/storage.h
+include/linux/usb/tcpci.h
 include/linux/usb/tcpm.h
 include/linux/usb/typec_altmode.h
 include/linux/usb/typec_dp.h
