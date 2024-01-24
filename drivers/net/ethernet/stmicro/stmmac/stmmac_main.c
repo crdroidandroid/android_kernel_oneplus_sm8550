@@ -3995,7 +3995,7 @@ static void stmmac_fpe_stop_wq(struct stmmac_priv *priv)
 
 	if (priv->fpe_wq)
 		destroy_workqueue(priv->fpe_wq);
-
+	priv->fpe_wq = NULL;
 	netdev_info(priv->dev, "FPE workqueue stop");
 }
 
