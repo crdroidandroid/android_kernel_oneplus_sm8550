@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2023-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/platform_device.h>
@@ -85,10 +85,8 @@ int hgsl_sysfs_client_init(struct hgsl_priv *priv)
 			hgsl->clients_sysfs,
 			name);
 
-	if (unlikely(ret != 0)) {
-		kobject_put(&priv->sysfs_client);
+	if (unlikely(ret != 0))
 		pr_warn("Create sysfs proc node failed.\n");
-	}
 
 	return ret;
 }
