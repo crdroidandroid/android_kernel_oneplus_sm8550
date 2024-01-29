@@ -5,7 +5,7 @@
 
 ################################################################################
 ## Variant setup
-MSM_ARCH=kalamale_roboticsvm1
+MSM_ARCH=kalamale_roboticsvm
 VARIANTS=(defconfig debug_defconfig)
 [ -z "${VARIANT}" ] && VARIANT=debug_defconfig
 
