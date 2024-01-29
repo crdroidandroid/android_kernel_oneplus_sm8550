@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2016-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022-2023, Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2024, Qualcomm Innovation Center, Inc. All rights reserved.
  */
 #include "hab.h"
 #include "hab_grantable.h"
+#include "hab_trace_os.h"
 
 static int hab_rx_queue_empty(struct virtual_channel *vchan)
 {
@@ -234,6 +235,8 @@ static void hab_msg_queue(struct virtual_channel *vchan,
 	hab_spin_lock(&vchan->rx_lock, irqs_disabled);
 	list_add_tail(&message->node, &vchan->rx_list);
 	hab_spin_unlock(&vchan->rx_lock, irqs_disabled);
+
+	trace_hab_pchan_recv_wakeup(vchan->pchan);
 
 	wake_up(&vchan->rx_queue);
 }
