@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2019, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022, 2024 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  */
 
@@ -1527,6 +1527,10 @@ static const struct msm_pingroup bengal_groups[] = {
 	[120] = UFS_RESET(ufs_reset, 0x178000),
 };
 
+static const int bengal_reserved_gpios[] = {
+	0, 1, 2, 3, 14, 15, 16, 17, -1
+};
+
 static const struct msm_pinctrl_soc_data bengal_pinctrl = {
 	.pins = bengal_pins,
 	.npins = ARRAY_SIZE(bengal_pins),
@@ -1534,6 +1538,7 @@ static const struct msm_pinctrl_soc_data bengal_pinctrl = {
 	.nfunctions = ARRAY_SIZE(bengal_functions),
 	.groups = bengal_groups,
 	.ngroups = ARRAY_SIZE(bengal_groups),
+	.reserved_gpios = bengal_reserved_gpios,
 	.ngpios = 113,
 };
 
