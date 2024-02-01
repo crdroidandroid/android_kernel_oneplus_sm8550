@@ -926,9 +926,9 @@ static void mhi_dev_net_state_cb(struct mhi_dev_client_cb_data *cb_data)
 			mhi_client->out_chan);
 		return;
 	}
-	mhi_dev_net_log(mhi_client->vf_id, MHI_MSG_VERBOSE, "IN ch_id::%d, state :%d\n",
+	mhi_dev_net_log(mhi_client->vf_id, MHI_VERBOSE, "IN ch_id::%d, state :%d\n",
 			mhi_client->in_chan, info_in_ch);
-	mhi_dev_net_log(mhi_client->vf_id, MHI_MSG_VERBOSE, "OUT ch_id:%d, state :%d\n",
+	mhi_dev_net_log(mhi_client->vf_id, MHI_VERBOSE, "OUT ch_id:%d, state :%d\n",
 			mhi_client->out_chan, info_out_ch);
 	if (info_in_ch == MHI_STATE_CONNECTED &&
 		info_out_ch == MHI_STATE_CONNECTED) {
@@ -1156,14 +1156,14 @@ static int mhi_dev_net_probe(struct platform_device *pdev)
 					mhi_dev_net_log(MHI_PF_ID, MHI_INFO,
 							"mhi_net_ctxt.eth_iface_out_ch[%d]=%d\n", i,
 							mhi_net_ctxt.eth_iface_out_ch[i]);
-					mhi_dev_net_log(MHI_PF_ID, MHI_MSG_ERROR,
+					mhi_dev_net_log(MHI_PF_ID, MHI_ERROR,
 							"mhi_net_ctxt.eth_iface_out_ch[%d]=%d\n", i,
 							mhi_net_ctxt.eth_iface_out_ch[i]);
 					if (mhi_net_ctxt.eth_iface_out_ch[i]) {
 						mhi_dev_net_log(MHI_PF_ID, MHI_INFO,
 								"Channel %d uses ethernet interface\n",
 								mhi_net_ctxt.eth_iface_out_ch[i]);
-						mhi_dev_net_log(MHI_PF_ID, MHI_MSG_ERROR,
+						mhi_dev_net_log(MHI_PF_ID, MHI_ERROR,
 								"Channel %d uses ethernet interface\n",
 								mhi_net_ctxt.eth_iface_out_ch[i]);
 					}
