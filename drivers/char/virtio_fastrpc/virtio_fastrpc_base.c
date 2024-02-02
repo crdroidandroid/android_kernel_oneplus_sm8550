@@ -61,7 +61,7 @@
  * need to be matched with BE_MINOR_VER. And it will return to 0 when
  * FE_MAJOR_VER is increased.
  */
-#define FE_MINOR_VER 0x8
+#define FE_MINOR_VER 0x9
 #define FE_VERSION (FE_MAJOR_VER << 16 | FE_MINOR_VER)
 #define BE_MAJOR_VER(ver) (((ver) >> 16) & 0xffff)
 
@@ -723,16 +723,18 @@ static const struct file_operations fops = {
 static int recv_single(struct virt_msg_hdr *rsp, unsigned int len)
 {
 	struct vfastrpc_apps *me = &gfa;
-	struct virt_fastrpc_msg *msg;
+	struct virt_fastrpc_msg *msg = NULL;
+	unsigned long flags;
 
 	if (len != rsp->len) {
 		dev_err(me->dev, "msg %u len mismatch,expected %u but %d found\n",
 				rsp->cmd, rsp->len, len);
 		return -EINVAL;
 	}
-	spin_lock(&me->msglock);
+	spin_lock_irqsave(&me->msglock, flags);
+
 	msg = me->msgtable[rsp->msgid];
-	spin_unlock(&me->msglock);
+	spin_unlock_irqrestore(&me->msglock, flags);
 
 	if (!msg) {
 		dev_err(me->dev, "msg %u already free in table[%u]\n",
@@ -741,13 +743,13 @@ static int recv_single(struct virt_msg_hdr *rsp, unsigned int len)
 	}
 	msg->rxbuf = (void *)rsp;
 
+	if (msg->ctx)
+		trace_recv_single_end(msg->ctx);
+
 	if (msg->ctx && msg->ctx->asyncjob.isasyncjob)
 		vfastrpc_queue_completed_async_job(msg->ctx);
 	else
 		complete(&msg->work);
-
-	if (msg->ctx)
-		trace_recv_single_end(msg->ctx);
 
 	return 0;
 }
