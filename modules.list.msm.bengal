@@ -16,6 +16,7 @@ qcom_logbuf_vh.ko
 qcom_cpu_vendor_hooks.ko
 clk-smd-rpm.ko
 gcc-khaje.ko
+gcc-sm6115.ko
 qcom-cpufreq-hw.ko
 qcom_ipcc.ko
 qcom_ipc_logging.ko
