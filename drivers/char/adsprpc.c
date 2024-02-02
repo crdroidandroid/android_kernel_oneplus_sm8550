@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2012-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022-2023, Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2024, Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 /* Uncomment this block to log an error on every VERIFY failure */
@@ -5544,15 +5544,6 @@ static int fastrpc_session_alloc_locked(struct fastrpc_channel_ctx *chan,
 					chan->session[idx].smmu.pd_type == pd_type)) {
 				chan->session[idx].used = 1;
 				break;
-			}
-		}
-		if (idx >= chan->sesscount) {
-			for (idx = 0; idx < chan->sesscount; ++idx) {
-				if (!chan->session[idx].used &&
-					chan->session[idx].smmu.secure == secure) {
-					chan->session[idx].used = 1;
-					break;
-				}
 			}
 		}
 		if (idx >= chan->sesscount) {
