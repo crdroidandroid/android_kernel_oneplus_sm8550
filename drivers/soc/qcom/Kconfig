@@ -266,6 +266,16 @@ source "drivers/soc/qcom/hgsl/Kconfig"
 source "drivers/soc/qcom/hab/Kconfig"
 source "drivers/soc/qcom/memshare/Kconfig"
 
+config QCOM_SAIL_MAILBOX
+	tristate "Qualcomm Technologies, Inc. sail mailbox driver"
+	depends on MAILBOX
+	default n
+	help
+	  Qualcomm Technologies, Inc. safety island (SAIL) mailbox driver.
+	  The SAIL mailbox driver facilitates communication
+	  between APSS and Safety Island.
+	  If unsure, say 'N'.
+
 config QCOM_QFPROM_SYS
 	tristate "Qualcomm Technologies, Inc. QFPROM_SYS driver "
 	depends on QCOM_QFPROM
