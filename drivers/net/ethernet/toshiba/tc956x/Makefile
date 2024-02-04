@@ -7,9 +7,13 @@ subdir-ccflags-y += -m32
 endif
 
 subdir-ccflags-y += -DTC956X
+subdir-ccflags-y += -DFIRMWARE_NAME='"qps615_fw.bin"'
+subdir-ccflags-y += -DTC956X_ETH1
+subdir-ccflags-y += -DEEPROM_MAC_ADDR
 
 subdir-ccflags-y += -DTC956X_SRIOV_PF
 subdir-ccflags-y += -DCONFIG_TC956X_PLATFORM_SUPPORT
+subdir-ccflags-y += -DTC956X_PCIE_GEN3_SETTING
 
 obj-$(CONFIG_TC956X_PCIE_ETH) += tc956x_pcie_eth.o
 tc956x_pcie_eth-y := tc956xmac_main.o tc956xmac_ethtool.o tc956xmac_mdio.o \
