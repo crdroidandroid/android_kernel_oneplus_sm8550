@@ -19,13 +19,20 @@
 #include "clk-regmap-divider.h"
 #include "clk-regmap-mux.h"
 #include "clk-regmap-phy-mux.h"
-#include "gdsc.h"
 #include "reset.h"
+#include "vdd-level-bengal.h"
 
-enum {
-	DT_BI_TCXO,
-	DT_GCC_GPU_GPLL0_CLK_SRC,
-	DT_GCC_GPU_GPLL0_DIV_CLK_SRC,
+#define CX_GMU_CBCR_SLEEP_MASK          0xf
+#define CX_GMU_CBCR_SLEEP_SHIFT         4
+#define CX_GMU_CBCR_WAKE_MASK           0xf
+#define CX_GMU_CBCR_WAKE_SHIFT          8
+
+static DEFINE_VDD_REGULATORS(vdd_cx, VDD_NUM, 1, vdd_corner);
+static DEFINE_VDD_REGULATORS(vdd_mx, VDD_NUM, 1, vdd_corner);
+
+static struct clk_vdd_class *gpu_cc_sm6115_regulators[] = {
+	&vdd_cx,
+	&vdd_mx,
 };
 
 enum {
@@ -58,6 +65,7 @@ static const struct alpha_pll_config gpu_cc_pll0_config = {
 	.aux2_output_mask = BIT(2),
 	.config_ctl_val = 0x4001055b,
 	.test_ctl_hi1_val = 0x1,
+	.test_ctl_hi_mask = 0x1,
 };
 
 /* 1200MHz configuration */
@@ -71,10 +79,17 @@ static struct clk_alpha_pll gpu_cc_pll0 = {
 		.hw.init = &(struct clk_init_data){
 			.name = "gpu_cc_pll0",
 			.parent_data = &(const struct clk_parent_data){
-				.index = DT_BI_TCXO,
+				.fw_name = "bi_tcxo",
 			},
 			.num_parents = 1,
 			.ops = &clk_alpha_pll_ops,
+		},
+		.vdd_data = {
+			.vdd_class = &vdd_mx,
+			.num_rate_max = VDD_NUM,
+			.rate_max = (unsigned long[VDD_NUM]) {
+				[VDD_MIN] = 1000000000,
+				[VDD_NOMINAL] = 2000000000},
 		},
 	},
 };
@@ -114,6 +129,7 @@ static const struct alpha_pll_config gpu_cc_pll1_config = {
 	.aux_output_mask = BIT(1),
 	.config_ctl_val = 0x4001055b,
 	.test_ctl_hi1_val = 0x1,
+	.test_ctl_hi_mask = 0x1,
 };
 
 static struct clk_alpha_pll gpu_cc_pll1 = {
@@ -126,10 +142,17 @@ static struct clk_alpha_pll gpu_cc_pll1 = {
 		.hw.init = &(struct clk_init_data){
 			.name = "gpu_cc_pll1",
 			.parent_data = &(const struct clk_parent_data){
-				.index = DT_BI_TCXO,
+				.fw_name = "bi_tcxo",
 			},
 			.num_parents = 1,
 			.ops = &clk_alpha_pll_ops,
+		},
+		.vdd_data = {
+			.vdd_class = &vdd_mx,
+			.num_rate_max = VDD_NUM,
+			.rate_max = (unsigned long[VDD_NUM]) {
+				[VDD_MIN] = 1000000000,
+				[VDD_NOMINAL] = 2000000000},
 		},
 	},
 };
@@ -166,11 +189,11 @@ static const struct parent_map gpu_cc_parent_map_0[] = {
 };
 
 static const struct clk_parent_data gpu_cc_parent_data_0[] = {
-	{ .index = P_BI_TCXO },
+	{ .fw_name = "bi_tcxo" },
 	{ .hw = &gpu_cc_pll0.clkr.hw },
 	{ .hw = &gpu_cc_pll1.clkr.hw },
-	{ .index = DT_GCC_GPU_GPLL0_CLK_SRC },
-	{ .index = DT_GCC_GPU_GPLL0_DIV_CLK_SRC },
+	{ .fw_name = "gcc_gpu_gpll0_clk_src" },
+	{ .fw_name = "gcc_gpu_gpll0_div_clk_src" },
 };
 
 static const struct parent_map gpu_cc_parent_map_1[] = {
@@ -181,10 +204,10 @@ static const struct parent_map gpu_cc_parent_map_1[] = {
 };
 
 static const struct clk_parent_data gpu_cc_parent_data_1[] = {
-	{ .index = P_BI_TCXO },
+	{ .fw_name = "bi_tcxo" },
 	{ .hw = &gpu_cc_pll0_out_aux2.clkr.hw },
 	{ .hw = &gpu_cc_pll1_out_aux.clkr.hw },
-	{ .index = DT_GCC_GPU_GPLL0_CLK_SRC },
+	{ .fw_name = "gpll0_out_main" },
 };
 
 static const struct freq_tbl ftbl_gpu_cc_gmu_clk_src[] = {
@@ -198,12 +221,19 @@ static struct clk_rcg2 gpu_cc_gmu_clk_src = {
 	.hid_width = 5,
 	.parent_map = gpu_cc_parent_map_0,
 	.freq_tbl = ftbl_gpu_cc_gmu_clk_src,
+	.enable_safe_config = true,
 	.clkr.hw.init = &(struct clk_init_data){
 		.name = "gpu_cc_gmu_clk_src",
 		.parent_data = gpu_cc_parent_data_0,
 		.num_parents = ARRAY_SIZE(gpu_cc_parent_data_0),
 		.flags = CLK_SET_RATE_PARENT,
-		.ops = &clk_rcg2_shared_ops,
+		.ops = &clk_rcg2_ops,
+	},
+	.clkr.vdd_data = {
+		.vdd_class = &vdd_cx,
+		.num_rate_max = VDD_NUM,
+		.rate_max = (unsigned long[VDD_NUM]) {
+			[VDD_LOWER] = 200000000},
 	},
 };
 
@@ -231,6 +261,18 @@ static struct clk_rcg2 gpu_cc_gx_gfx3d_clk_src = {
 		.num_parents = ARRAY_SIZE(gpu_cc_parent_data_1),
 		.flags = CLK_SET_RATE_PARENT | CLK_OPS_PARENT_ENABLE,
 		.ops = &clk_rcg2_ops,
+	},
+	.clkr.vdd_data = {
+		.vdd_class = &vdd_cx,
+		.num_rate_max = VDD_NUM,
+		.rate_max = (unsigned long[VDD_NUM]) {
+			[VDD_LOWER] = 320000000,
+			[VDD_LOW] = 465000000,
+			[VDD_LOW_L1] = 600000000,
+			[VDD_NOMINAL] = 745000000,
+			[VDD_NOMINAL_L1] = 820000000,
+			[VDD_HIGH] = 900000000,
+			[VDD_HIGH_L1] = 980000000},
 	},
 };
 
@@ -331,6 +373,7 @@ static struct clk_branch gpu_cc_cxo_clk = {
 		.enable_mask = BIT(0),
 		.hw.init = &(struct clk_init_data){
 			.name = "gpu_cc_cxo_clk",
+			.flags = CLK_DONT_HOLD_STATE,
 			.ops = &clk_branch2_ops,
 		},
 	},
@@ -394,29 +437,6 @@ static struct clk_branch gpu_cc_hlos1_vote_gpu_smmu_clk = {
 	},
 };
 
-static struct gdsc gpu_cx_gdsc = {
-	.gdscr = 0x106c,
-	.gds_hw_ctrl = 0x1540,
-	.pd = {
-		.name = "gpu_cx_gdsc",
-	},
-	.pwrsts = PWRSTS_OFF_ON,
-	.flags = VOTABLE,
-};
-
-static struct gdsc gpu_gx_gdsc = {
-	.gdscr = 0x100c,
-	.clamp_io_ctrl = 0x1508,
-	.resets = (unsigned int []){ GPU_GX_BCR },
-	.reset_count = 1,
-	.pd = {
-		.name = "gpu_gx_gdsc",
-	},
-	.parent = &gpu_cx_gdsc.pd,
-	.pwrsts = PWRSTS_OFF_ON,
-	.flags = CLAMP_IO | SW_RESET | VOTABLE,
-};
-
 static struct clk_regmap *gpu_cc_sm6115_clocks[] = {
 	[GPU_CC_AHB_CLK] = &gpu_cc_ahb_clk.clkr,
 	[GPU_CC_CRC_AHB_CLK] = &gpu_cc_crc_ahb_clk.clkr,
@@ -441,11 +461,6 @@ static const struct qcom_reset_map gpu_cc_sm6115_resets[] = {
 	[GPU_GX_BCR] = { 0x1008 },
 };
 
-static struct gdsc *gpu_cc_sm6115_gdscs[] = {
-	[GPU_CX_GDSC] = &gpu_cx_gdsc,
-	[GPU_GX_GDSC] = &gpu_gx_gdsc,
-};
-
 static const struct regmap_config gpu_cc_sm6115_regmap_config = {
 	.reg_bits = 32,
 	.reg_stride = 4,
@@ -460,8 +475,8 @@ static const struct qcom_cc_desc gpu_cc_sm6115_desc = {
 	.num_clks = ARRAY_SIZE(gpu_cc_sm6115_clocks),
 	.resets = gpu_cc_sm6115_resets,
 	.num_resets = ARRAY_SIZE(gpu_cc_sm6115_resets),
-	.gdscs = gpu_cc_sm6115_gdscs,
-	.num_gdscs = ARRAY_SIZE(gpu_cc_sm6115_gdscs),
+	.clk_regulators = gpu_cc_sm6115_regulators,
+	.num_clk_regulators = ARRAY_SIZE(gpu_cc_sm6115_regulators),
 };
 
 static const struct of_device_id gpu_cc_sm6115_match_table[] = {
@@ -473,6 +488,8 @@ MODULE_DEVICE_TABLE(of, gpu_cc_sm6115_match_table);
 static int gpu_cc_sm6115_probe(struct platform_device *pdev)
 {
 	struct regmap *regmap;
+	unsigned int value, mask;
+	int ret;
 
 	regmap = qcom_cc_map(pdev, &gpu_cc_sm6115_desc);
 	if (IS_ERR(regmap))
@@ -481,14 +498,26 @@ static int gpu_cc_sm6115_probe(struct platform_device *pdev)
 	clk_alpha_pll_configure(&gpu_cc_pll0, regmap, &gpu_cc_pll0_config);
 	clk_alpha_pll_configure(&gpu_cc_pll1, regmap, &gpu_cc_pll1_config);
 
-	/* Set recommended WAKEUP/SLEEP settings for the gpu_cc_cx_gmu_clk */
-	qcom_branch_set_wakeup(regmap, gpu_cc_cx_gmu_clk, 0xf);
-	qcom_branch_set_sleep(regmap, gpu_cc_cx_gmu_clk, 0xf);
+	/* Recommended WAKEUP/SLEEP settings for the gpu_cc_cx_gmu_clk */
+	mask = CX_GMU_CBCR_WAKE_MASK << CX_GMU_CBCR_WAKE_SHIFT;
+	mask |= CX_GMU_CBCR_SLEEP_MASK << CX_GMU_CBCR_SLEEP_SHIFT;
+	value = 0xf << CX_GMU_CBCR_WAKE_SHIFT | 0xf << CX_GMU_CBCR_SLEEP_SHIFT;
+	regmap_update_bits(regmap, gpu_cc_cx_gmu_clk.clkr.enable_reg,
+								mask, value);
 
-	qcom_branch_set_force_mem_core(regmap, gpu_cc_gx_gfx3d_clk, true);
-	qcom_branch_set_force_periph_on(regmap, gpu_cc_gx_gfx3d_clk, true);
+	ret = qcom_cc_really_probe(pdev, &gpu_cc_sm6115_desc, regmap);
+	if (ret) {
+		dev_err(&pdev->dev, "Failed to register GPUCC clocks\n");
+		return ret;
+	}
 
-	return qcom_cc_really_probe(pdev, &gpu_cc_sm6115_desc, regmap);
+	dev_info(&pdev->dev, "Registered GPUCC clocks\n");
+	return ret;
+}
+
+static void gpu_cc_sm6115_sync_state(struct device *dev)
+{
+	qcom_cc_sync_state(dev, &gpu_cc_sm6115_desc);
 }
 
 static struct platform_driver gpu_cc_sm6115_driver = {
@@ -496,6 +525,7 @@ static struct platform_driver gpu_cc_sm6115_driver = {
 	.driver = {
 		.name = "sm6115-gpucc",
 		.of_match_table = gpu_cc_sm6115_match_table,
+		.sync_state = gpu_cc_sm6115_sync_state,
 	},
 };
 module_platform_driver(gpu_cc_sm6115_driver);
