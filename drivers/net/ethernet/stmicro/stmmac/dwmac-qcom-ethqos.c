@@ -3169,6 +3169,7 @@ static int qcom_ethqos_suspend(struct device *dev)
 	place_marker("M - Ethernet Suspend End");
 #endif
 	ETHQOSDBG(" ret = %d\n", ret);
+	ethqos->curr_serdes_speed = 0;
 	return ret;
 }
 
