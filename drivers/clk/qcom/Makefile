@@ -117,6 +117,7 @@ obj-$(CONFIG_SDX_GCC_BAAGHA) += gcc-sdxbaagha.o
 obj-$(CONFIG_SDX_GCC_PINN) += gcc-sdxpinn.o
 obj-$(CONFIG_SM_CAMCC_8150) += camcc-sm8150.o
 obj-$(CONFIG_SM_CAMCC_8250) += camcc-sm8250.o
+obj-$(CONFIG_SM_DEBUGCC_6115) += debugcc-sm6115.o
 obj-$(CONFIG_SM_DEBUGCC_8150) += debugcc-sm8150.o
 obj-$(CONFIG_SM_DEBUGCC_8250) += debugcc-sm8250.o
 obj-$(CONFIG_SM_DISPCC_6115) += dispcc-sm6115.o
