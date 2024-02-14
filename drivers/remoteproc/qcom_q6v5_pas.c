@@ -32,7 +32,9 @@
 #include <soc/qcom/secure_buffer.h>
 #include <trace/events/rproc_qcom.h>
 #include <soc/qcom/qcom_ramdump.h>
+#if IS_ENABLED(CONFIG_QCOM_DS_SKIP_Q6_STOP)
 #include <linux/remoteproc/qcom_rproc.h>
+#endif
 
 #include "qcom_common.h"
 #include "qcom_pil_info.h"
@@ -636,6 +638,7 @@ static int adsp_stop(struct rproc *rproc)
 	return ret;
 }
 
+#if IS_ENABLED(CONFIG_QCOM_DS_SKIP_Q6_STOP)
 static int adsp_shutdown(struct rproc *rproc)
 {
 	struct qcom_adsp *adsp = (struct qcom_adsp *)rproc->priv;
@@ -681,6 +684,7 @@ void adsp_set_ops_stop(struct rproc *rproc, bool suspend)
 		rproc->ops->stop = adsp_stop;
 }
 EXPORT_SYMBOL_GPL(adsp_set_ops_stop);
+#endif
 
 static int adsp_attach(struct rproc *rproc)
 {
