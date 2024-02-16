@@ -1419,6 +1419,7 @@ static const struct adsp_data qcs605_adsp_resource = {
 	.uses_elf64 = false,
 	.ssr_name = "lpass",
 	.sysmon_name = "adsp",
+	.qmp_name = "adsp",
 	.ssctl_id = 0x14,
 };
 
@@ -1564,6 +1565,7 @@ static const struct adsp_data qcs605_cdsp_resource = {
 	.uses_elf64 = false,
 	.ssr_name = "cdsp",
 	.sysmon_name = "cdsp",
+	.qmp_name = "cdsp",
 	.ssctl_id = 0x17,
 };
 
