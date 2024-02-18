@@ -1361,6 +1361,11 @@ static void arm_smmu_qcom_tlb_add_inv(void *cookie)
 	unsigned long flags;
 
 	spin_lock_irqsave(&smmu_domain->iotlb_gather_lock, flags);
+	if (smmu_domain->skip_tlb_management) {
+		smmu_domain->deferred_flush = false;
+		spin_unlock_irqrestore(&smmu_domain->iotlb_gather_lock, flags);
+		return;
+	}
 	smmu_domain->deferred_flush = true;
 	spin_unlock_irqrestore(&smmu_domain->iotlb_gather_lock, flags);
 }
@@ -1368,6 +1373,15 @@ static void arm_smmu_qcom_tlb_add_inv(void *cookie)
 static void arm_smmu_qcom_tlb_sync(void *cookie)
 {
 	struct arm_smmu_domain *smmu_domain = cookie;
+	unsigned long flags;
+
+	spin_lock_irqsave(&smmu_domain->iotlb_gather_lock, flags);
+	if (smmu_domain->skip_tlb_management) {
+		smmu_domain->deferred_flush = false;
+		spin_unlock_irqrestore(&smmu_domain->iotlb_gather_lock, flags);
+		return;
+	}
+	spin_unlock_irqrestore(&smmu_domain->iotlb_gather_lock, flags);
 
 	arm_smmu_rpm_get(smmu_domain->smmu);
 	__arm_smmu_flush_iotlb_all(&smmu_domain->domain, false);
@@ -2354,6 +2368,15 @@ static void arm_smmu_flush_iotlb_all(struct iommu_domain *domain)
 {
 	struct arm_smmu_domain *smmu_domain = to_smmu_domain(domain);
 	struct arm_smmu_device *smmu = smmu_domain->smmu;
+	unsigned long flags;
+
+	spin_lock_irqsave(&smmu_domain->iotlb_gather_lock, flags);
+	if (smmu_domain->skip_tlb_management) {
+		smmu_domain->deferred_flush = false;
+		spin_unlock_irqrestore(&smmu_domain->iotlb_gather_lock, flags);
+		return;
+	}
+	spin_unlock_irqrestore(&smmu_domain->iotlb_gather_lock, flags);
 
 	if (smmu_domain->flush_ops) {
 		arm_smmu_rpm_get(smmu);
@@ -2378,8 +2401,10 @@ static void __arm_smmu_flush_iotlb_all(struct iommu_domain *domain, bool force)
 	 * 1) GPU - old implementation uses upstream io-pgtable-arm.c
 	 * 2) fastmap
 	 * once these users have gone away, force parameter can be removed.
+	 *
+	 * Also return, If skip_tlb_management is set.
 	 */
-	if (!force && !smmu_domain->deferred_flush) {
+	if (smmu_domain->skip_tlb_management || (!force && !smmu_domain->deferred_flush)) {
 		spin_unlock_irqrestore(&smmu_domain->iotlb_gather_lock, flags);
 		return;
 	}
@@ -3073,6 +3098,17 @@ static int arm_smmu_get_mappings_configuration(struct iommu_domain *domain)
 	return ret;
 }
 
+static void  arm_smmu_skip_tlb_management(struct iommu_domain *domain,
+					bool skip)
+{
+	struct arm_smmu_domain *smmu_domain = to_smmu_domain(domain);
+	unsigned long flags;
+
+	spin_lock_irqsave(&smmu_domain->iotlb_gather_lock, flags);
+	smmu_domain->skip_tlb_management = skip;
+	spin_unlock_irqrestore(&smmu_domain->iotlb_gather_lock, flags);
+}
+
 static struct qcom_iommu_ops arm_smmu_ops = {
 	.iova_to_phys_hard		= arm_smmu_iova_to_phys_hard,
 	.sid_switch			= arm_smmu_sid_switch,
@@ -3083,6 +3119,7 @@ static struct qcom_iommu_ops arm_smmu_ops = {
 	.set_fault_model		= arm_smmu_set_fault_model,
 	.enable_s1_translation		= arm_smmu_enable_s1_translation,
 	.get_mappings_configuration	= arm_smmu_get_mappings_configuration,
+	.skip_tlb_management		= arm_smmu_skip_tlb_management,
 
 	.iommu_ops = {
 		.capable		= arm_smmu_capable,
@@ -3350,50 +3387,6 @@ static int arm_smmu_handoff_cbs(struct arm_smmu_device *smmu)
 	return 0;
 }
 #endif
-
-static int arm_smmu_parse_impl_def_registers(struct arm_smmu_device *smmu)
-{
-	struct device *dev = smmu->dev;
-	int i, ntuples, ret;
-	u32 *tuples;
-	struct arm_smmu_impl_def_reg *regs, *regit;
-
-	if (!of_find_property(dev->of_node, "attach-impl-defs", &ntuples))
-		return 0;
-
-	ntuples /= sizeof(u32);
-	if (ntuples % 2) {
-		dev_err(dev,
-			"Invalid number of attach-impl-defs registers: %d\n",
-			ntuples);
-		return -EINVAL;
-	}
-
-	regs = devm_kmalloc_array(dev, ntuples, sizeof(*regs), GFP_KERNEL);
-	if (!regs)
-		return -ENOMEM;
-
-	tuples = kmalloc_array(ntuples * 2, sizeof(*tuples), GFP_KERNEL);
-	if (!tuples)
-		return -ENOMEM;
-
-	ret = of_property_read_u32_array(dev->of_node, "attach-impl-defs",
-					tuples, ntuples);
-	if (ret)
-		goto out;
-
-	for (i = 0, regit = regs; i < ntuples; i += 2, ++regit) {
-		regit->offset = tuples[i];
-		regit->value = tuples[i + 1];
-	}
-
-	smmu->impl_def_attach_registers = regs;
-	smmu->num_impl_def_attach_registers = ntuples / 2;
-
-out:
-	kfree(tuples);
-	return ret;
-}
 
 static int arm_smmu_device_cfg_probe(struct arm_smmu_device *smmu)
 {
@@ -3909,10 +3902,6 @@ static int arm_smmu_device_probe(struct platform_device *pdev)
 		return err;
 	smmu->sec_id = msm_dev_to_device_id(dev);
 	err = arm_smmu_device_cfg_probe(smmu);
-	if (err)
-		goto out_power_off;
-
-	err = arm_smmu_parse_impl_def_registers(smmu);
 	if (err)
 		goto out_power_off;
 

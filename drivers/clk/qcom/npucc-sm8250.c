@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2018-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022-2023, Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2024, Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/clk-provider.h>
@@ -963,6 +963,9 @@ static const struct qcom_reset_map npu_cc_sm8250_resets[] = {
 	[NPU_CC_CAL_HM1_BCR] = { 0x181130 },
 	[NPU_CC_CORE_BCR] = { 0x181000 },
 	[NPU_CC_DSP_BCR] = { 0x181200 },
+	[NPU_CC_DPM_TEMP_CLK_ARES] = { 0x1810c4, 2 },
+	[NPU_CC_LLM_CURR_CLK_ARES] = { 0x1810d4, 2 },
+	[NPU_CC_LLM_TEMP_CLK_ARES] = { 0x1810c8, 2 },
 };
 
 static const struct regmap_config npu_cc_sm8250_regmap_config = {

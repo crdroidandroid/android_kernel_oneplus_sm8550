@@ -310,7 +310,6 @@ static int qcom_ipcc_setup_mbox(struct ipcc_protocol_data *proto_data,
 			of_node_put(curr_ph.np);
 			if (!ret && curr_ph.np == controller_dn) {
 				proto_data->num_chans++;
-				break;
 			}
 		}
 	}
