@@ -7187,8 +7187,11 @@ static int tc956xmac_open(struct net_device *dev)
 			   __func__);
 		goto init_error;
 	}
-
+#ifdef TC956X_PTP
 	ret = tc956xmac_hw_setup(dev, true);
+#else
+	ret = tc956xmac_hw_setup(dev, false);
+#endif
 	if (ret < 0) {
 		netdev_err(priv->dev, "%s: Hw setup failed\n", __func__);
 		/*goto init_error;*/
