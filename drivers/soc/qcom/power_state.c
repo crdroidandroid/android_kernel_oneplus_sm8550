@@ -124,7 +124,9 @@ static int subsys_suspend(struct subsystem_data *ss_data, struct rproc *rproc, u
 	case SUBSYS_DEEPSLEEP:
 	case SUBSYS_HIBERNATE:
 		ss_data->ignore_ssr = true;
+#if IS_ENABLED(CONFIG_QCOM_DS_SKIP_Q6_STOP)
 		adsp_set_ops_stop(rproc, true);
+#endif
 		rproc_shutdown(rproc);
 		ss_data->ignore_ssr = false;
 		break;
@@ -145,7 +147,9 @@ static int subsys_resume(struct subsystem_data *ss_data, struct rproc *rproc, u3
 	case SUBSYS_DEEPSLEEP:
 	case SUBSYS_HIBERNATE:
 		ss_data->ignore_ssr = true;
+#if IS_ENABLED(CONFIG_QCOM_DS_SKIP_Q6_STOP)
 		adsp_set_ops_stop(rproc, false);
+#endif
 		ret = rproc_boot(rproc);
 		ss_data->ignore_ssr = false;
 		break;
