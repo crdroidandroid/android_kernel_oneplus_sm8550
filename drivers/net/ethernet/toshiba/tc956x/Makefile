@@ -9,6 +9,7 @@ endif
 subdir-ccflags-y += -DTC956X
 
 subdir-ccflags-y += -DTC956X_SRIOV_PF
+subdir-ccflags-y += -DCONFIG_TC956X_PLATFORM_SUPPORT
 
 obj-$(CONFIG_TC956X_PCIE_ETH) += tc956x_pcie_eth.o
 tc956x_pcie_eth-y := tc956xmac_main.o tc956xmac_ethtool.o tc956xmac_mdio.o \
@@ -16,6 +17,7 @@ tc956x_pcie_eth-y := tc956xmac_main.o tc956xmac_ethtool.o tc956xmac_mdio.o \
 	      hwif.o  tc956xmac_tc.o dwxgmac2_core.o \
 	      dwxgmac2_descs.o dwxgmac2_dma.o tc956x_pci.o \
 	      tc956x_msigen.o \
-	      tc956x_pcie_logstat.o tc956x_pf_rsc_mng.o
+	      tc956x_pcie_logstat.o tc956x_pf_rsc_mng.o \
+	      tc956x_qcom.o
 
 subdir-ccflags-y += -DTC956X_AUTOMOTIVE_CONFIG

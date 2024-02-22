@@ -2828,6 +2828,7 @@ static int tc956xmac_pci_probe(struct pci_dev *pdev,
 			mac1_interface = ENABLE_SGMII_INTERFACE;
 		res.port_interface = mac1_interface;
 	}
+	tc956x_platform_port_interface_overlay(&pdev->dev, &res);
 
 	plat->port_interface = res.port_interface;
 
