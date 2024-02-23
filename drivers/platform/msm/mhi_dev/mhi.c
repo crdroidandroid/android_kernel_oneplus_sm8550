@@ -74,8 +74,8 @@
 #define MHI_DEV_CH_CLOSE_TIMEOUT_MAX	5100
 #define MHI_DEV_CH_CLOSE_TIMEOUT_COUNT	200
 
-#define IGNORE_CH_SIZE			2
-int ignore_ch_channel[IGNORE_CH_SIZE] = {2, 3};
+#define IGNORE_CH_SIZE			4
+int ignore_ch_channel[IGNORE_CH_SIZE] = {2, 3, 24, 25};
 
 uint32_t bhi_imgtxdb;
 enum mhi_msg_level mhi_msg_lvl = MHI_MSG_ERROR;
