@@ -8300,7 +8300,7 @@ static netdev_tx_t tc956xmac_xmit(struct sk_buff *skb, struct net_device *dev)
 		if (skb->data[19] & 0x01) {
 			struct timespec64 ts = ns_to_timespec64(skb->tstamp);
 			u32 Presentation_time, Traverse_time, app_launch_time;
-			u64 ns, lt;
+			u64 ns = 0, lt;
 #ifndef CONFIG_ARCH_DMA_ADDR_T_64BIT
 			u64 quotient;
 			u32 reminder;
@@ -9964,7 +9964,7 @@ static int tc956xmac_ioctl_set_est(struct tc956xmac_priv *priv, void __user *dat
 	struct tc956xmac_est *cfg = priv->plat->est;
 	struct tc956xmac_ioctl_est_cfg *est;
 	int ret = 0;
-	u64 system_time;
+	u64 system_time = 0;
 	u32 system_time_s;
 	u32 system_time_ns;
 #ifndef CONFIG_ARCH_DMA_ADDR_T_64BIT
@@ -10633,8 +10633,8 @@ static int tc956x_xgmac_get_fw_status(struct tc956xmac_priv *priv,
 static void tc956x_ptp_configuration(struct tc956xmac_priv *priv, u32 tcr_config)
 {
 	struct timespec64 now;
-	u32 control, sec_inc;
-	u64 temp;
+	u32 control, sec_inc = 0;
+	u64 temp = 0;
 
 	if (tcr_config == 0) {
 		control = PTP_TCR_TSENA | PTP_TCR_TSCTRLSSR
@@ -10654,8 +10654,8 @@ static void tc956x_ptp_configuration(struct tc956xmac_priv *priv, u32 tcr_config
 		priv->plat->has_xgmac,
 		&sec_inc);
 #endif
-
-	temp = div_u64(1000000000ULL, sec_inc);
+	if (sec_inc > 0)
+		temp = div_u64(1000000000ULL, sec_inc);
 
 	/*
 	 * calculate default added value: formula is :
@@ -10881,7 +10881,7 @@ static int tc956xmac_ptp_clk_config(struct tc956xmac_priv *priv, void __user *da
 	int ret = 0;
 	u32 value = 0;
 	__u64 temp = 0;
-	__u32 sec_inc;
+	__u32 sec_inc = 0;
 	struct timespec64 now;
 
 	DBGPR_FUNC(priv->device, "--> %s\n", __func__);
@@ -10909,7 +10909,8 @@ static int tc956xmac_ptp_clk_config(struct tc956xmac_priv *priv, void __user *da
 #endif
 
 	DBGPR_FUNC(priv->device, "sec_inc : %x , tc956x_pps_cfg->ptpclk_freq :%d\n", sec_inc, tc956x_pps_cfg->ptpclk_freq);
-	temp = div_u64(1000000000ULL, sec_inc);
+	if (sec_inc > 0)
+		temp = div_u64(1000000000ULL, sec_inc);
 	temp = (u64)(temp << 32);
 	priv->default_addend = div_u64(temp, TC956X_PTP_SYSCLOCK);
 
