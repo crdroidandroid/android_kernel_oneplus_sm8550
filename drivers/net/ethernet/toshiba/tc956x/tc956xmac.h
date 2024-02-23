@@ -1241,11 +1241,17 @@ int tc956x_platform_probe(struct tc956xmac_priv *priv, struct tc956xmac_resource
 int tc956x_platform_remove(struct tc956xmac_priv *priv);
 int tc956x_platform_suspend(struct tc956xmac_priv *priv);
 int tc956x_platform_resume(struct tc956xmac_priv *priv);
+int tc956x_platform_port_interface_overlay(struct device *dev, struct tc956xmac_resources *res);
 #else
 static inline int tc956x_platform_probe(struct tc956xmac_priv *priv, struct tc956xmac_resources *res) { return 0; }
 static inline int tc956x_platform_remove(struct tc956xmac_priv *priv) { return 0; }
 static inline int tc956x_platform_suspend(struct tc956xmac_priv *priv) { return 0; }
 static inline int tc956x_platform_resume(struct tc956xmac_priv *priv) { return 0; }
+static inline int tc956x_platform_port_interface_overlay(struct device *dev,
+							 struct tc956xmac_resources *res)
+{
+	return 0;
+}
 #endif
 
 int tc956x_GPIO_OutputConfigPin(struct tc956xmac_priv *priv, u32 gpio_pin, u8 out_value);

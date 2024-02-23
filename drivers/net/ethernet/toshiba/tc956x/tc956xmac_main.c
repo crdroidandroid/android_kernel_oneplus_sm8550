@@ -4300,7 +4300,8 @@ static int tc956xmac_init_phy(struct net_device *dev)
 	edata.advertised = 0;
 
 	if (priv->phylink) {
-		if (priv->plat->interface != PHY_INTERFACE_MODE_RGMII) {
+		if (priv->plat->interface != PHY_INTERFACE_MODE_RGMII &&
+		    priv->plat->interface != PHY_INTERFACE_MODE_RGMII_ID) {
 			netdev_info(priv->dev, "Ethtool EEE Setting\n");
 			phylink_ethtool_set_eee(priv->phylink, &edata);
 #ifdef TC956X_5_G_2_5_G_EEE_SUPPORT
