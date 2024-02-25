@@ -4300,7 +4300,8 @@ static int tc956xmac_init_phy(struct net_device *dev)
 	edata.advertised = 0;
 
 	if (priv->phylink) {
-		if (priv->plat->interface != PHY_INTERFACE_MODE_RGMII) {
+		if (priv->plat->interface != PHY_INTERFACE_MODE_RGMII &&
+		    priv->plat->interface != PHY_INTERFACE_MODE_RGMII_ID) {
 			netdev_info(priv->dev, "Ethtool EEE Setting\n");
 			phylink_ethtool_set_eee(priv->phylink, &edata);
 #ifdef TC956X_5_G_2_5_G_EEE_SUPPORT
@@ -7187,8 +7188,11 @@ static int tc956xmac_open(struct net_device *dev)
 			   __func__);
 		goto init_error;
 	}
-
+#ifdef TC956X_PTP
 	ret = tc956xmac_hw_setup(dev, true);
+#else
+	ret = tc956xmac_hw_setup(dev, false);
+#endif
 	if (ret < 0) {
 		netdev_err(priv->dev, "%s: Hw setup failed\n", __func__);
 		/*goto init_error;*/
@@ -8297,7 +8301,7 @@ static netdev_tx_t tc956xmac_xmit(struct sk_buff *skb, struct net_device *dev)
 		if (skb->data[19] & 0x01) {
 			struct timespec64 ts = ns_to_timespec64(skb->tstamp);
 			u32 Presentation_time, Traverse_time, app_launch_time;
-			u64 ns, lt;
+			u64 ns = 0, lt;
 #ifndef CONFIG_ARCH_DMA_ADDR_T_64BIT
 			u64 quotient;
 			u32 reminder;
@@ -9961,7 +9965,7 @@ static int tc956xmac_ioctl_set_est(struct tc956xmac_priv *priv, void __user *dat
 	struct tc956xmac_est *cfg = priv->plat->est;
 	struct tc956xmac_ioctl_est_cfg *est;
 	int ret = 0;
-	u64 system_time;
+	u64 system_time = 0;
 	u32 system_time_s;
 	u32 system_time_ns;
 #ifndef CONFIG_ARCH_DMA_ADDR_T_64BIT
@@ -10630,8 +10634,8 @@ static int tc956x_xgmac_get_fw_status(struct tc956xmac_priv *priv,
 static void tc956x_ptp_configuration(struct tc956xmac_priv *priv, u32 tcr_config)
 {
 	struct timespec64 now;
-	u32 control, sec_inc;
-	u64 temp;
+	u32 control, sec_inc = 0;
+	u64 temp = 0;
 
 	if (tcr_config == 0) {
 		control = PTP_TCR_TSENA | PTP_TCR_TSCTRLSSR
@@ -10651,8 +10655,8 @@ static void tc956x_ptp_configuration(struct tc956xmac_priv *priv, u32 tcr_config
 		priv->plat->has_xgmac,
 		&sec_inc);
 #endif
-
-	temp = div_u64(1000000000ULL, sec_inc);
+	if (sec_inc > 0)
+		temp = div_u64(1000000000ULL, sec_inc);
 
 	/*
 	 * calculate default added value: formula is :
@@ -10878,7 +10882,7 @@ static int tc956xmac_ptp_clk_config(struct tc956xmac_priv *priv, void __user *da
 	int ret = 0;
 	u32 value = 0;
 	__u64 temp = 0;
-	__u32 sec_inc;
+	__u32 sec_inc = 0;
 	struct timespec64 now;
 
 	DBGPR_FUNC(priv->device, "--> %s\n", __func__);
@@ -10906,7 +10910,8 @@ static int tc956xmac_ptp_clk_config(struct tc956xmac_priv *priv, void __user *da
 #endif
 
 	DBGPR_FUNC(priv->device, "sec_inc : %x , tc956x_pps_cfg->ptpclk_freq :%d\n", sec_inc, tc956x_pps_cfg->ptpclk_freq);
-	temp = div_u64(1000000000ULL, sec_inc);
+	if (sec_inc > 0)
+		temp = div_u64(1000000000ULL, sec_inc);
 	temp = (u64)(temp << 32);
 	priv->default_addend = div_u64(temp, TC956X_PTP_SYSCLOCK);
 

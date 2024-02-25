@@ -1078,7 +1078,7 @@ static int tc_setup_taprio(struct tc956xmac_priv *priv,
 	bool fpe = false;
 	int i, ret = 0;
 
-	u64 system_time;
+	u64 system_time = 0;
 	ktime_t current_time_ns;
 
 	u32 tx_channels_count = priv->plat->tx_queues_to_use;
