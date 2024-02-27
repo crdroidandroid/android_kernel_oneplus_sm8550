@@ -1112,7 +1112,8 @@ bail:
 }
 
 static int fastrpc_session_alloc_secure_memory(struct fastrpc_channel_ctx *chan, int secure,
-			int sharedcb, int pd_type, struct fastrpc_session_ctx **session);
+			int sharedcb, int pd_type, int proc_flags,
+			struct fastrpc_session_ctx **session);
 
 static inline bool fastrpc_get_persistent_map(size_t len, struct fastrpc_mmap **pers_map)
 {
@@ -1303,7 +1304,7 @@ static int fastrpc_mmap_create(struct fastrpc_file *fl, int fd, struct dma_buf *
 		if (map->secure) {
 			if (!fl->secsctx)
 				err = fastrpc_session_alloc_secure_memory(chan, 1, 0,
-							 fl->pd_type, &fl->secsctx);
+							 fl->pd_type, fl->proc_flags, &fl->secsctx);
 			if (err) {
 				ADSPRPC_ERR(
 					"fastrpc_session_alloc_secure_memory failed for fd %d ret %d\n",
@@ -5530,7 +5531,8 @@ int fastrpc_internal_mmap(struct fastrpc_file *fl,
 static void fastrpc_context_list_dtor(struct fastrpc_file *fl);
 
 static int fastrpc_session_alloc_locked(struct fastrpc_channel_ctx *chan,
-		int secure, int sharedcb, int pd_type, struct fastrpc_session_ctx **session)
+		int secure, int sharedcb, int pd_type, int proc_flags,
+		struct fastrpc_session_ctx **session)
 {
 	struct fastrpc_apps *me = &gfa;
 	uint64_t idx = 0;
@@ -5549,6 +5551,17 @@ static int fastrpc_session_alloc_locked(struct fastrpc_channel_ctx *chan,
 					chan->session[idx].smmu.pd_type == pd_type)) {
 				chan->session[idx].used = 1;
 				break;
+			}
+		}
+		if (idx >= chan->sesscount) {
+			for (idx = 0; idx < chan->sesscount; ++idx) {
+				if (!chan->session[idx].used &&
+					chan->session[idx].smmu.secure == secure &&
+					proc_flags != FASTRPC_INIT_CREATE &&
+					proc_flags != FASTRPC_INIT_NO_CREATE) {
+					chan->session[idx].used = 1;
+					break;
+				}
 			}
 		}
 		if (idx >= chan->sesscount) {
@@ -5733,7 +5746,8 @@ bail:
 }
 
 static int  fastrpc_session_alloc_secure_memory(struct fastrpc_channel_ctx *chan, int secure,
-			int sharedcb, int pd_type, struct fastrpc_session_ctx **session)
+			int sharedcb, int pd_type, int proc_flags,
+			struct fastrpc_session_ctx **session)
 {
 	int err = 0;
 	struct fastrpc_apps *me = &gfa;
@@ -5747,7 +5761,8 @@ static int  fastrpc_session_alloc_secure_memory(struct fastrpc_channel_ctx *chan
 
 	mutex_lock(&chan->smd_mutex);
 	if (!*session)
-		err = fastrpc_session_alloc_locked(chan, secure, sharedcb, pd_type, session);
+		err = fastrpc_session_alloc_locked(chan, secure, sharedcb, pd_type,
+				proc_flags, session);
 	mutex_unlock(&chan->smd_mutex);
 	if (err == -EUSERS) {
 		ADSPRPC_WARN(
@@ -6477,7 +6492,7 @@ int fastrpc_get_info(struct fastrpc_file *fl, uint32_t *info)
 		fl->ssrcount = fl->apps->channel[cid].ssrcount;
 		mutex_lock(&fl->apps->channel[cid].smd_mutex);
 		err = fastrpc_session_alloc_locked(&fl->apps->channel[cid],
-				0, fl->sharedcb, fl->pd_type, &fl->sctx);
+				0, fl->sharedcb, fl->pd_type, fl->proc_flags, &fl->sctx);
 		mutex_unlock(&fl->apps->channel[cid].smd_mutex);
 		if (err == -EUSERS) {
 			ADSPRPC_WARN(
