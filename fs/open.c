@@ -402,6 +402,9 @@ extern bool susfs_is_sus_su_hooks_enabled __read_mostly;
 extern bool __ksu_is_allow_uid(uid_t uid);
 extern int ksu_handle_faccessat(int *dfd, const char __user **filename_user, int *mode,
 			int *flags);
+#elif CONFIG_KSU
+extern int ksu_handle_faccessat(int *dfd, const char __user **filename_user, int *mode,
+			        int *flags);
 #endif
 
 static long do_faccessat(int dfd, const char __user *filename, int mode, int flags)
@@ -422,6 +425,8 @@ static long do_faccessat(int dfd, const char __user *filename, int mode, int fla
 		ksu_handle_faccessat(&dfd, &filename, &mode, NULL);
 	}
 orig_flow:
+#elif CONFIG_KSU
+	ksu_handle_faccessat(&dfd, &filename, &mode, NULL);
 #endif
 
 	if (mode & ~S_IRWXO)	/* where's F_OK, X_OK, W_OK, R_OK? */
