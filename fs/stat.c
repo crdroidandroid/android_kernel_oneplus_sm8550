@@ -222,6 +222,8 @@ int vfs_fstat(int fd, struct kstat *stat)
 extern bool susfs_is_sus_su_hooks_enabled __read_mostly;
 extern bool __ksu_is_allow_uid(uid_t uid);
 extern int ksu_handle_stat(int *dfd, const char __user **filename_user, int *flags);
+#elif CONFIG_KSU
+extern int ksu_handle_stat(int *dfd, const char __user **filename_user, int *flags);
 #endif
 
 static int vfs_statx(int dfd, const char __user *filename, int flags,
@@ -241,6 +243,8 @@ static int vfs_statx(int dfd, const char __user *filename, int flags,
 		ksu_handle_stat(&dfd, &filename, &flags);
 	}
 orig_flow:
+#elif CONFIG_KSU
+	ksu_handle_stat(&dfd, &filename, &statx_flags);
 #endif
 
 	if (flags & ~(AT_SYMLINK_NOFOLLOW | AT_NO_AUTOMOUNT | AT_EMPTY_PATH |
