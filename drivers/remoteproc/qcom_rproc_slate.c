@@ -106,6 +106,7 @@ struct pil_mdt {
  * @app_status: status of tz app loading
  * @is_ready: Is slate chip up
  * @err_ready: The error ready signal
+ * @shutdown_done: The shutdown done signal
  * @region_start: DMA handle for loading FW
  * @region_end: DMA address indicating end of DMA buffer
  * @region: CPU address for DMA buffer
@@ -144,6 +145,7 @@ struct qcom_slate {
 	int app_status;
 	bool is_ready;
 	struct completion err_ready;
+	struct completion shutdown_done;
 
 	phys_addr_t region_start;
 	phys_addr_t region_end;
@@ -333,8 +335,9 @@ static irqreturn_t slate_status_change(int irq, void *dev_id)
 			"SLATE got unexpected reset: irq state changed 1->0\n");
 			/* skip dump collection and return with shutdown completion signal */
 			if (is_slate_unload_only()) {
-				pr_err("Received shutdown_only request with value: %d\n", is_slate_unload_only());
-				complete(&drvdata->err_ready);
+				dev_info(drvdata->dev,
+					"Received shutdown_only request\n");
+				complete(&drvdata->shutdown_done);
 				return IRQ_HANDLED;
 			}
 		queue_work(drvdata->slate_queue, &drvdata->restart_work);
@@ -530,6 +533,30 @@ static int wait_for_err_ready(struct qcom_slate *slate_data)
 	return 0;
 }
 
+/**
+ * wait_for_shutdown_done() - Called in power_down to wait for shutdown done.
+ * Signal waiting function.
+ * @slate_data: SLATE RPROC private structure.
+ *
+ * Return: 0 on success. Error code on failure.
+ */
+static int wait_for_shutdown_done(struct qcom_slate *slate_data)
+{
+	int ret;
+
+	if ((!slate_data->status_irq))
+		return 0;
+
+	ret = wait_for_completion_timeout(&slate_data->shutdown_done,
+			msecs_to_jiffies(10000));
+	if (!ret) {
+		pr_err("[%s]: shutdown done timed out\n",
+			slate_data->firmware_name);
+		return -ETIMEDOUT;
+	}
+	return 0;
+}
+
 void send_reset_signal(struct qcom_slate *slate_data)
 {
 	struct tzapp_slate_req slate_tz_req;
@@ -707,7 +734,7 @@ static void slate_coredump(struct rproc *rproc)
 			 */
 			/* By this time if S2A is not pulled then wait for it to go LOW */
 			if (gpio_get_value(slate_data->gpios[0])) {
-				ret = wait_for_err_ready(slate_data);
+				ret = wait_for_shutdown_done(slate_data);
 				if (ret) {
 					dev_err(slate_data->dev,
 					"[%s:%d]: Timed out waiting for error ready: %s!\n",
@@ -1069,7 +1096,7 @@ static int slate_stop(struct rproc *rproc)
 
 	/* wait for slate shutdown completion in exclusive slate shutdown request */
 	if (is_slate_unload_only()) {
-		ret = wait_for_err_ready(slate_data);
+		ret = wait_for_shutdown_done(slate_data);
 		if (ret) {
 			dev_err(slate_data->dev,
 			"[%s:%d]: Timed out waiting for error ready: %s!\n",
@@ -1232,6 +1259,7 @@ static int rproc_slate_driver_probe(struct platform_device *pdev)
 		goto destroy_wq;
 
 	init_completion(&slate->err_ready);
+	init_completion(&slate->shutdown_done);
 	pr_debug("Slate probe is completed\n");
 	return 0;
 

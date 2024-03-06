@@ -1169,8 +1169,8 @@ int habhyp_commdev_alloc(void **commdev, int is_be, char *name, int vmid_remote,
 
 int habhyp_commdev_dealloc(void *commdev)
 {
-	struct virtio_pchan_link *link = commdev;
-	struct physical_channel *pchan = link->pchan;
+	struct physical_channel *pchan = commdev;
+	struct virtio_pchan_link *link = pchan->hyp_data;
 
 	pr_info("free commdev %s\n", pchan->name);
 	link->pchan = NULL;
