@@ -62,7 +62,7 @@ static int dwxgmac2_dma_reset(struct tc956xmac_priv *priv, void __iomem *ioaddr)
 	writel(value | XGMAC_SWR, ioaddr + XGMAC_DMA_MODE);
 
 	return readl_poll_timeout(ioaddr + XGMAC_DMA_MODE, value,
-				  !(value & XGMAC_SWR), 0, 100000);
+				  !(value & XGMAC_SWR), 1000, 10000000);
 }
 
 static void dwxgmac2_dma_init(struct tc956xmac_priv *priv, void __iomem *ioaddr,

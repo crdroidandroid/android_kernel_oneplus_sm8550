@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2015-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022-2023, Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2024, Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 /*
@@ -146,7 +146,7 @@ static const struct ep_pcie_irq_info_t ep_pcie_irq_info[EP_PCIE_MAX_IRQ] = {
 };
 
 static int ep_pcie_core_wakeup_host_internal(enum ep_pcie_event event);
-static void ep_pcie_config_inbound_iatu(struct ep_pcie_dev_t *dev, u32 vf_id);
+static void ep_pcie_config_inbound_iatu(struct ep_pcie_dev_t *dev, bool is_vf);
 
 /*
  * ep_pcie_clk_dump - Clock CBCR reg info will be dumped in Dmesg logs.
@@ -843,7 +843,7 @@ static void ep_pcie_sriov_init(struct ep_pcie_dev_t *dev)
 
 static void ep_pcie_core_init(struct ep_pcie_dev_t *dev, bool configured)
 {
-	uint32_t val = 0, i;
+	uint32_t val = 0;
 	struct resource *dbi = dev->res[EP_PCIE_RES_DM_CORE].resource;
 	struct resource *dbi_vf = dev->res[EP_PCIE_RES_DM_VF_CORE].resource;
 
@@ -1172,16 +1172,15 @@ static void ep_pcie_core_init(struct ep_pcie_dev_t *dev, bool configured)
 	 * BAR access prior to configuration of inbound IATU causing transaction
 	 * timeout on host side.
 	 */
-	if (dbi_vf) {
-		for (i = 1; i <= ep_pcie_dev.num_vfs; i++)
-			ep_pcie_config_inbound_iatu(dev, i);
-	}
+	if (dbi_vf)
+		ep_pcie_config_inbound_iatu(dev, !PCIE_PHYSICAL_DEVICE);
 }
 
-static void ep_pcie_config_inbound_iatu(struct ep_pcie_dev_t *dev, u32 vf_id)
+static void ep_pcie_config_inbound_iatu(struct ep_pcie_dev_t *dev, bool is_vf)
 {
 	struct resource *mmio = dev->res[EP_PCIE_RES_MMIO].resource;
-	u32 lower, limit, bar, size, vf_num = 0;
+	u32 lower, limit, vf_lower, bar, size, vf_num = 0, vf_id = 1;
+	u32 system_page_size = 1;
 
 	lower = mmio->start;
 	limit = mmio->end;
@@ -1194,77 +1193,82 @@ static void ep_pcie_config_inbound_iatu(struct ep_pcie_dev_t *dev, u32 vf_id)
 	 */
 	ep_pcie_write_reg(dev->iatu, PCIE20_IATU_I_CTRL2(0), BIT(31) | BIT(30) |  BIT(19));
 
-	if (vf_id == PCIE_PHYSICAL_DEVICE) {
+	if (!is_vf) {
 		bar = readl_relaxed(dev->dm_core + PCIE20_BAR0);
 		ep_pcie_write_reg(dev->parf, PCIE20_PARF_MHI_BASE_ADDR_LOWER, lower);
 		ep_pcie_write_reg(dev->parf, PCIE20_PARF_MHI_BASE_ADDR_UPPER, 0x0);
 
 		lower = readl_relaxed(dev->parf + PCIE20_PARF_MHI_BASE_ADDR_LOWER);
 	} else {
-		lower = (lower + (vf_id * size));
-		limit = lower + size;
-		vf_num = vf_id - 1;
-		bar = readl_relaxed(dev->dm_core + ep_pcie_dev.sriov_cap + PCIE20_SRIOV_BAR(0));
-		if (ep_pcie_dev.db_fwd_off_varied) {
-			ep_pcie_write_reg(dev->parf,
-				PCIE20_PARF_MHI_BASE_ADDR_VFn_LOWER(vf_num), lower);
-			ep_pcie_write_reg(dev->parf,
-				PCIE20_PARF_MHI_BASE_ADDR_VFn_UPPER(vf_num), 0);
+		/*
+		 * In case of different BAR size alighments (eg, in ARM 64K
+		 * BAR size was seen being used), hence Configure PARF_MHI_BASE_ADDR_LOWER_VF
+		 * register based on system page size to facilitate proper BAR access.
+		 */
+		system_page_size = readl_relaxed(dev->dm_core + ep_pcie_dev.sriov_cap +
+							PCIE20_SYSTEM_PAGE_SIZE_REG);
+		vf_lower = lower + size;
+		for (vf_id = 1; vf_id <= ep_pcie_dev.num_vfs; vf_id++) {
+			vf_num = vf_id - 1;
+			lower = (vf_lower + (system_page_size * size * vf_num));
+			limit = lower + size;
+			if (ep_pcie_dev.db_fwd_off_varied) {
+				ep_pcie_write_reg(dev->parf,
+					PCIE20_PARF_MHI_BASE_ADDR_VFn_LOWER(vf_num), lower);
+				ep_pcie_write_reg(dev->parf,
+					PCIE20_PARF_MHI_BASE_ADDR_VFn_UPPER(vf_num), 0);
 
-			lower = readl_relaxed(dev->parf +
-					PCIE20_PARF_MHI_BASE_ADDR_VFn_LOWER(vf_num));
-		} else {
-			ep_pcie_write_reg(dev->parf,
-				PCIE20_PARF_MHI_BASE_ADDR_V1_VFn_LOWER(vf_num), lower);
-			ep_pcie_write_reg(dev->parf,
-				PCIE20_PARF_MHI_BASE_ADDR_V1_VFn_UPPER(vf_num), 0);
+				lower = readl_relaxed(dev->parf +
+						PCIE20_PARF_MHI_BASE_ADDR_VFn_LOWER(vf_num));
+			} else {
+				ep_pcie_write_reg(dev->parf,
+					PCIE20_PARF_MHI_BASE_ADDR_V1_VFn_LOWER(vf_num), lower);
+				ep_pcie_write_reg(dev->parf,
+					PCIE20_PARF_MHI_BASE_ADDR_V1_VFn_UPPER(vf_num), 0);
 
-			lower = readl_relaxed(dev->parf +
-					PCIE20_PARF_MHI_BASE_ADDR_V1_VFn_LOWER(vf_num));
+				lower = readl_relaxed(dev->parf +
+						PCIE20_PARF_MHI_BASE_ADDR_V1_VFn_LOWER(vf_num));
+			}
+			EP_PCIE_DBG(dev, "MHI vf_id:%d lower:0x%x limit:0x%x\n",
+						vf_id, lower, limit);
 		}
+		bar = readl_relaxed(dev->dm_core + ep_pcie_dev.sriov_cap + PCIE20_SRIOV_BAR(0));
 	}
-	EP_PCIE_DBG(dev, "MHI PARF vf_id:%d addr:0x%x\n", vf_id, lower);
 
 	/* Bar address is between 4-31 bits, masking 0-3 bits */
 	bar &= ~(0xf);
 
 	EP_PCIE_DBG(dev,
-		"PCIe V%d: BAR is 0x%x; MMIO[0x%x-0x%x] vf_id:%d\n",
-		dev->rev, bar, lower, limit, vf_id);
+		"PCIe V%d: BAR for %s device is: 0x%x",
+		dev->rev, is_vf ? "virtual":"physical", bar);
 
 	if (dev->phy_rev >= 6) {
-		ep_pcie_write_reg(dev->iatu, PCIE20_IATU_I_CTRL1(vf_id), 0x0);
-		ep_pcie_write_reg(dev->iatu, PCIE20_IATU_I_LTAR(vf_id), lower);
-		ep_pcie_write_reg(dev->iatu, PCIE20_IATU_I_UTAR(vf_id), 0x0);
-		ep_pcie_write_reg(dev->iatu, PCIE20_IATU_I_LBAR(vf_id), bar + (size * vf_num));
-		ep_pcie_write_reg(dev->iatu, PCIE20_IATU_I_UBAR(vf_id), 0x0);
+		ep_pcie_write_reg(dev->iatu, PCIE20_IATU_I_CTRL1(is_vf), 0x0);
+		ep_pcie_write_reg(dev->iatu, PCIE20_IATU_I_LTAR(is_vf), vf_lower);
+		ep_pcie_write_reg(dev->iatu, PCIE20_IATU_I_UTAR(is_vf), 0x0);
 
 		/*
 		 * When set BIT(26) in CTRL2 register, Virtual Function BAR matching
 		 * is used which allows all VFs in a PF which match a BAR
 		 * to be matched with a single ATU region.
 		 */
-		if (vf_id) {
-			ep_pcie_write_reg(dev->iatu, PCIE20_IATU_I_CTRL2(vf_id),
+		if (is_vf) {
+			ep_pcie_write_reg(dev->iatu, PCIE20_IATU_I_CTRL2(is_vf),
 						BIT(31) | BIT(26));
 		} else {
-			ep_pcie_write_reg(dev->iatu, PCIE20_IATU_I_CTRL2(vf_id),
+			ep_pcie_write_reg(dev->iatu, PCIE20_IATU_I_CTRL2(is_vf),
 						BIT(31) | BIT(30) | BIT(19));
 		}
 		EP_PCIE_DBG(dev,
 			"PCIe V%d: Inbound iATU configuration\n", dev->rev);
 		EP_PCIE_DBG(dev, "PCIE20_IATU_I_CTRL1(0):0x%x\n",
-			readl_relaxed(dev->iatu + PCIE20_IATU_I_CTRL1(vf_id)));
+			readl_relaxed(dev->iatu + PCIE20_IATU_I_CTRL1(is_vf)));
 		EP_PCIE_DBG(dev, "PCIE20_IATU_I_LTAR(0):0x%x\n",
-			readl_relaxed(dev->iatu + PCIE20_IATU_I_LTAR(vf_id)));
+			readl_relaxed(dev->iatu + PCIE20_IATU_I_LTAR(is_vf)));
 		EP_PCIE_DBG(dev, "PCIE20_IATU_I_UTAR(0):0x%x\n",
-			readl_relaxed(dev->iatu + PCIE20_IATU_I_UTAR(vf_id)));
-		EP_PCIE_DBG(dev, "PCIE20_IATU_I_LBAR(0):0x%x\n",
-			readl_relaxed(dev->iatu + PCIE20_IATU_I_LBAR(vf_id)));
-		EP_PCIE_DBG(dev, "PCIE20_IATU_I_UBAR(0):0x%x\n",
-			readl_relaxed(dev->iatu + PCIE20_IATU_I_UBAR(vf_id)));
+			readl_relaxed(dev->iatu + PCIE20_IATU_I_UTAR(is_vf)));
 		EP_PCIE_DBG(dev, "PCIE20_IATU_I_CTRL2(0):0x%x\n",
-			readl_relaxed(dev->iatu + PCIE20_IATU_I_CTRL2(vf_id)));
+			readl_relaxed(dev->iatu + PCIE20_IATU_I_CTRL2(is_vf)));
 		return;
 	}
 
@@ -2369,7 +2373,7 @@ checkbme:
 	ret = qcom_ep_pcie_icc_bw_update(dev, link_speed, link_width);
 	if (ret) {
 		EP_PCIE_ERR(dev, "PCIe V%d: fail to set bus bandwidth:%d\n", dev->rev, ret);
-		return ret;
+		goto out;
 	}
 
 	/* Clear PERST_RAW_RESET_STATUS when linking up */
@@ -3582,19 +3586,20 @@ int ep_pcie_core_get_msi_config(struct ep_pcie_msi_config *cfg, u32 vf_id)
 		ep_pcie_dev.rev, lower, upper, data, vf_id);
 
 	if (ctrl_reg & BIT(16)) {
-
-		if (ep_pcie_dev.active_config)
-			ep_pcie_config_outbound_iatu_entry(&ep_pcie_dev,
-					EP_PCIE_OATU_INDEX_MSI,
-					vf_id,
-					msi->start + (n * 0x8), EP_PCIE_OATU_UPPER,
-					msi->end, lower, upper);
-		else
-			ep_pcie_config_outbound_iatu_entry(&ep_pcie_dev,
-					EP_PCIE_OATU_INDEX_MSI,
-					vf_id,
-					msi->start + (n * 0x8), 0, msi->end,
-					lower, upper);
+		if (ep_pcie_dev.use_iatu_msi) {
+			if (ep_pcie_dev.active_config)
+				ep_pcie_config_outbound_iatu_entry(&ep_pcie_dev,
+						EP_PCIE_OATU_INDEX_MSI,
+						vf_id,
+						msi->start + (n * 0x8), EP_PCIE_OATU_UPPER,
+						msi->end, lower, upper);
+			else
+				ep_pcie_config_outbound_iatu_entry(&ep_pcie_dev,
+						EP_PCIE_OATU_INDEX_MSI,
+						vf_id,
+						msi->start + (n * 0x8), 0, msi->end,
+						lower, upper);
+		}
 
 		if (ep_pcie_dev.active_config || ep_pcie_dev.pcie_edma ||
 			ep_pcie_dev.no_path_from_ipa_to_pcie) {
@@ -3801,6 +3806,11 @@ static int ep_pcie_core_wakeup_host_internal(enum ep_pcie_event event)
 {
 	struct ep_pcie_dev_t *dev = &ep_pcie_dev;
 
+	if (atomic_read(&dev->host_wake_pending)) {
+		EP_PCIE_DBG(dev, "PCIe V%d: Host wake is already pending, returning\n", dev->rev);
+		return 0;
+	}
+
 	if (!atomic_read(&dev->perst_deast)) {
 		if (event == EP_PCIE_EVENT_INVALID) {
 			EP_PCIE_DBG(dev, "PCIe V%d: Wake from DMA Call Back\n", dev->rev);
@@ -3808,12 +3818,14 @@ static int ep_pcie_core_wakeup_host_internal(enum ep_pcie_event event)
 		}
 		/*D3 cold handling*/
 		ep_pcie_core_toggle_wake_gpio(true);
+		atomic_set(&dev->host_wake_pending, 1);
 	} else if (dev->l23_ready) {
 		EP_PCIE_DBG(dev,
 			"PCIe V%d: request to assert WAKE# when in D3hot\n",
 			dev->rev);
 		/*D3 hot handling*/
 		ep_pcie_core_issue_inband_pme();
+		atomic_set(&dev->host_wake_pending, 1);
 	} else {
 		/*D0 handling*/
 		EP_PCIE_DBG(dev,
@@ -3822,7 +3834,6 @@ static int ep_pcie_core_wakeup_host_internal(enum ep_pcie_event event)
 	}
 
 
-	atomic_set(&dev->host_wake_pending, 1);
 	EP_PCIE_DBG(dev,
 		"PCIe V%d: Set wake pending : %d and return ; perst is %s de-asserted; D3hot is %s set\n",
 		dev->rev, atomic_read(&dev->host_wake_pending),

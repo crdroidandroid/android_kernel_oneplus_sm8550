@@ -1133,7 +1133,7 @@ static int tc956xmac_xgmac3_default_data(struct pci_dev *pdev,
 		plat->max_speed = 10000;
 	}
 	if (plat->port_interface == ENABLE_RGMII_INTERFACE) {
-		plat->interface = PHY_INTERFACE_MODE_RGMII;
+		plat->interface = PHY_INTERFACE_MODE_RGMII_ID;
 		plat->max_speed = 1000;
 	}
 	if ((plat->port_interface == ENABLE_SGMII_INTERFACE) ||
@@ -2828,6 +2828,7 @@ static int tc956xmac_pci_probe(struct pci_dev *pdev,
 			mac1_interface = ENABLE_SGMII_INTERFACE;
 		res.port_interface = mac1_interface;
 	}
+	tc956x_platform_port_interface_overlay(&pdev->dev, &res);
 
 	plat->port_interface = res.port_interface;
 

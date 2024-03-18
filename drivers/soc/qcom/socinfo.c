@@ -110,6 +110,10 @@ static const char *const pmic_models[] = {
 	[32] = "PM8150B",
 	[33] = "PMK8002",
 	[36] = "PM8009",
+	/* Lemansau Main Domain */
+	[78] = "PM8775",
+	/* Lemansau SAIL Domain */
+	[79] = "PM8775",
 };
 #endif /* CONFIG_DEBUG_FS */
 

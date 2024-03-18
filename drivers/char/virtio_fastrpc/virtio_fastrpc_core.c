@@ -381,6 +381,7 @@ static void context_free(struct vfastrpc_invoke_ctx *ctx)
 			trace_fastrpc_rxbuf_send_end(ctx);
 		}
 
+		ctx->msg->ctx = NULL;
 		virt_free_msg(vfl, ctx->msg);
 		ctx->msg = NULL;
 	}

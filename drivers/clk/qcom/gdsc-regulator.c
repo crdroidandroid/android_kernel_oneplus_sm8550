@@ -68,6 +68,13 @@ struct collapse_vote {
 	u32		vote_bit;
 };
 
+struct clk_ctrl {
+	struct regmap	*regmap;
+	unsigned int	offset;
+	unsigned int	bit;
+	bool		en_inverted;
+};
+
 struct gdsc {
 	struct regulator_dev	*rdev;
 	struct regulator_desc	rdesc;
@@ -76,6 +83,7 @@ struct gdsc {
 	struct regmap           *domain_addr;
 	struct regmap           *hw_ctrl;
 	struct regmap           **sw_resets;
+	struct clk_ctrl		*clk_ctrl;
 	struct collapse_vote	collapse_vote;
 	struct clk		**clocks;
 	struct mbox_client	mbox_client;
@@ -100,6 +108,7 @@ struct gdsc {
 	int			path_count;
 	u32			clk_dis_wait_val;
 	int			collapse_count;
+	int			clk_ctrl_count;
 	u32			gds_timeout;
 	bool			skip_disable_before_enable;
 	bool			skip_disable;
@@ -258,6 +267,24 @@ static int gdsc_qmp_enable(struct gdsc *sc)
 	return ret;
 }
 
+static void gdsc_clk_ctrl(struct gdsc *sc, bool en)
+{
+	uint32_t clk_ctrl_mask, clk_ctrl_val;
+	int i;
+
+	for (i = 0; i < sc->clk_ctrl_count; i++) {
+		clk_ctrl_mask = BIT(sc->clk_ctrl[i].bit);
+
+		if (sc->clk_ctrl[i].en_inverted ^ en)
+			clk_ctrl_val = clk_ctrl_mask;
+		else
+			clk_ctrl_val = 0;
+
+		regmap_update_bits(sc->clk_ctrl[i].regmap,
+			sc->clk_ctrl[i].offset, clk_ctrl_mask, clk_ctrl_val);
+	}
+}
+
 static int gdsc_enable(struct regulator_dev *rdev)
 {
 	struct gdsc *sc = rdev_get_drvdata(rdev);
@@ -278,6 +305,9 @@ static int gdsc_enable(struct regulator_dev *rdev)
 				sc->rdesc.name);
 		return -EBUSY;
 	}
+
+	if (sc->clk_ctrl_count)
+		gdsc_clk_ctrl(sc, true);
 
 	if (sc->toggle_logic) {
 		for (i = 0; i < sc->path_count; i++) {
@@ -459,6 +489,9 @@ static int gdsc_disable(struct regulator_dev *rdev)
 			goto done;
 		}
 	}
+
+	if (sc->clk_ctrl_count)
+		gdsc_clk_ctrl(sc, false);
 
 	if (sc->force_root_en) {
 		clk_prepare_enable(sc->clocks[sc->root_clk_idx]);
@@ -739,6 +772,51 @@ void gdsc_debug_print_regs(struct regulator *regulator)
 }
 EXPORT_SYMBOL(gdsc_debug_print_regs);
 
+static int gdsc_parse_dt_clk_ctrl_data(struct gdsc *sc, struct device *dev)
+{
+	struct of_phandle_args args;
+	int ret, i, clk_ctrl_len;
+
+	if (of_find_property(dev->of_node, "qcom,clk-ctrl", NULL)) {
+
+		clk_ctrl_len = of_count_phandle_with_args(dev->of_node, "qcom,clk-ctrl", NULL);
+
+		if (clk_ctrl_len % 4) {
+			dev_err(dev, "Invalid length of clk-ctrl arguments\n");
+			return -EINVAL;
+		}
+
+		sc->clk_ctrl_count = clk_ctrl_len / 4;
+
+		sc->clk_ctrl = devm_kmalloc_array(dev, sc->clk_ctrl_count,
+						   sizeof(*sc->clk_ctrl), GFP_KERNEL);
+		if (!sc->clk_ctrl)
+			return -ENOMEM;
+
+		for (i = 0; i < sc->clk_ctrl_count; i++) {
+			ret = of_parse_phandle_with_fixed_args(dev->of_node,
+						"qcom,clk-ctrl", 3, i, &args);
+			if (ret) {
+				dev_err(dev, "Failed to get clk-ctrl arguments for index:%d\n", i);
+				return ret;
+			}
+
+			sc->clk_ctrl[i].regmap = syscon_node_to_regmap(args.np);
+			of_node_put(args.np);
+			if (IS_ERR(sc->clk_ctrl[i].regmap)) {
+				dev_err(dev, "Failed to get clk-ctrl regmap for index:%d\n", i);
+				return PTR_ERR(sc->clk_ctrl[i].regmap);
+			}
+
+			sc->clk_ctrl[i].offset = args.args[0];
+			sc->clk_ctrl[i].bit = args.args[1];
+			sc->clk_ctrl[i].en_inverted = !!args.args[2];
+		}
+	}
+
+	return 0;
+}
+
 static int gdsc_parse_dt_data(struct gdsc *sc, struct device *dev,
 				struct regulator_init_data **init_data)
 {
@@ -790,6 +868,11 @@ static int gdsc_parse_dt_data(struct gdsc *sc, struct device *dev,
 		if (IS_ERR(sc->hw_ctrl))
 			return PTR_ERR(sc->hw_ctrl);
 	}
+
+
+	ret = gdsc_parse_dt_clk_ctrl_data(sc, dev);
+	if (ret)
+		return ret;
 
 	sc->gds_timeout = TIMEOUT_US;
 	of_property_read_u32(dev->of_node, "qcom,gds-timeout",

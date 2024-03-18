@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2017-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022-2023, Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2024, Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 /*
@@ -969,11 +969,11 @@ mem_alloc_fail:
 	ret_val = -ENOMEM;
 channel_open_fail:
 register_state_cb_fail:
-	for (j = i ; j >= 0; j--)
+	for (j = i ; j > 0; j--)
 		mhi_dev_net_dergstr_client(mhi_net_client[j]);
 client_register_fail:
 channel_init_fail:
-	for (j = i ; j >= 0; j--) {
+	for (j = i ; j > 0; j--) {
 		destroy_workqueue(mhi_net_client[j]->pending_pckt_wq);
 		kfree(mhi_net_client[j]);
 	}

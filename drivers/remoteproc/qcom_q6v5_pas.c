@@ -5,7 +5,7 @@
  * Copyright (C) 2016 Linaro Ltd
  * Copyright (C) 2014 Sony Mobile Communications AB
  * Copyright (c) 2012-2013, 2020-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022-2023, Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2024, Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/clk.h>
@@ -32,7 +32,9 @@
 #include <soc/qcom/secure_buffer.h>
 #include <trace/events/rproc_qcom.h>
 #include <soc/qcom/qcom_ramdump.h>
+#if IS_ENABLED(CONFIG_QCOM_DS_SKIP_Q6_STOP)
 #include <linux/remoteproc/qcom_rproc.h>
+#endif
 
 #include "qcom_common.h"
 #include "qcom_pil_info.h"
@@ -636,6 +638,7 @@ static int adsp_stop(struct rproc *rproc)
 	return ret;
 }
 
+#if IS_ENABLED(CONFIG_QCOM_DS_SKIP_Q6_STOP)
 static int adsp_shutdown(struct rproc *rproc)
 {
 	struct qcom_adsp *adsp = (struct qcom_adsp *)rproc->priv;
@@ -681,6 +684,7 @@ void adsp_set_ops_stop(struct rproc *rproc, bool suspend)
 		rproc->ops->stop = adsp_stop;
 }
 EXPORT_SYMBOL_GPL(adsp_set_ops_stop);
+#endif
 
 static int adsp_attach(struct rproc *rproc)
 {
@@ -1411,6 +1415,17 @@ static const struct adsp_data khaje_adsp_resource = {
 	.ssctl_id = 0x14,
 };
 
+static const struct adsp_data bengal_adsp_resource = {
+	.crash_reason_smem = 423,
+	.firmware_name = "adsp.mdt",
+	.pas_id = 1,
+	.minidump_id = 5,
+	.uses_elf64 = false,
+	.ssr_name = "lpass",
+	.sysmon_name = "adsp",
+	.ssctl_id = 0x14,
+};
+
 static const struct adsp_data qcs605_adsp_resource = {
 	.crash_reason_smem = 423,
 	.firmware_name = "adsp.mdt",
@@ -1419,6 +1434,7 @@ static const struct adsp_data qcs605_adsp_resource = {
 	.uses_elf64 = false,
 	.ssr_name = "lpass",
 	.sysmon_name = "adsp",
+	.qmp_name = "adsp",
 	.ssctl_id = 0x14,
 };
 
@@ -1556,6 +1572,17 @@ static const struct adsp_data khaje_cdsp_resource = {
 	.ssctl_id = 0x17,
 };
 
+static const struct adsp_data bengal_cdsp_resource = {
+	.crash_reason_smem = 601,
+	.firmware_name = "cdsp.mdt",
+	.pas_id = 18,
+	.minidump_id = 7,
+	.uses_elf64 = false,
+	.ssr_name = "cdsp",
+	.sysmon_name = "cdsp",
+	.ssctl_id = 0x17,
+};
+
 static const struct adsp_data qcs605_cdsp_resource = {
 	.crash_reason_smem = 601,
 	.firmware_name = "cdsp.mdt",
@@ -1564,6 +1591,7 @@ static const struct adsp_data qcs605_cdsp_resource = {
 	.uses_elf64 = false,
 	.ssr_name = "cdsp",
 	.sysmon_name = "cdsp",
+	.qmp_name = "cdsp",
 	.ssctl_id = 0x17,
 };
 
@@ -1668,7 +1696,7 @@ static const struct adsp_data khaje_mpss_resource = {
 	.ssctl_id = 0x12,
 };
 
-static const struct adsp_data qcs605_mpss_resource = {
+static const struct adsp_data bengal_mpss_resource = {
 	.crash_reason_smem = 421,
 	.firmware_name = "modem.mdt",
 	.pas_id = 4,
@@ -2155,7 +2183,9 @@ static const struct of_device_id adsp_of_match[] = {
 	{ .compatible = "qcom,trinket-cdsp-pas", .data = &trinket_cdsp_resource},
 	{ .compatible = "qcom,qcs605-adsp-pas", .data = &qcs605_adsp_resource},
 	{ .compatible = "qcom,qcs605-cdsp-pas", .data = &qcs605_cdsp_resource},
-	{ .compatible = "qcom,qcs605-modem-pas", .data = &qcs605_mpss_resource},
+	{ .compatible = "qcom,bengal-adsp-pas", .data = &bengal_adsp_resource},
+	{ .compatible = "qcom,bengal-cdsp-pas", .data = &bengal_cdsp_resource},
+	{ .compatible = "qcom,bengal-modem-pas", .data = &bengal_mpss_resource},
 	{ },
 };
 MODULE_DEVICE_TABLE(of, adsp_of_match);

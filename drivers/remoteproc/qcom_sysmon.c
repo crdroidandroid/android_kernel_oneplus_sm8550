@@ -775,6 +775,7 @@ static void sysmon_stop(struct rproc_subdev *subdev, bool crashed)
 	del_timer_sync(&sysmon->timeout_data.timer);
 }
 
+#if IS_ENABLED(CONFIG_QCOM_DS_SKIP_Q6_STOP)
 static void sysmon_shutdown(struct rproc_subdev *subdev, bool crashed)
 {
 	unsigned long timeout;
@@ -819,6 +820,7 @@ void qcom_sysmon_set_ops_stop(struct qcom_sysmon *sysmon, bool suspend)
 		sysmon->subdev.stop = sysmon_stop;
 }
 EXPORT_SYMBOL_GPL(qcom_sysmon_set_ops_stop);
+#endif
 
 static void sysmon_unprepare(struct rproc_subdev *subdev)
 {
