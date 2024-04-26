@@ -40,6 +40,7 @@
 #include <soc/oplus/system/boot_mode.h>
 #include <linux/version.h>
 #include <linux/proc_fs.h>
+#include <linux/power_supply.h>
 #endif
 #include <linux/soc/qcom/battery_charger.h>
 #define OPLUS_FEATURE_RICHTAP_SUPPORT
@@ -621,6 +622,8 @@ struct haptics_hw_config {
 	u32			fifo_vmax_mv;
 	u32			old_steady_vmax_mv;
 	u32			vibrator_type;
+	u32			vbat_low_soc;
+	u32			vbat_low_fifo_vmax_mv;
 #endif
 	u32			t_lra_us;
 	u32			cl_t_lra_us;
@@ -1508,6 +1511,34 @@ static int haptics_check_hpwr_status(struct haptics_chip *chip)
 }
 #endif
 
+#ifdef OPLUS_FEATURE_CHG_BASIC
+#define DEFAULT_BATT_SOC 50
+static int haptics_read_batt_soc(struct haptics_chip *chip, int *val)
+{
+	static struct power_supply *batt_psy;
+	union power_supply_propval ret = {0,};
+	int rc = 0;
+
+	*val = DEFAULT_BATT_SOC;
+	if (!batt_psy)
+		batt_psy = power_supply_get_by_name("battery");
+	if (batt_psy) {
+		rc = power_supply_get_property(batt_psy,
+				POWER_SUPPLY_PROP_CAPACITY, &ret);
+		if (rc) {
+			dev_err(chip->dev, "battery soc read error:%d\n", rc);
+			return rc;
+		}
+		*val = ret.intval;
+		dev_err(chip->dev, "battery soc is :%d\n", *val);
+	} else {
+		dev_err(chip->dev, "get battery psy failed\n");
+	}
+
+	return rc;
+}
+#endif
+
 #if IS_ENABLED(CONFIG_OPLUS_FEATURE_FAULT_INJECT_VIBRATOR)
 noinline
 #endif
@@ -1515,6 +1546,23 @@ static int haptics_set_vmax_mv(struct haptics_chip *chip, u32 vmax_mv)
 {
 	int rc = 0;
 	u8 val, vmax_step;
+
+#ifdef OPLUS_FEATURE_CHG_BASIC
+	u32 batt_soc = 0;
+	bool vbat_is_low = false;
+
+	if (chip->config.vbat_low_soc > 0) {
+		haptics_read_batt_soc(chip, &batt_soc);
+		if (batt_soc < chip->config.vbat_low_soc)
+			vbat_is_low = true;
+	}
+
+	if (vbat_is_low && vmax_mv > chip->config.vbat_low_fifo_vmax_mv) {
+		vmax_mv = chip->config.vbat_low_fifo_vmax_mv;
+		dev_dbg(chip->dev, "batt_soc=%d,force vmax=%d\n",
+					batt_soc, chip->config.vbat_low_fifo_vmax_mv);
+	}
+#endif
 
 #ifdef OPLUS_FEATURE_CHG_BASIC
 	mutex_lock(&chip->vmax_lock);
@@ -5291,6 +5339,16 @@ static int haptics_parse_dt(struct haptics_chip *chip)
 #ifdef OPLUS_FEATURE_CHG_BASIC
 	chip->disable_pm_ops = false;
 	chip->disable_pm_ops = of_property_read_bool(node, "qcom,disable-pm-ops");
+
+	rc = of_property_read_u32(node, "qcom,vbat-low-soc", &config->vbat_low_soc);
+	if (rc || config->vbat_low_soc > 100) {
+		config->vbat_low_soc = 0;
+	}
+
+	rc = of_property_read_u32(node, "qcom,vbat-low-fifo-vmax-mv", &config->vbat_low_fifo_vmax_mv);
+	if (rc || config->vbat_low_fifo_vmax_mv > config->fifo_vmax_mv) {
+		config->vbat_low_fifo_vmax_mv = config->fifo_vmax_mv;
+	}
 #endif
 	rc = haptics_parse_primitives_dt(chip);
 	if (rc < 0) {
