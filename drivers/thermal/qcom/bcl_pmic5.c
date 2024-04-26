@@ -23,6 +23,10 @@
 #include <linux/nvmem-consumer.h>
 #include <linux/ipc_logging.h>
 #include "thermal_zone_internal.h"
+#ifdef OPLUS_FEATURE_CHG_BASIC
+#include <linux/power_supply.h>
+#include <linux/proc_fs.h>
+#endif
 
 #define BCL_DRIVER_NAME       "bcl_pmic5"
 #define BCL_MONITOR_EN        0x46
@@ -157,10 +161,30 @@ struct bcl_device {
 	bool				no_bit_shift;
 	uint32_t			ibat_ext_range_factor;
 	struct bcl_peripheral_data	param[BCL_TYPE_MAX];
+#ifdef OPLUS_FEATURE_CHG_BASIC
+	bool				support_track;
+	int				id;
+#endif
 };
 
 static struct bcl_device *bcl_devices[MAX_PERPH_COUNT];
 static int bcl_device_ct;
+
+#ifdef OPLUS_FEATURE_CHG_BASIC
+struct timeval {
+	long tv_sec;
+	long tv_usec;
+};
+
+static void do_gettimeofday(struct timeval *tv)
+{
+	struct timespec64 now;
+
+	ktime_get_real_ts64(&now);
+	tv->tv_sec = now.tv_sec;
+	tv->tv_usec = now.tv_nsec/1000;
+}
+#endif
 
 static int bcl_read_register(struct bcl_device *bcl_perph, int16_t reg_offset,
 				unsigned int *data)
@@ -589,10 +613,55 @@ static irqreturn_t bcl_handle_irq(int irq, void *data)
 	int ibat = 0, vbat = 0;
 	struct bcl_device *bcl_perph;
 
+#ifdef OPLUS_FEATURE_CHG_BASIC
+	struct timeval tv;
+	static struct power_supply *batt_psy;
+	union power_supply_propval psy = {0,};
+	int err = 0;
+	int vol = 0,curr = 0;
+	int level = -1,id = -1;
+	long time_s = 0;
+#endif
+
 	if (!perph_data->tz_dev)
 		return IRQ_HANDLED;
 	bcl_perph = perph_data->dev;
 	bcl_read_register(bcl_perph, BCL_IRQ_STATUS, &irq_status);
+
+#ifdef OPLUS_FEATURE_CHG_BASIC
+	if (bcl_perph->support_track) {
+		if (irq_status & 0x04) {
+			level = 2;
+		} else if (irq_status & 0x02) {
+			level = 1;
+		} else if (irq_status & 0x01) {
+			level = 0;
+		}
+		do_gettimeofday(&tv);
+		time_s = tv.tv_sec;
+		id = bcl_perph->id;
+		if (!batt_psy)
+			batt_psy = power_supply_get_by_name("battery");
+		if (batt_psy) {
+			err = power_supply_get_property(batt_psy,
+				POWER_SUPPLY_PROP_VOLTAGE_NOW, &psy);
+			if (err) {
+				pr_err("can't get battery voltage:%d\n",err);
+			} else {
+				vol = psy.intval / 1000;
+			}
+
+			err = power_supply_get_property(batt_psy,
+				POWER_SUPPLY_PROP_CURRENT_NOW, &psy);
+			if (err) {
+				pr_err("can't get battery current:%d\n",err);
+			} else {
+				curr = psy.intval;
+			}
+		}
+	}
+#endif
+
 	if (bcl_perph->param[BCL_IBAT_LVL0].tz_dev)
 		bcl_read_ibat(&bcl_perph->param[BCL_IBAT_LVL0], &ibat);
 	else if (bcl_perph->param[BCL_2S_IBAT_LVL0].tz_dev)
@@ -721,6 +790,9 @@ static int bcl_get_devicetree_data(struct platform_device *pdev,
 		if (ret < 0)
 			pr_err("Error reading register:BCL_L1_DGL_CLR_CTL ret:%d\n", ret);
 	}
+
+	bcl_perph->support_track =  of_property_read_bool(dev_node,"bcl,support_track");
+	pr_err("bcl support_track:%d, id:%d\n", bcl_perph->support_track, bcl_perph->id);
 #endif
 
 	return ret;
@@ -988,7 +1060,9 @@ static int bcl_probe(struct platform_device *pdev)
 		return -ENOMEM;
 	bcl_perph = bcl_devices[bcl_device_ct];
 	bcl_perph->dev = &pdev->dev;
-
+#ifdef OPLUS_FEATURE_CHG_BASIC
+	bcl_perph->id = bcl_device_ct;
+#endif
 	bcl_perph->regmap = dev_get_regmap(pdev->dev.parent, NULL);
 	if (!bcl_perph->regmap) {
 		dev_err(&pdev->dev, "Couldn't get parent's regmap\n");
