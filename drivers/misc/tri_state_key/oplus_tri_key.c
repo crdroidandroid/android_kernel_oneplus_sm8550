@@ -825,82 +825,106 @@ static int oplus_get_data(struct extcon_dev_data *chip)
 }
 
 static void threeaxis_update_position(struct extcon_dev_data *chip , int xtolen, int ytolen, int ztolen) {
-	int xup_limit = 0;
-	int xdown_limit = 0;
-	int xmid_limit = 0;
+	int xup_down_limit = 0;
+	int xup_up_limit = 0;
+	int xdown_down_limit = 0;
+	int xdown_up_limit = 0;
+	int xmid_down_limit = 0;
+	int xmid_up_limit = 0;
 	int ymid_limit = 0;
 	TRI_KEY_LOG("%s: call interf = %d xtolen = %d, ytonlen=%d, ztolen =%d \n", __func__, chip->interf, xtolen, ytolen, ztolen);
 	if (chip->threeaxis_calib_data[1] < 0) {
-		xup_limit = chip->threeaxis_calib_data[0] + chip->position_tolen[0];
-		xdown_limit = chip->threeaxis_calib_data[6] - chip->position_tolen[0];
-		xmid_limit = chip->threeaxis_calib_data[3] - chip->position_tolen[0];
+		xup_down_limit = chip->threeaxis_calib_data[0] - chip->position_tolen[0] - 2000;
+		xup_up_limit = chip->threeaxis_calib_data[0] + chip->position_tolen[0];
+		xdown_down_limit = chip->threeaxis_calib_data[6] - chip->position_tolen[0];
+		xdown_up_limit = chip->threeaxis_calib_data[6] + chip->position_tolen[0] + 2000;
+		xmid_down_limit = chip->threeaxis_calib_data[3] - chip->position_tolen[0];
+		xmid_up_limit = chip->threeaxis_calib_data[3] + chip->position_tolen[0];
 		ymid_limit = abs(chip->threeaxis_calib_data[4]) - chip->position_tolen[1];
-		if (chip->hall_value.hall_x  < (xup_limit + xtolen)) {
+		TRI_KEY_LOG("%s: xup_limit = [%d %d], xdown_limit = [%d %d], xmid_limit = [%d %d],  \n",
+				__func__, xup_down_limit, xup_up_limit, xdown_down_limit, xdown_up_limit, xmid_down_limit, xmid_up_limit);
+		TRI_KEY_LOG("%s: ymid_limit = %d, , calib_data[1] = %d, \n", __func__, ymid_limit, chip->threeaxis_calib_data[1]);
+		TRI_KEY_LOG("%s: position_tolen[0] = %d, position_tolen[1] = %d, xtolen = %d, \n", __func__, chip->position_tolen[0], chip->position_tolen[1], xtolen);
+		TRI_KEY_LOG("%s: calib_data[0] = %d, calib_data[6] = %d\n", __func__, chip->threeaxis_calib_data[0], chip->threeaxis_calib_data[6]);
+		TRI_KEY_LOG("%s: calib_data[3] = %d, calib_data[4] = %d,\n", __func__, chip->threeaxis_calib_data[3], chip->threeaxis_calib_data[4]);
+		if (chip->hall_value.hall_x  > (xup_down_limit + xtolen) && chip->hall_value.hall_x  < (xup_up_limit + xtolen)) {
 				chip->state = 0;
 				chip->position = UP_STATE;
 				last_position = chip->position;
 				chip->pre_hall_value.hall_x = chip->hall_value.hall_x;
 				chip->pre_hall_value.hall_y = chip->hall_value.hall_y;
 				chip->pre_hall_value.hall_z = chip->hall_value.hall_z;
-				TRI_KEY_LOG(" UP_STATE hallx=%d xup_limit =%d the position is %d\n", chip->hall_value.hall_x, xup_limit, chip->state);
+				TRI_KEY_LOG(" UP_STATE hallx=%d xup_limit =[%d %d] the position is %d\n", \
+				chip->hall_value.hall_x, xup_down_limit, xup_up_limit, chip->state);
 		}
 
-		if (chip->hall_value.hall_x  > (xdown_limit - xtolen)) {
+		if (chip->hall_value.hall_x  < (xdown_up_limit - xtolen) && chip->hall_value.hall_x  > (xdown_down_limit - xtolen)) {
 				chip->state = 1;
 				chip->position = DOWN_STATE;
 				last_position = chip->position;
 				chip->pre_hall_value.hall_x = chip->hall_value.hall_x;
 				chip->pre_hall_value.hall_y = chip->hall_value.hall_y;
 				chip->pre_hall_value.hall_z = chip->hall_value.hall_z;
-				TRI_KEY_LOG("DOWN_STATE hall x=%d  xdown_limit=%d the position is %d\n", chip->hall_value.hall_x, xdown_limit, chip->state);
+				TRI_KEY_LOG("DOWN_STATE hall x=%d  xdown_limit=[%d %d] the position is %d\n", \
+				chip->hall_value.hall_x, xdown_down_limit, xdown_up_limit, chip->state);
 		}
-		if ((chip->hall_value.hall_x > (xmid_limit - xtolen)) && (abs(chip->hall_value.hall_y) > (ymid_limit + ytolen))) {
+		if ((chip->hall_value.hall_x > (xmid_down_limit - xtolen) && chip->hall_value.hall_x < (xmid_up_limit - xtolen))
+						&& (abs(chip->hall_value.hall_y) > (ymid_limit + ytolen))) {
 				chip->state = 2;
 				chip->position = MID_STATE;
 				last_position = chip->position;
 				chip->pre_hall_value.hall_x = chip->hall_value.hall_x;
 				chip->pre_hall_value.hall_y = chip->hall_value.hall_y;
 				chip->pre_hall_value.hall_z = chip->hall_value.hall_z;
-				TRI_KEY_LOG("MID_STATE hall x=%d , hall y = %d , xmid_limit=%d, ymid_limit=%d, the position is %d\n", \
-				chip->hall_value.hall_x, chip->hall_value.hall_y, xmid_limit, ymid_limit, chip->state);
+				TRI_KEY_LOG("MID_STATE hall x=%d , hall y = %d , xmid_limit=[%d %d] ymid_limit=%d, the position is %d\n", \
+				chip->hall_value.hall_x, chip->hall_value.hall_y, xmid_down_limit, xmid_up_limit, ymid_limit, chip->state);
 		}
 
 	} else {
-		xup_limit = chip->threeaxis_calib_data[0] - chip->position_tolen[0];
-		xdown_limit = chip->threeaxis_calib_data[6] + chip->position_tolen[0];
-		xmid_limit = chip->threeaxis_calib_data[3] - chip->position_tolen[0];
+		xup_down_limit = chip->threeaxis_calib_data[0] - chip->position_tolen[0];
+		xup_up_limit = chip->threeaxis_calib_data[0] + chip->position_tolen[0] + 2000;
+		xdown_down_limit = chip->threeaxis_calib_data[6] - chip->position_tolen[0] - 2000;
+		xdown_up_limit = chip->threeaxis_calib_data[6] + chip->position_tolen[0];
+		xmid_down_limit = chip->threeaxis_calib_data[3] - chip->position_tolen[0];
+		xmid_up_limit = chip->threeaxis_calib_data[3] + chip->position_tolen[0];
 		ymid_limit = abs(chip->threeaxis_calib_data[4]) - chip->position_tolen[1];
-		TRI_KEY_LOG("%s: xmid_limit = %d ymid_limit = %d,  \n", __func__, xmid_limit, ymid_limit);
-		if (chip->hall_value.hall_x  > (xup_limit + xtolen)) {
+		TRI_KEY_LOG("%s: xup_limit = [%d %d], xdown_limit = [%d %d], xmid_limit = [%d %d],  \n",
+				__func__, xup_down_limit, xup_up_limit, xdown_down_limit, xdown_up_limit, xmid_down_limit, xmid_up_limit);
+		TRI_KEY_LOG("%s: ymid_limit = %d, , calib_data[1] = %d, \n", __func__, ymid_limit, chip->threeaxis_calib_data[1]);
+		TRI_KEY_LOG("%s: position_tolen[0] = %d, position_tolen[1] = %d, xtolen = %d, \n", __func__, chip->position_tolen[0], chip->position_tolen[1], xtolen);
+		TRI_KEY_LOG("%s: calib_data[0] = %d, calib_data[6] = %d\n", __func__, chip->threeaxis_calib_data[0], chip->threeaxis_calib_data[6]);
+		TRI_KEY_LOG("%s: calib_data[3] = %d, calib_data[4] = %d,\n", __func__, chip->threeaxis_calib_data[3], chip->threeaxis_calib_data[4]);
+		if (chip->hall_value.hall_x  > (xup_down_limit + xtolen) && chip->hall_value.hall_x  < (xup_up_limit + xtolen)) {
 				chip->state = 0;
 				chip->position = UP_STATE;
 				last_position = chip->position;
 				chip->pre_hall_value.hall_x = chip->hall_value.hall_x;
 				chip->pre_hall_value.hall_y = chip->hall_value.hall_y;
 				chip->pre_hall_value.hall_z = chip->hall_value.hall_z;
-				TRI_KEY_LOG(" UP_STATE hallx=%d xup_limit =%d the position is %d\n", \
-				chip->hall_value.hall_x, xup_limit, chip->state);
+				TRI_KEY_LOG(" UP_STATE hallx=%d xup_limit =[%d %d] the position is %d\n", \
+				chip->hall_value.hall_x, xup_down_limit, xup_up_limit, chip->state);
 		}
 
-		if (chip->hall_value.hall_x  < (xdown_limit - xtolen)) {
+		if (chip->hall_value.hall_x  < (xdown_up_limit - xtolen) && chip->hall_value.hall_x  > (xdown_down_limit - xtolen)) {
 				chip->state = 1;
 				chip->position = DOWN_STATE;
 				last_position = chip->position;
 				chip->pre_hall_value.hall_x = chip->hall_value.hall_x;
 				chip->pre_hall_value.hall_y = chip->hall_value.hall_y;
 				chip->pre_hall_value.hall_z = chip->hall_value.hall_z;
-				TRI_KEY_LOG("DOWN_STATE hall x=%d  xdown_limit=%d the position is %d\n", \
-				chip->hall_value.hall_x, xdown_limit, chip->state);
+				TRI_KEY_LOG("DOWN_STATE hall x=%d  xdown_limit=[%d %d] the position is %d\n", \
+				chip->hall_value.hall_x, xdown_down_limit, xdown_up_limit, chip->state);
 		}
-		if ((chip->hall_value.hall_x > (xmid_limit - xtolen)) && (abs(chip->hall_value.hall_y) > (ymid_limit + ytolen))) {
+		if ((chip->hall_value.hall_x > (xmid_down_limit - xtolen) && chip->hall_value.hall_x < (xmid_up_limit - xtolen))
+						&& (abs(chip->hall_value.hall_y) > (ymid_limit + ytolen))) {
 				chip->state = 2;
 				chip->position = MID_STATE;
 				last_position = chip->position;
 				chip->pre_hall_value.hall_x = chip->hall_value.hall_x;
 				chip->pre_hall_value.hall_y = chip->hall_value.hall_y;
 				chip->pre_hall_value.hall_z = chip->hall_value.hall_z;
-				TRI_KEY_LOG("MID_STATE hall x=%d , hall y = %d , xmid_limit=%d, ymid_limit=%d, the position is %d\n", \
-				chip->hall_value.hall_x, chip->hall_value.hall_y, xmid_limit, ymid_limit, chip->state);
+				TRI_KEY_LOG("MID_STATE hall x=%d , hall y = %d , xmid_limit=[%d %d] ymid_limit=%d, the position is %d\n", \
+				chip->hall_value.hall_x, chip->hall_value.hall_y, xmid_down_limit, xmid_up_limit, ymid_limit, chip->state);
 		}
 	}
 	last_interf = chip->interf;
