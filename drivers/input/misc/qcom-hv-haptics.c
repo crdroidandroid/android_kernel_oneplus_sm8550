@@ -1539,73 +1539,24 @@ static int haptics_read_batt_soc(struct haptics_chip *chip, int *val)
 }
 #endif
 
-#if IS_ENABLED(CONFIG_OPLUS_FEATURE_FAULT_INJECT_VIBRATOR)
-noinline
-#endif
-static int haptics_set_vmax_mv(struct haptics_chip *chip, u32 vmax_mv)
+static int haptics_get_lra_nominal_impedance(struct haptics_chip *chip, u32 *nominal_ohm)
 {
-	int rc = 0;
-	u8 val, vmax_step;
+	u8 val;
+	int rc;
 
-#ifdef OPLUS_FEATURE_CHG_BASIC
-	u32 batt_soc = 0;
-	bool vbat_is_low = false;
-
-	if (chip->config.vbat_low_soc > 0) {
-		haptics_read_batt_soc(chip, &batt_soc);
-		if (batt_soc < chip->config.vbat_low_soc)
-			vbat_is_low = true;
+	if (!chip->hap_cfg_nvmem) {
+		dev_dbg(chip->dev, "nvmem is not defined, couldn't get defined LRA nominal impedance\n");
+		return -EINVAL;
 	}
 
-	if (vbat_is_low && vmax_mv > chip->config.vbat_low_fifo_vmax_mv) {
-		vmax_mv = chip->config.vbat_low_fifo_vmax_mv;
-		dev_dbg(chip->dev, "batt_soc=%d,force vmax=%d\n",
-					batt_soc, chip->config.vbat_low_fifo_vmax_mv);
-	}
-#endif
-
-#ifdef OPLUS_FEATURE_CHG_BASIC
-	mutex_lock(&chip->vmax_lock);
-#endif
-
-	if (vmax_mv > chip->max_vmax_mv) {
-		dev_dbg(chip->dev, "vmax (%d) exceed the max value: %d\n",
-					vmax_mv, chip->max_vmax_mv);
-		vmax_mv = chip->max_vmax_mv;
+	rc = nvmem_device_read(chip->hap_cfg_nvmem,
+			HAP_LRA_NOMINAL_OHM_SDAM_OFFSET, 1, &val);
+	if (rc > 0) {
+		*nominal_ohm = (val * LRA_IMPEDANCE_MOHMS_LSB) / 1000;
+		dev_dbg(chip->dev, "LRA nominal impedance is %d ohm\n", *nominal_ohm);
 	}
 
-	if (vmax_mv > chip->clamped_vmax_mv)
-		vmax_mv = chip->clamped_vmax_mv;
-
-	if (chip->clamp_at_5v && (vmax_mv > CLAMPED_VMAX_MV))
-		vmax_mv = CLAMPED_VMAX_MV;
-
-	vmax_step = (chip->is_hv_haptics) ?
-				VMAX_HV_STEP_MV : VMAX_MV_STEP_MV;
-	val = vmax_mv / vmax_step;
-	rc = haptics_write(chip, chip->cfg_addr_base,
-			HAP_CFG_VMAX_REG, &val, 1);
-	if (rc < 0) {
-		dev_err(chip->dev, "config VMAX failed, rc=%d\n", rc);
-#ifndef OPLUS_FEATURE_CHG_BASIC
-	else
-		dev_dbg(chip->dev, "Set Vmax to %u mV\n", vmax_mv);
-#endif
-#ifdef OPLUS_FEATURE_CHG_BASIC
-	mutex_unlock(&chip->vmax_lock);
-	return rc;
-#endif
-	}
-#ifdef OPLUS_FEATURE_CHG_BASIC
-	dev_dbg(chip->dev, "Set Vmax to %u mV", vmax_mv);
-	rc = haptics_check_hpwr_status(chip);
-	if (rc < 0)
-		dev_err(chip->dev, "check hpwr_status failed, rc=%d", rc);
-#endif
-
-	mutex_unlock(&chip->vmax_lock);
-
-	return rc;
+	return rc > 0 ? 0 : rc;
 }
 
 static int haptics_set_vmax_headroom_mv(struct haptics_chip *chip, u32 hdrm_mv)
@@ -1643,6 +1594,99 @@ static int haptics_get_vmax_headroom_mv(struct haptics_chip *chip, u32 *hdrm_mv)
 
 	*hdrm_mv = (val & VMAX_HDRM_MASK) * VMAX_HDRM_STEP_MV;
 	return 0;
+}
+
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_FAULT_INJECT_VIBRATOR)
+noinline
+#endif
+static int haptics_set_vmax_mv(struct haptics_chip *chip, u32 vmax_mv)
+{
+	int rc = 0;
+	u8 val, vmax_step;
+	u32 nominal_ohm, vmax_hdrm_mv;
+
+#ifdef OPLUS_FEATURE_CHG_BASIC
+	u32 batt_soc = 0;
+	bool vbat_is_low = false;
+
+	if (chip->config.vbat_low_soc > 0) {
+		haptics_read_batt_soc(chip, &batt_soc);
+		if (batt_soc < chip->config.vbat_low_soc)
+			vbat_is_low = true;
+	}
+
+	if (vbat_is_low && vmax_mv > chip->config.vbat_low_fifo_vmax_mv) {
+		vmax_mv = chip->config.vbat_low_fifo_vmax_mv;
+		dev_dbg(chip->dev, "batt_soc=%d,force vmax=%d\n",
+					batt_soc, chip->config.vbat_low_fifo_vmax_mv);
+	}
+#endif
+
+#ifdef OPLUS_FEATURE_CHG_BASIC
+	mutex_lock(&chip->vmax_lock);
+#endif
+
+	if (vmax_mv > chip->max_vmax_mv) {
+		dev_dbg(chip->dev, "vmax (%d) exceed the max value: %d\n",
+					vmax_mv, chip->max_vmax_mv);
+		vmax_mv = chip->max_vmax_mv;
+	}
+
+	if (vmax_mv > chip->clamped_vmax_mv)
+		vmax_mv = chip->clamped_vmax_mv;
+
+	if (chip->clamp_at_5v && (vmax_mv > CLAMPED_VMAX_MV))
+		vmax_mv = CLAMPED_VMAX_MV;
+
+	rc = haptics_get_lra_nominal_impedance(chip, &nominal_ohm);
+	if (!rc && (chip->hw_type >= HAP525_HV)) {
+		if ((nominal_ohm >= 15) && (vmax_mv > 4500))
+			vmax_hdrm_mv = 1000;
+		else if ((nominal_ohm < 15) && (vmax_mv > 7000))
+			vmax_hdrm_mv = 1500;
+		else if ((nominal_ohm < 15) && (vmax_mv > 3500))
+			vmax_hdrm_mv = 1000;
+		else
+			vmax_hdrm_mv = 500;
+
+		if ((vmax_mv + vmax_hdrm_mv) > MAX_VMAX_MV)
+			vmax_mv = MAX_VMAX_MV - vmax_hdrm_mv;
+
+		rc = haptics_set_vmax_headroom_mv(chip, vmax_hdrm_mv);
+		if (rc < 0) {
+			mutex_unlock(&chip->vmax_lock);
+			return rc;
+		}
+
+		dev_dbg(chip->dev, "update VMAX_HDRM to %d mv\n", vmax_hdrm_mv);
+	}
+
+	vmax_step = (chip->is_hv_haptics) ?
+				VMAX_HV_STEP_MV : VMAX_MV_STEP_MV;
+	val = vmax_mv / vmax_step;
+	rc = haptics_write(chip, chip->cfg_addr_base,
+			HAP_CFG_VMAX_REG, &val, 1);
+	if (rc < 0) {
+		dev_err(chip->dev, "config VMAX failed, rc=%d\n", rc);
+#ifndef OPLUS_FEATURE_CHG_BASIC
+	else
+		dev_dbg(chip->dev, "Set Vmax to %u mV\n", vmax_mv);
+#endif
+#ifdef OPLUS_FEATURE_CHG_BASIC
+	mutex_unlock(&chip->vmax_lock);
+	return rc;
+#endif
+	}
+#ifdef OPLUS_FEATURE_CHG_BASIC
+	dev_dbg(chip->dev, "Set Vmax to %u mV", vmax_mv);
+	rc = haptics_check_hpwr_status(chip);
+	if (rc < 0)
+		dev_err(chip->dev, "check hpwr_status failed, rc=%d", rc);
+#endif
+
+	mutex_unlock(&chip->vmax_lock);
+
+	return rc;
 }
 
 static int haptics_enable_autores(struct haptics_chip *chip, bool en)
@@ -5574,10 +5618,8 @@ static int haptics_measure_realtime_lra_impedance(struct haptics_chip *chip)
 	vmax_mv = RT_IMPD_DET_VMAX_DEFAULT_MV;
 	current_sel = chip->clamp_at_5v ? CURRENT_SEL_VAL_125MA : CURRENT_SEL_VAL_250MA;
 	if (chip->hap_cfg_nvmem != NULL) {
-		rc = nvmem_device_read(chip->hap_cfg_nvmem,
-				HAP_LRA_NOMINAL_OHM_SDAM_OFFSET, 1, &val);
-		if (!rc && val) {
-			nominal_ohm = val;
+		rc = haptics_get_lra_nominal_impedance(chip, &nominal_ohm);
+		if (!rc) {
 			/*
 			 * use 250mA current_sel when nominal impedance is lower than 15 Ohms
 			 * and use 125mA detection when nominal impedance is higher than 40 Ohms
