@@ -37,6 +37,7 @@ struct pwrkey_monitor_data g_black_data = {
 /* if last stage in this array, skip */
 static char black_last_skip_block_stages[][64] = {
 	{ "LIGHT_setScreenState_" }, /* quick press powerkey, power decide wakeup when black check, skip */
+	{ "POWERKEY_interceptKeyBeforeQueueing" }, /* don't wakeup in case heycast/powerlight */
 };
 
 /* if contain stage in this array, skip */
