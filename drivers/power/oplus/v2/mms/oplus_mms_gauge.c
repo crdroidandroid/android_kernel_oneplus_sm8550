@@ -1113,6 +1113,42 @@ int oplus_gauge_get_batt_capacity_mah(struct oplus_mms *topic)
 	return cap_mah;
 }
 
+int oplus_gauge_get_battinfo_sn(struct oplus_mms *topic, char *sn_buff, int size_buffer)
+{
+	int rc = 0;
+	int len = 0;
+	struct oplus_mms_gauge *chip;
+
+	if (topic == NULL) {
+		chg_err("topic is NULL");
+		return 0;
+	}
+	chip = oplus_mms_get_drvdata(topic);
+	if (!chip || !sn_buff || size_buffer < OPLUS_BATT_SERIAL_NUM_SIZE)
+		return -EINVAL;
+
+	rc = oplus_chg_ic_func(chip->gauge_ic_parallel[chip->main_gauge],
+		OPLUS_IC_FUNC_GAUGE_GET_BATT_SN, sn_buff, size_buffer);
+	len = rc;
+	if (rc < 0) {
+		chg_err("get main battery serial number error, rc=%d\n", rc);
+	} else {
+		if (chip->sub_gauge
+		    && ((size_buffer - len) > OPLUS_BATT_SERIAL_NUM_SIZE)) {
+			/* change the end of main_gauge '\0' to '\n', and add 1 to the length */
+			sn_buff[len] = '\n';
+			len += 1;
+			rc = oplus_chg_ic_func(chip->gauge_ic_parallel[__ffs(chip->sub_gauge)],
+				OPLUS_IC_FUNC_GAUGE_GET_BATT_SN, &sn_buff[len], (size_buffer - len));
+			if (rc < 0)
+				chg_err("get sub battery serial number error, rc=%d\n", rc);
+			else
+				len += rc;
+		}
+	}
+	return len;
+}
+
 void oplus_gauge_set_batt_full(bool full)
 {
 	int rc;
