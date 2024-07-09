@@ -33,9 +33,11 @@
 #define PPS_MONITOR_CYCLE_MS		1500
 #define PPS_WATCHDOG_TIME_MS		3000
 #define PPS_START_DEF_CURR_MA		1500
-#define PPS_START_DEF_VOL_MV		5000
+#define PPS_START_DEF_VOL_MV		5500
 #define PPS_MONITOR_TIME_MS		500
 #define OPLUS_FIXED_PDO_CURR_MA		3000
+#define OPLUS_FIXED_PDO_DEF_VOL		5000
+
 
 #define PPS_UPDATE_PDO_TIME		5
 #define PPS_UPDATE_FASTCHG_TIME	1
@@ -848,7 +850,7 @@ static int oplus_pps_switch_to_normal(struct oplus_pps *chip)
 	/* switch to 5v when switch to normal */
 	if (chip->wired_online)
 		rc = oplus_chg_ic_func(chip->pps_ic, OPLUS_IC_FUNC_FIXED_PDO_SET,
-				PPS_START_DEF_VOL_MV, OPLUS_FIXED_PDO_CURR_MA);
+				OPLUS_FIXED_PDO_DEF_VOL, OPLUS_FIXED_PDO_CURR_MA);
 
 	rc = oplus_chg_ic_func(chip->dpdm_switch,
 		OPLUS_IC_FUNC_SET_DPDM_SWITCH_MODE, DPDM_SWITCH_TO_AP);
