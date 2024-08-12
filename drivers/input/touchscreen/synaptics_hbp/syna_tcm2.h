@@ -52,6 +52,7 @@
 #include "../oplus_touchscreen_v2/touchpanel_common.h"
 #endif
 
+
 #define PLATFORM_DRIVER_NAME "synaptics_tcm_hbp"
 
 #define TOUCH_INPUT_NAME "touchpanel"
@@ -85,7 +86,16 @@
 #define TX_NUM 17
 #define RX_NUM 38
 
+#define IRQ_COST_TIME_OVER_5MS 5000
+#define IRQ_COST_TIME_OVER_10MS 10000
+#define IRQ_COST_TIME_OVER_20MS 20000
+#define IRQ_COST_TIME_OVER_50MS 50000
+
 #define FW_UPDATE_COMPLETE_TIMEOUT  msecs_to_jiffies(40*1000)
+
+#define GESTURE_MODE_SWITCH_RETRY_TIMES     5
+#define MAX_HEALTH_REPORT_LEN 50
+
 /**
  * @section: Driver Configurations
  *
@@ -287,6 +297,15 @@ typedef enum debug_level {
 	LEVEL_DEBUG,    /printk all tp debug info/
 } tp_debug_level;
 */
+
+enum fingerprint_err_type {
+	FOD_ENABLE_NO_ERROR = 0,
+	/* reserved 1-6 */
+	FINGERPRINT_AREA_NOT_MATCH = 7,
+	ANOTHER_FINGER_ON_NON_FP_ZONE = 8,
+	FINGERPRINT_DOWN_BEFORE_FP_ENABLE = 9,
+};
+
 /**
  * @brief: Power States
  *
@@ -559,6 +578,14 @@ static inline unsigned int le4_to_uint(const unsigned char *src)
 	       (unsigned int)src[3] * 0x1000000;
 }
 
+struct syna_tcm_test {
+	unsigned int num_of_reports;
+	unsigned char report_type;
+	unsigned int report_index;
+	struct tcm_buffer report;
+	struct tcm_buffer test_resp;
+	struct tcm_buffer test_out;
+};
 /**
  * @brief: context of the synaptics linux-based driver
  *
@@ -570,6 +597,9 @@ struct syna_tcm {
 
 	/* TouchComm device core context */
 	struct tcm_dev *tcm_dev;
+
+	struct syna_tcm_test *test_hcd;
+	struct completion report_complete;
 
 	/* PLatform device driver */
 	struct platform_device *pdev;
@@ -671,6 +701,7 @@ struct syna_tcm {
 	unsigned short touch_and_hold;
 	bool is_fp_down;
 	struct fp_underscreen_info fp_info;	/*tp info used for underscreen fingerprint*/
+	bool fp_active;	/*prepare for screen off fingerprint earlier*/
 
 	/* framebuffer callbacks notifier */
 #if IS_ENABLED(CONFIG_DRM_OPLUS_PANEL_NOTIFY)
@@ -850,6 +881,56 @@ void syna_cdev_update_power_state_report_queue(struct syna_tcm *tcm, bool wakeup
 #endif
 
 #endif
+
+
+
+#define INIT_BUFFER(buffer, is_clone) \
+	mutex_init(&buffer.buf_mutex); \
+
+#define LOCK_BUFFER(buffer) \
+	mutex_lock(&buffer.buf_mutex)
+
+#define UNLOCK_BUFFER(buffer) \
+	mutex_unlock(&buffer.buf_mutex)
+
+#define RELEASE_BUFFER(buffer) \
+	do { \
+        if (buffer.clone == false) { \
+			kfree(buffer.buf); \
+			buffer.buf_size = 0; \
+			buffer.data_length = 0; \
+        } \
+	} while (0)
+
+struct syna_tcm_report {
+	unsigned char id;
+	struct tcm_buffer buffer;
+};
+
+static inline int syna_tcm_alloc_mem(struct tcm_buffer *buffer,
+					 unsigned int size)
+{
+	if (size > buffer->buf_size) {
+		if (buffer->buf != NULL) {
+			kfree(buffer->buf);
+		}
+		buffer->buf = kzalloc(size, GFP_KERNEL);
+
+		if (!(buffer->buf)) {
+			//TPD_INFO("%s: Failed to allocate memory, size %d\n", __func__, size);
+			buffer->buf_size = 0;
+			buffer->data_length = 0;
+			return -ENOMEM;
+		}
+		buffer->buf_size = size;
+	}
+
+	memset(buffer->buf, 0, buffer->buf_size);
+	buffer->data_length = 0;
+
+	return 0;
+}
+
 
 #endif /* end of _SYNAPTICS_TCM2_DRIVER_H_ */
 

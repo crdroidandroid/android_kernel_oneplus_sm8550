@@ -301,6 +301,13 @@ bool oplus_chglib_is_abnormal_pd_svooc_adapter(struct device *dev)
 	return chip->is_abnormal_pd_svooc_adapter;
 }
 
+int oplus_chglib_get_adapter_sid_power(struct device *dev)
+{
+	struct vphy_chip *chip = oplus_chglib_get_vphy_chip(dev);
+
+	return sid_to_adapter_power(chip->adapter_sid);
+}
+
 bool oplus_chglib_is_pd_svooc_adapter(struct device *dev)
 {
 	struct vphy_chip *chip = oplus_chglib_get_vphy_chip(dev);
@@ -374,6 +381,7 @@ bool oplus_chglib_get_vooc_sid_is_config(struct device *dev)
 	oplus_mms_get_item_data(chip->vooc_topic,
 				VOOC_ITEM_SID, &data, false);
 
+	chip->adapter_sid = data.intval;
 	return data.intval ? true : false;
 }
 
@@ -598,6 +606,7 @@ static void oplus_chglib_vooc_subs_callback(struct mms_subscribe *subs,
 		switch (id) {
 		case VOOC_ITEM_SID:
 			oplus_mms_get_item_data(chip->vooc_topic, id, &data, false);
+			chip->adapter_sid = data.intval;
 			if (data.intval)
 				schedule_work(&chip->send_absent_notify_work);
 			break;
