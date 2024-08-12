@@ -354,8 +354,10 @@ enum tcm_report_type {
 	REPORT_TOUCH = 0x11,
 	REPORT_DELTA = 0x12,
 	REPORT_RAW = 0x13,
+	REPORT_DEBUG = 0x14,
 	REPORT_HBP_ACTIVE_FRAME = 0x23,
 	/* custom report */
+	REPORT_LOG = 0x9f,
 	REPORT_POWER_STATE_INFO = 0xFE,
 };
 

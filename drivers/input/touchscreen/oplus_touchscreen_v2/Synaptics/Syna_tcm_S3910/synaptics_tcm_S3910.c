@@ -51,6 +51,7 @@ static int syna_set_large_thd(void *chip_data, int large_thd);
 static int syna_set_large_corner_frame_limit(void *chip_data, int frame);
 static int syna_set_disable_level(void *chip_data, uint8_t level);
 static int syna_glove_mode(void *chip_data, bool enable);
+static void syna_set_touch_direction(void *chip_data, uint8_t dir);
 
 
 static struct fw_grip_operations syna_fw_grip_op = {
@@ -3264,6 +3265,10 @@ static int syna_tcm_set_game_mode(struct syna_tcm_data *tcm_info, int enable)
 			return retval;
 		}*/
 
+		if (ts->edge_pull_out_support) {
+			syna_set_touch_direction(tcm_info, tcm_info->touch_direction);
+		}
+
 		if (tcm_info->extreme_game_report_rate) {
 			switch (ts->noise_level) {
 			case INTELLIGENT_GAME_MODE:
@@ -3286,16 +3291,16 @@ static int syna_tcm_set_game_mode(struct syna_tcm_data *tcm_info, int enable)
 		if (tcm_info->switch_game_rate_support) {/*tcm_info->game_rate_switch_support*/
 			switch (ts->noise_level) {
 			case SYNA_GET_RATE_120:
-				report_rate = SYNA_120HZ_REPORT_RATE;
+				report_rate = tcm_info->game_report_rate_array[0];
 				break;
 			case SYNA_GET_RATE_240:
-				report_rate = SYNA_240HZ_REPORT_RATE;
+				report_rate = tcm_info->game_report_rate_array[1];
 				break;
 			case SYNA_GET_RATE_360:
-				report_rate = SYNA_360HZ_REPORT_RATE;
+				report_rate = tcm_info->game_report_rate_array[2];
 				break;
 			case SYNA_GET_RATE_720:
-				report_rate = SYNA_720HZ_REPORT_RATE;
+				report_rate = tcm_info->game_report_rate_array[3];
 				break;
 			default:
 				report_rate = tcm_info->game_rate;
@@ -6706,9 +6711,41 @@ static int syna_specific_resume_operate(void *chip_data, struct specific_resume_
 
 static void syna_set_touch_direction(void *chip_data, uint8_t dir)
 {
+	int retval = 0;
 	struct syna_tcm_data *tcm_info = (struct syna_tcm_data *)chip_data;
+	struct touchpanel_data *ts = spi_get_drvdata(tcm_info->client);
 
 	tcm_info->touch_direction = dir;
+	if (ts->edge_pull_out_support) {
+		if (tcm_info->game_mode) {
+			switch (tcm_info->touch_direction) {
+			case LANDSCAPE_SCREEN_90:
+				retval = syna_tcm_set_dynamic_config(tcm_info, DC_GRIP_ROATE_TO_HORIZONTAL_LEVEL, EDGE_STRETCH_RIGHT);
+				if (retval < 0) {
+					TPD_INFO("Failed to set touch direction\n");
+				}
+				break;
+			case LANDSCAPE_SCREEN_270:
+				retval = syna_tcm_set_dynamic_config(tcm_info, DC_GRIP_ROATE_TO_HORIZONTAL_LEVEL, EDGE_STRETCH_LEFT);
+				if (retval < 0) {
+					TPD_INFO("Failed to set touch direction\n");
+				}
+				break;
+			default:
+				retval = syna_tcm_set_dynamic_config(tcm_info, DC_GRIP_ROATE_TO_HORIZONTAL_LEVEL, EDGE_STRETCH_OFF);
+				if (retval < 0) {
+					TPD_INFO("Failed to set touch direction\n");
+				}
+				break;
+			}
+			TPD_INFO("set touch direction = 0x%02x!\n", tcm_info->touch_direction);
+		} else {
+			retval = syna_tcm_set_dynamic_config(tcm_info, DC_GRIP_ROATE_TO_HORIZONTAL_LEVEL, EDGE_STRETCH_OFF);
+			if (retval < 0) {
+				TPD_INFO("Failed to set touch direction\n");
+			}
+		}
+	}
 }
 
 static uint8_t syna_get_touch_direction(void *chip_data)
@@ -6905,6 +6942,55 @@ static int syna_tcm_sensitive_lv_set(void *chip_data, int level)
 		return 0;
 	}
 	TPD_INFO("OK synaptics sensitive lv to %d, now reg_val:%d", level, regval);
+
+	return 0;
+}
+
+static int syna_tcm_diaphragm_touch_lv_set(void *chip_data, int level)
+{
+	struct syna_tcm_data *tcm_info = (struct syna_tcm_data *)chip_data;
+	unsigned short regval = 0;
+	int retval = 0;
+
+	retval = syna_tcm_get_dynamic_config(tcm_info, DC_LOW_TEMP_ENABLE, &regval);
+	if (retval < 0) {
+		TPD_INFO("Failed to get diaphragm_touch config\n");
+		return 0;
+	}
+
+	switch (level) {
+	case DIAPHRAGM_DEFAULT_MODE:
+		regval = 0xfcff & regval;
+		break;
+	case DIAPHRAGM_FILM_MODE:
+		regval = 0xfcff & regval;
+		regval = 0x0100 | regval;
+		break;
+	case DIAPHRAGM_WATERPROO_MODE:
+		regval = 0xfcff & regval;
+		regval = 0x0200 | regval;
+		break;
+	case DIAPHRAGM_FILM_WATERPROO_MODE:
+		regval = 0xfcff & regval;
+		regval = 0x0200 | regval;
+		break;
+	default:
+		TPD_INFO("error, level = %d", level);
+		return 0;
+	}
+
+	retval = syna_tcm_set_dynamic_config(tcm_info, DC_LOW_TEMP_ENABLE, regval);
+	if (retval < 0) {
+		TPD_INFO("Failed to set diaphragm_touch config\n");
+		return 0;
+	}
+
+	retval = syna_tcm_get_dynamic_config(tcm_info, DC_LOW_TEMP_ENABLE, &regval);
+	if (retval < 0) {
+		TPD_INFO("Failed to get diaphragm_touch config\n");
+		return 0;
+	}
+	TPD_INFO("diaphragm_touch_lv_set level = %d regval = %d", level, regval);
 
 	return 0;
 }
@@ -7810,6 +7896,7 @@ static struct oplus_touchpanel_operations syna_tcm_ops = {
 	.specific_resume_operate	= syna_specific_resume_operate,
 	.smooth_lv_set			= syna_tcm_smooth_lv_set,
 	.sensitive_lv_set		= syna_tcm_sensitive_lv_set,
+	.diaphragm_touch_lv_set		= syna_tcm_diaphragm_touch_lv_set,
 	.get_touch_points_auto		= syna_get_touch_points_auto,
 	.get_gesture_info_auto		= syna_get_gesture_info_auto,
 	.screenon_fingerprint_info_auto	= syna_tcm_fingerprint_info_auto,
@@ -7860,6 +7947,12 @@ static void init_chip_dts(struct device *dev, void *chip_data)
 		tcm_info->fps_report_rate_array[3] = 1;
 		tcm_info->fps_report_rate_array[4] = 120;
 		tcm_info->fps_report_rate_array[5] = 2;
+		tcm_info->game_report_rate_num = GAME_REPORT_NUM;
+                tcm_info->game_report_rate_array[0] = SYNA_120HZ_REPORT_RATE;
+                tcm_info->game_report_rate_array[1] = SYNA_240HZ_REPORT_RATE;
+                tcm_info->game_report_rate_array[2] = SYNA_360HZ_REPORT_RATE;
+                tcm_info->game_report_rate_array[3] = SYNA_720HZ_REPORT_RATE;
+		tcm_info->game_report_rate_array[4] = SYNA_180HZ_REPORT_RATE;
 		tcm_info->syna_tempepratue[0] = 5;
 		tcm_info->syna_tempepratue[1] = 15;
 		tcm_info->syna_low_temp_enable = 0;
@@ -7891,6 +7984,8 @@ static void init_chip_dts(struct device *dev, void *chip_data)
 	tcm_info->gesture_mask = tcm_info->default_gesture_mask;
 	rc = of_property_count_u32_elems(chip_np, "fps_report_rate");
 	tcm_info->fps_report_rate_num = rc;
+	rc = of_property_count_u32_elems(chip_np, "game_report_rate");
+        tcm_info->game_report_rate_num = rc;
 
 	if (tcm_info->fps_report_rate_num > 0 && tcm_info->fps_report_rate_num <= FPS_REPORT_NUM
 		&& !(tcm_info->fps_report_rate_num % 2)) {
@@ -7914,6 +8009,27 @@ static void init_chip_dts(struct device *dev, void *chip_data)
 		tcm_info->fps_report_rate_array[5] = 2;
 		TPD_INFO("fps_report_rate is not dubole %d\n", tcm_info->fps_report_rate_num);
 	}
+
+	if (tcm_info->game_report_rate_num > 0 && tcm_info->game_report_rate_num <= GAME_REPORT_NUM) {
+                rc = of_property_read_u32_array(chip_np, "game_report_rate", temp_array, tcm_info->game_report_rate_num);
+                if (rc) {
+                        TP_INFO(tcm_info->tp_index, "game_report_rate not specified %d\n", rc);
+                } else {
+                        for (i = 0; i < tcm_info->game_report_rate_num; i++) {
+                                tcm_info->game_report_rate_array[i] = temp_array[i];
+                                TP_INFO(tcm_info->tp_index, "game_report_rate is: %d\n", tcm_info->game_report_rate_array[i]);
+                        }
+                }
+        } else {
+		tcm_info->game_report_rate_num = GAME_REPORT_NUM;
+                tcm_info->game_report_rate_array[0] = SYNA_120HZ_REPORT_RATE;
+                tcm_info->game_report_rate_array[1] = SYNA_240HZ_REPORT_RATE;
+                tcm_info->game_report_rate_array[2] = SYNA_360HZ_REPORT_RATE;
+                tcm_info->game_report_rate_array[3] = SYNA_720HZ_REPORT_RATE;
+		tcm_info->game_report_rate_array[4] = SYNA_180HZ_REPORT_RATE;
+                TP_INFO(tcm_info->tp_index, "game_report_rate is not dubole %d\n", tcm_info->game_report_rate_num);
+        }
+
 	rc = of_property_read_u32(chip_np, "fwupdate_bootloader", &tcm_info->fwupdate_bootloader);
 	if (rc < 0) {
 		tcm_info->fwupdate_bootloader = 0;

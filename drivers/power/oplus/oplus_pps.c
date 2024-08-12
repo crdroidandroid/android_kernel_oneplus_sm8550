@@ -4362,6 +4362,20 @@ static void oplus_pps_cancel_stop_work(void)
 	cancel_delayed_work(&chip->pps_stop_work);
 }
 
+static void oplus_pps_get_ops_work(struct work_struct *work)
+{
+	static int retry = 100;
+	struct oplus_pps_chip *chip = &g_pps_chip;
+	if (!chip)
+		return;
+
+	chip->ops = oplus_pps_ops_get();
+	if (!chip->ops && retry > 0) {
+		retry--;
+		schedule_delayed_work(&chip->get_pps_ops_work, msecs_to_jiffies(100));
+	}
+}
+
 static void oplus_pps_stop_work(struct work_struct *work)
 {
 	struct oplus_pps_chip *chip = container_of(work, struct oplus_pps_chip, pps_stop_work.work);
@@ -4779,6 +4793,10 @@ int oplus_pps_init(struct oplus_chg_chip *g_chg_chip)
 	}
 
 	chip->ops = oplus_pps_ops_get();
+	if (chip->pps_support_type && !chip->ops) {
+		INIT_DELAYED_WORK(&chip->get_pps_ops_work, oplus_pps_get_ops_work);
+		schedule_delayed_work(&chip->get_pps_ops_work, msecs_to_jiffies(100));
+	}
 
 	INIT_DELAYED_WORK(&chip->pps_stop_work, oplus_pps_stop_work);
 	INIT_DELAYED_WORK(&chip->update_pps_work, oplus_pps_update_work);
