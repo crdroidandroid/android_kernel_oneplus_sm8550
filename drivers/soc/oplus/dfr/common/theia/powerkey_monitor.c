@@ -22,8 +22,14 @@ static int stage_start = 0;
 #define PROC_PWK_REPORT "theiaPwkReport"
 
 static struct task_struct *block_thread = NULL;
+/* Control node write */
 static bool timer_started = false;
+/* Determine if exemption is required for timing anomalies  7189904*/
+static bool irq_started = false;
+/* Determine if exemption is required for timing anomalies  7189904*/
+static bool slow_flag = false;
 static int systemserver_pid = -1;
+/* Determine if the startup is complete*/
 static bool g_system_boot_completed = false;
 static spinlock_t record_stage_spinlock;
 
@@ -32,10 +38,22 @@ int get_systemserver_pid(void)
 	return systemserver_pid;
 }
 
-void set_timer_started_false(void)
+void set_timer_started(bool enable)
 {
-	timer_started = false;
+	timer_started = enable;
 }
+
+bool is_slowkernel_skip(void)
+{
+	return slow_flag;
+}
+
+void set_pwk_flag(bool enable)
+{
+	slow_flag = false;
+	irq_started = enable;
+}
+EXPORT_SYMBOL_GPL(set_pwk_flag);
 
 static ssize_t powerkey_monitor_param_proc_read(struct file *file,
 	char __user *buf, size_t count, loff_t *off)
@@ -84,7 +102,6 @@ static bool handle_param_setup(char *key, char *value)
 		int s_pid;
 		POWER_MONITOR_DEBUG_PRINTK("systemserver_pid changed\n");
 		if (sscanf(value, "%d", &s_pid) == 1)
-			POWER_MONITOR_DEBUG_PRINTK("systemserver_pid change to %d\n", s_pid);
 			systemserver_pid = s_pid;
 	} else if (!strcmp(key, "boot-completed")) {
 		int is_boot_completed;
@@ -239,10 +256,18 @@ static ssize_t theia_powerkey_report_proc_read(struct file *file,
 void record_stage(const char *buf)
 {
 	unsigned long flag;
-	if (!timer_started)
+	if (!timer_started) {
+		if (irq_started) {
+			if (!strcmp(buf, "POWERKEY_InputReaderProcessKey") || !strcmp(buf, "POWERKEY_interceptKeyBeforeQueueing")) {
+				POWER_MONITOR_DEBUG_PRINTK("record_stage: return in case slow kernel");
+				irq_started = false;
+				slow_flag = true;
+			}
+		}
 		return;
+	}
 
-	POWER_MONITOR_DEBUG_PRINTK("%s: buf:%s flow_buf:%s flow_buf_curr:0x%s flow_index:%x\n", __func__, buf, flow_buf, flow_buf_curr, flow_index);
+	POWER_MONITOR_DEBUG_PRINTK("%s: buf:%s\n", __func__, buf);
 
 	spin_lock_irqsave(&record_stage_spinlock, flag);
 	memset(flow_buf_curr, 0, STAGE_BRIEF_SIZE);
@@ -378,6 +403,10 @@ void theia_pwk_stage_end(char *reason)
 		POWER_MONITOR_DEBUG_PRINTK("theia_pwk_stage_end, reason:%s\n", reason);
 		record_stage(reason);
 		timer_started = false;
+	}
+
+	if (irq_started) {
+		irq_started = false;
 	}
 }
 

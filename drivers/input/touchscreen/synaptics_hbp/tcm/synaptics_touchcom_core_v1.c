@@ -454,6 +454,11 @@ static int syna_tcm_v1_read(struct tcm_dev *tcm_dev, unsigned int rd_length,
 		return _EINVAL;
 	}
 
+	if (IS_ERR_OR_NULL(buf)) {
+		LOGE("Invalid pointer buf\n");
+		return _EINVAL;
+	}
+
 	if (rd_length == 0)
 		return 0;
 
