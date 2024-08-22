@@ -370,19 +370,6 @@ enum flash_data {
 	PPDT_DATA,
 };
 
-enum stretch_status {
-	EDGE_STRETCH_OFF = 0,
-	EDGE_STRETCH_RIGHT,
-	EDGE_STRETCH_LEFT,
-};
-
-enum smart_mode {
-	DIAPHRAGM_DEFAULT_MODE = 0,
-	DIAPHRAGM_FILM_MODE = 1,
-	DIAPHRAGM_WATERPROO_MODE = 2,
-	DIAPHRAGM_FILM_WATERPROO_MODE = 3,
-};
-
 struct syna_tcm_buffer {
 	bool clone;
 	unsigned char *buf;
@@ -549,7 +536,6 @@ struct fp_area_rate {
 
 #define FIRMWARE_MODE_BL_MAX 2
 #define FPS_REPORT_NUM 6
-#define GAME_REPORT_NUM 5
 #define ERROR_STATE_MAX 3
 #define FWUPDATE_BL_MAX 3
 #define FW_BUF_SIZE             (256 * 1024)
@@ -652,8 +638,6 @@ struct syna_tcm_data {
 	bool switch_game_rate_support;
 	unsigned int fps_report_rate_num;
 	u32 fps_report_rate_array[FPS_REPORT_NUM];
-	unsigned int game_report_rate_num;
-	u32 game_report_rate_array[GAME_REPORT_NUM];
 	/*temperatue data*/
 	u32 syna_tempepratue[2];
 	unsigned int syna_low_temp_enable;
