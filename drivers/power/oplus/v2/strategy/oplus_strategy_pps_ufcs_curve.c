@@ -441,7 +441,7 @@ static int puc_strategy_init(struct oplus_chg_strategy *strategy)
 	if (soc_range == PUC_BATT_CURVE_SOC_RANGE_INVALID)
 		return -EFAULT;
 	temp_range = puc_get_temp_region(puc);
-	if (temp_range == PUC_BATT_CURVE_SOC_RANGE_INVALID)
+	if (temp_range == PUC_BATT_CURVE_TEMP_RANGE_INVALID)
 		return -EFAULT;
 
 	rc = puc_strategy_get_vbat(puc, &vbat);
