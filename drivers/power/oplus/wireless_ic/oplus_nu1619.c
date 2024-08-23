@@ -4909,7 +4909,7 @@ static void nu1619_charge_set_target_ichg(struct oplus_nu1619_ic *chip)
 	case ADAPTER_TYPE_THIRD_PARTY:
 	case ADAPTER_TYPE_SVOOC:
 	case ADAPTER_TYPE_SVOOC_50W:
-		if ((chip->nu1619_chg_status.dock_version == DOCK_THIRD) && (chip->nu1619_chg_status.adapter_power == ADAPTER_POWER_THIRD_20W)) {
+		if ((chip->nu1619_chg_status.dock_version == DOCK_THIRD) && (chip->nu1619_chg_status.adapter_power == ADAPTER_POWER_20W)) {
 			if (target_ichg >= WPC_20W_DOCK_CURR_MAX_MA)
 				target_ichg = WPC_20W_DOCK_CURR_MAX_MA;
 		}
