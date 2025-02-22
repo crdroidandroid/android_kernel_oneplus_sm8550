@@ -11063,6 +11063,7 @@ u32 oplus_chg_get_pps_status(void)
 	return pst->prop[USB_GET_PPS_STATUS];
 }
 
+#if IS_ENABLED(CONFIG_OPLUS_CHG_TEST_KIT)
 int oplus_check_cc_mode(void) {
 	int rc = 0;
 	struct battery_chg_dev *bcdev = NULL;
@@ -11090,6 +11091,7 @@ int oplus_check_cc_mode(void) {
 	else
 		return MODE_SRC;
 }
+#endif /* CONFIG_OPLUS_CHG_TEST_KIT */
 
 int oplus_chg_set_pps_config(int vbus_mv, int ibus_ma)
 {
@@ -11466,7 +11468,9 @@ struct oplus_chg_operations  battery_chg_ops = {
 	.set_bcc_curr_to_voocphy = oplus_set_bcc_curr_to_voocphy,
 	.pdo_5v = oplus_chg_set_pdo_5v,
 	.get_subboard_temp = oplus_get_subboard_temp,
+#ifdef CONFIG_OPLUS_CHG_TEST_KIT
 	.check_cc_mode = oplus_check_cc_mode,
+#endif
 	.get_ccdetect_online = sm8550_get_ccdetect_online,
 	.get_abnormal_adapter_disconnect_cnt = oplus_get_abnormal_adapter_disconnect_cnt,
 };
