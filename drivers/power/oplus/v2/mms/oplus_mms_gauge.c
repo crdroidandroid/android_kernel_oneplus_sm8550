@@ -30,137 +30,29 @@
 #include <oplus_mms_wired.h>
 #include <oplus_mms_gauge.h>
 #include <oplus_chg_vooc.h>
+#include <oplus_batt_bal.h>
 #include <oplus_parallel.h>
 #include <oplus_chg_wls.h>
+#include <oplus_chg_mutual.h>
 #include <linux/ktime.h>
 #include <linux/sched/clock.h>
+#include "gauge/oplus_gauge_common.h"
+
+#ifndef CONFIG_OPLUS_CHARGER_MTK
+#include <linux/soc/qcom/smem.h>
+#endif
 
 #define GAUGE_IC_NUM_MAX 2
 #define ERR_COUNT_MAX 3
 #define GAUGE_PARALLEL_IC_NUM_MIN 2
 #define GAUGE_DEFAULT_VOLT_MV		3800
 #define DEFAULT_SOC 50
-#define PUSH_DELAY_MS 2000
-#define DUMP_INFO_LEN 128
-static char deep_id_info[DUMP_INFO_LEN] = { 0 };
 
-#define GAUGE_REG_INFO_SIZE 512
-#define CALIB_TIME_STR_LEN 32
-
-struct oplus_virtual_gauge_child {
-	struct oplus_chg_ic_dev *ic_dev;
-	int index;
-	int capacity_ratio;
-	enum oplus_chg_ic_func *funcs;
-	int func_num;
-	enum oplus_chg_ic_virq_id *virqs;
-	int virq_num;
-};
-
-struct deep_dischg_batt_curve {
-	unsigned int iterm;
-	unsigned int vterm;
-	unsigned int ctime;
-};
-
-#define DEEP_DISCHG_BATT_CURVE_MAX		6
-struct deep_dischg_batt_curves {
-	struct deep_dischg_batt_curve limits[DEEP_DISCHG_BATT_CURVE_MAX];
-	int nums;
-};
-
-struct deep_dischg_count_curve {
-	unsigned int count;
-	unsigned int vbat0;
-	unsigned int vbat1;
-	unsigned int index;
-};
-
-#define DEEP_DISCHG_COUNT_CURVE_MAX		6
-struct deep_dischg_count_curves {
-	struct deep_dischg_count_curve limits[DEEP_DISCHG_COUNT_CURVE_MAX];
-	int nums;
-};
-
-struct deep_dischg_limits {
-	int32_t uv_thr;
-	int32_t count_thr;
-	int32_t count_cali;
-	int32_t soc;
-};
-
-struct deep_dischg_spec {
-	bool support;
-	int counts;
-	bool sili_err;
-	struct deep_dischg_limits config;
-	struct deep_dischg_batt_curves batt_curves;
-	struct deep_dischg_count_curves count_curves;
-};
-
-struct oplus_mms_gauge {
-	struct device *dev;
-	struct oplus_chg_ic_dev *gauge_ic;
-	struct oplus_chg_ic_dev *gauge_ic_parallel[GAUGE_IC_NUM_MAX];
-	struct oplus_chg_ic_dev *voocphy_ic;
-	struct oplus_mms *gauge_topic;
-	struct oplus_mms *gauge_topic_parallel[GAUGE_IC_NUM_MAX];
-	struct oplus_mms *comm_topic;
-	struct oplus_mms *wired_topic;
-	struct oplus_mms *vooc_topic;
-	struct oplus_mms *err_topic;
-	struct oplus_mms *parallel_topic;
-	struct oplus_mms *wls_topic;
-	struct mms_subscribe *comm_subs;
-	struct mms_subscribe *wired_subs;
-	struct mms_subscribe *gauge_subs;
-	struct mms_subscribe *vooc_subs;
-	struct mms_subscribe *parallel_subs;
-	struct mms_subscribe *wls_subs;
-
-	struct delayed_work hal_gauge_init_work;
-	struct work_struct err_handler_work;
-	struct work_struct online_handler_work;
-	struct work_struct offline_handler_work;
-	struct work_struct resume_handler_work;
-	struct work_struct update_change_work;
-	struct work_struct gauge_update_work;
-	struct work_struct gauge_set_curve_work;
-	struct work_struct set_gauge_batt_full_work;
-	struct delayed_work subboard_ntc_err_work;
-	struct delayed_work deep_dischg_work;
-	struct delayed_work deep_id_work;
-
-	struct votable *gauge_update_votable;
-	struct deep_dischg_spec deep_spec;
-
-	int device_type;
-	int device_type_for_vooc;
-	unsigned int vooc_sid;
-	unsigned int err_code;
-	int check_batt_vol_count;
-	bool pd_svooc;
-	bool bat_volt_different;
-
-	bool factory_test_mode;
-	bool wired_online;
-	bool wls_online;
-	bool hmac;
-	bool support_subboard_ntc;
-	bool check_subboard_ntc_err;
-	bool batt_full;
-	int batt_temp_region;
-	int child_num;
-	struct oplus_virtual_gauge_child *child_list;
-	int main_gauge;
-	int sub_gauge;
-	int ui_soc;
-
-	unsigned char *gauge_reg_info[GAUGE_IC_NUM_MAX];
-	unsigned char calib_time_str[CALIB_TIME_STR_LEN];
-};
 
 static struct oplus_mms_gauge *g_mms_gauge;
+static void oplus_mms_gauge_get_reserve_calib_info(struct oplus_mms_gauge *chip);
+static int oplus_mms_gauge_push_auth(struct oplus_mms_gauge *chip);
+static int oplus_mms_gauge_push_hmac(struct oplus_mms_gauge *chip);
 
 static int gauge_dbg_tbat = 0;
 module_param(gauge_dbg_tbat, int, 0644);
@@ -195,7 +87,7 @@ static bool is_support_parallel(struct oplus_mms_gauge *chip)
 		return false;
 }
 
-bool is_support_parallel_battery(struct oplus_mms *topic)
+int is_support_parallel_battery(struct oplus_mms *topic)
 {
 	struct oplus_mms_gauge *chip;
 
@@ -204,7 +96,14 @@ bool is_support_parallel_battery(struct oplus_mms *topic)
 		return 0;
 	}
 	chip = oplus_mms_get_drvdata(topic);
-	return is_support_parallel(chip);
+
+	if (!is_support_parallel(chip))
+		return DEFAULT_CONNECT_TYPE;
+
+	if (chip->connect_type == OPLUS_CHG_IC_CONNECT_SERIAL)
+		return SERIAL_CONNECT_TYPE;
+	else
+		return PARALLEL_CONNECT_TYPE;
 }
 
 int oplus_gauge_get_batt_mvolts(void)
@@ -512,8 +411,7 @@ static int oplus_gauge_get_subboard_temp(struct oplus_mms_gauge *chip)
 	}
 #ifndef CONFIG_DISABLE_OPLUS_FUNCTION
 	if (get_eng_version() == HIGH_TEMP_AGING || oplus_is_ptcrb_version()) {
-		chg_info("CONFIG_HIGH_TEMP_VERSION enable here, "
-			 "disable high tbat shutdown\n");
+		chg_info("HIGH_TEMP_AGING, disable high tbat shutdown,temp %d -> 690\n", temp);
 		if (temp > 690)
 			temp = 690;
 	}
@@ -521,189 +419,89 @@ static int oplus_gauge_get_subboard_temp(struct oplus_mms_gauge *chip)
 	return temp;
 }
 
-static int oplus_mms_gauge_push_vbat_uv(struct oplus_mms_gauge *chip)
-{
-	struct mms_msg *msg;
-	int rc;
-
-	msg = oplus_mms_alloc_msg(MSG_TYPE_ITEM, MSG_PRIO_HIGH, GAUGE_ITEM_VBAT_UV);
-	if (msg == NULL) {
-		chg_err("alloc vbat uv msg error\n");
-		return -ENOMEM;
-	}
-	rc = oplus_mms_publish_msg(chip->gauge_topic, msg);
-	if (rc < 0) {
-		chg_err("publish vbat uv msg error, rc=%d\n", rc);
-		kfree(msg);
-	}
-	chg_info(" [%d, %d]\n", chip->deep_spec.config.uv_thr, chip->deep_spec.config.count_thr);
-
-	return rc;
-}
-
-#define GAUGE_INVALID_DEEP_COUNT_CALI	10
-#define GAUGE_INVALID_DEEP_DICHG_COUNT	10
-int oplus_gauge_show_deep_dischg_count(struct oplus_mms *topic)
+int oplus_gauge_show_batt_chem_id(struct oplus_mms *topic, char *buf, int len)
 {
 	struct oplus_mms_gauge *chip;
+	u8 chemid[CHEMID_MAX_LENGTH] = {0};
+	int rc;
+	struct oplus_chg_ic_dev *ic;
+	int i, j;
+	int index = 0;
 
 	if (topic == NULL) {
 		chg_err("topic is NULL\n");
 		return 0;
 	}
 	chip = oplus_mms_get_drvdata(topic);
-
-	if (!chip  || !chip->deep_spec.support)
-		return GAUGE_INVALID_DEEP_DICHG_COUNT;
-
-	return chip->deep_spec.counts;
-}
-
-static int oplus_gauge_get_deep_dischg_count(struct oplus_mms_gauge *chip)
-{
-	int rc, temp = GAUGE_INVALID_DEEP_DICHG_COUNT;
-
-	if (!chip  || !chip->deep_spec.support)
-		return GAUGE_INVALID_DEEP_DICHG_COUNT;
-
-	rc = oplus_chg_ic_func(chip->gauge_ic, OPLUS_IC_FUNC_GAUGE_GET_DEEP_DISCHG_COUNT, &temp);
-	if (rc < 0) {
-		if (rc != -ENOTSUPP)
-			chg_err(" get batt deep dischg count error, rc=%d\n", rc);
-		return GAUGE_INVALID_DEEP_DICHG_COUNT;
+	if (chip == NULL) {
+		chg_err("chip is NULL\n");
+		return 0;
 	}
+	if (sizeof(chemid) < CHEM_ID_LENGTH * chip->child_num)
+		return 0;
 
-	return temp;
-}
-
-static void oplus_gauge_set_deep_term_volt(struct oplus_mms_gauge *chip, int volt_mv)
-{
-	int rc = 0;
-
-	if (!chip || !chip->deep_spec.support)
-		return;
-
-	rc = oplus_chg_ic_func(chip->gauge_ic, OPLUS_IC_FUNC_GAUGE_SET_DEEP_TERM_VOLT, &volt_mv);
-	if (rc < 0)
-		chg_err("set batt deep term volt_mv error, rc=%d, volt_mv=%d\n", rc, volt_mv);
-}
-
-int oplus_gauge_get_deep_count_cali(struct oplus_mms *topic)
-{
-	int rc = -GAUGE_INVALID_DEEP_COUNT_CALI;
-	struct oplus_mms_gauge *chip;
-
-	if (topic == NULL) {
-		chg_err("topic is NULL\n");
-		return rc;
-	}
-	chip = oplus_mms_get_drvdata(topic);
-
-	if (!chip  || !chip->deep_spec.support)
-		return rc;
-
-	return chip->deep_spec.config.count_cali;
-}
-
-static void oplus_gauge_get_deep_limits(struct oplus_mms_gauge *chip)
-{
-	int index = 0, counts = 0;
-
-	if (!chip  || !chip->deep_spec.support)
-		return;
-
-	for (index = chip->deep_spec.count_curves.nums - 1; index >= 0; index--) {
-		counts = chip->deep_spec.count_curves.limits[index].count < chip->deep_spec.config.count_cali ?
-			0 : (chip->deep_spec.count_curves.limits[index].count - chip->deep_spec.config.count_cali);
-		if (chip->deep_spec.counts >= counts) {
-			chip->deep_spec.config.count_thr = counts;
-			if (chip->deep_spec.config.uv_thr != chip->deep_spec.count_curves.limits[index].vbat0) {
-				chip->deep_spec.config.uv_thr = chip->deep_spec.count_curves.limits[index].vbat0;
-				oplus_gauge_set_deep_term_volt(chip, chip->deep_spec.count_curves.limits[index].vbat1);
+	if (topic == chip->gauge_topic) {
+		for (i = 0; i < chip->child_num; i++) {
+			ic = chip->child_list[i].ic_dev;
+			rc = oplus_chg_ic_func(ic, OPLUS_IC_FUNC_GAUGE_GET_CHEM_ID, chemid + i * CHEM_ID_LENGTH,
+					       sizeof(chemid));
+			if (rc < 0)
+				continue;
+			index += snprintf(buf + index, len - index, "[%d][%s]", i, ic->manu_name);
+			for (j = i * CHEM_ID_LENGTH; j < CHEM_ID_LENGTH * (i + 1); j++)
+				index += snprintf(buf + index, len - index, "%x ", chemid[j]);
+		}
+	} else {
+		for (i = 0; i < chip->child_num; i++) {
+			if (topic != chip->gauge_topic_parallel[i])
+				continue;
+			ic = chip->gauge_ic_comb[i];
+			rc = oplus_chg_ic_func(ic, OPLUS_IC_FUNC_GAUGE_GET_CHEM_ID, chemid, sizeof(chemid));
+			if (rc >= 0) {
+				index += snprintf(buf + index, len - index, "[%d][%s]", i, ic->manu_name);
+				for (j = 0; j < CHEM_ID_LENGTH; j++)
+					index += snprintf(buf + index, len - index, "%x ", chemid[j]);
 			}
-			break;
 		}
 	}
-	oplus_mms_gauge_push_vbat_uv(chip);
-	chg_info(" [%d, %d, %d]\n", index, chip->deep_spec.config.uv_thr, chip->deep_spec.config.count_thr);
+
+	return index;
 }
 
-void oplus_gauge_set_deep_dischg_count(struct oplus_mms *topic, int count)
+static void oplus_mms_gauge_read_mode_set(struct oplus_mms *mms, bool mode)
 {
-	struct oplus_mms_gauge *chip;
 	int rc = 0;
-
-	if (topic == NULL) {
-		chg_err("topic is NULL\n");
-		return;
-	}
-	chip = oplus_mms_get_drvdata(topic);
-
-	if (!chip  || !chip->deep_spec.support)
-		return;
-	chip->deep_spec.counts = count;
-	oplus_gauge_get_deep_limits(chip);
-
-	rc = oplus_chg_ic_func(chip->gauge_ic, OPLUS_IC_FUNC_GAUGE_SET_DEEP_DISCHG_COUNT, &count);
-	if (rc < 0)
-		chg_err(" set batt deep dischg count error, rc=%d, count=%d\n", rc, count);
-}
-
-void oplus_gauge_set_deep_count_cali(struct oplus_mms *topic, int val)
-{
+	int i;
 	struct oplus_mms_gauge *chip;
+	struct oplus_chg_ic_dev *ic;
 
-	if (topic == NULL) {
-		chg_err("topic is NULL\n");
-		return;
-	}
-	chip = oplus_mms_get_drvdata(topic);
-
-	if (!chip  || !chip->deep_spec.support || val < 0)
-		return;
-
-	chip->deep_spec.config.count_cali = val;
-	oplus_gauge_get_deep_limits(chip);
-}
-
-static int oplus_gauge_get_batt_id_info(struct oplus_mms_gauge *chip)
-{
-	int rc, temp = GPIO_STATUS_NOT_SUPPORT;
-
-	if (!chip)
-		return GPIO_STATUS_NOT_SUPPORT;
-
-
-	rc = oplus_chg_ic_func(chip->gauge_ic, OPLUS_IC_FUNC_GAUGE_GET_BATTID_INFO, &temp);
-	if (rc < 0) {
-		if (rc != -ENOTSUPP)
-			chg_err(" get battid info error, rc=%d\n", rc);
-		return GPIO_STATUS_NOT_SUPPORT;
-	}
-
-	return temp;
-}
-
-static void oplus_gauge_init_sili_status(struct oplus_mms_gauge *chip)
-{
-	int bybid = 0, batt_id = 0;
-	if (!chip) {
-		chip->deep_spec.sili_err = false;
+	if (mms == NULL) {
+		chg_err("mms is NULL");
 		return;
 	}
 
-	bybid = oplus_wired_get_byb_id_info(chip->wired_topic);
+	chip = oplus_mms_get_drvdata(mms);
 
-	batt_id = oplus_gauge_get_batt_id_info(chip);
-	if (bybid == GPIO_STATUS_NC && batt_id == GPIO_STATUS_PD)
-		chip->deep_spec.sili_err = true;
-	else
-		chip->deep_spec.sili_err = false;
-
-	snprintf(deep_id_info, DUMP_INFO_LEN, "$$deep_support@@%d$$byb_id@@%d$$batt_id@@%d$$sili_err@@%d$$counts@@%d$$uv_thr@@%d",
-		chip->deep_spec.support, bybid, batt_id, chip->deep_spec.sili_err, chip->deep_spec.counts, chip->deep_spec.config.uv_thr);
-
-	chg_info(" [%d, %d, %d, %d]\n", bybid, batt_id, chip->deep_spec.sili_err, chip->deep_spec.support);
+	if (mms == chip->gauge_topic) {
+		for (i = 0; i < chip->child_num; i++) {
+			ic = chip->child_list[i].ic_dev;
+			rc = oplus_chg_ic_func(ic, OPLUS_IC_FUNC_GAUGE_SET_READ_MODE, mode);
+			if (rc < 0) {
+				chg_err("gauge[%d](%s): can't set gauge read mode, rc=%d\n", i, ic->manu_name, rc);
+				continue;
+			}
+		}
+	} else {
+		for (i = 0; i < chip->child_num; i++) {
+			if (mms != chip->gauge_topic_parallel[i])
+				continue;
+			ic = chip->gauge_ic_comb[i];
+			rc = oplus_chg_ic_func(ic, OPLUS_IC_FUNC_GAUGE_SET_READ_MODE, mode);
+			if (rc < 0)
+				chg_err("gauge[%d](%s): can't set gauge read mode, rc=%d\n", i, ic->manu_name, rc);
+			return;
+		}
+	}
 }
 
 #define TEMP_SELECT_POINT 320
@@ -718,20 +516,21 @@ static int oplus_gauge_get_batt_temperature(struct oplus_mms_gauge *chip)
 		return gauge_dbg_tbat;
 	}
 
-	rc = oplus_chg_ic_func(g_mms_gauge->gauge_ic_parallel[chip->main_gauge],
+	rc = oplus_chg_ic_func(g_mms_gauge->gauge_ic_comb[chip->main_gauge],
 		OPLUS_IC_FUNC_GAUGE_GET_BATT_TEMP, &main_temp);
 	if (rc < 0) {
 		chg_err("get battery temp error, rc=%d\n", rc);
 		main_temp = GAUGE_INVALID_TEMP;
 	}
 	if (chip->sub_gauge) {
-		rc = oplus_chg_ic_func(g_mms_gauge->gauge_ic_parallel[__ffs(chip->sub_gauge)],
+		rc = oplus_chg_ic_func(g_mms_gauge->gauge_ic_comb[__ffs(chip->sub_gauge)],
 			OPLUS_IC_FUNC_GAUGE_GET_BATT_TEMP, &sub_temp);
 		if (rc < 0) {
 			chg_err("get sub battery temp error, rc=%d\n", rc);
 			sub_temp = GAUGE_INVALID_TEMP;
 		}
-		if (sub_temp == GAUGE_INVALID_TEMP || main_temp == GAUGE_INVALID_TEMP)
+		if (chip->connect_type != OPLUS_CHG_IC_CONNECT_SERIAL &&
+		    (sub_temp == GAUGE_INVALID_TEMP || main_temp == GAUGE_INVALID_TEMP))
 			temp = main_temp;
 		else if (main_temp >= TEMP_SELECT_POINT || sub_temp >= TEMP_SELECT_POINT)
 			temp = main_temp > sub_temp ? main_temp : sub_temp;
@@ -743,8 +542,7 @@ static int oplus_gauge_get_batt_temperature(struct oplus_mms_gauge *chip)
 
 #ifndef CONFIG_DISABLE_OPLUS_FUNCTION
 	if (get_eng_version() == HIGH_TEMP_AGING || oplus_is_ptcrb_version()) {
-		chg_info("[OPLUS_CHG]CONFIG_HIGH_TEMP_VERSION enable here, "
-			 "disable high tbat shutdown\n");
+		chg_info("HIGH_TEMP_AGING, disable high tbat shutdown,temp %d -> 690\n", temp);
 		if (temp > 690)
 			temp = 690;
 	}
@@ -873,7 +671,8 @@ bool oplus_gauge_afi_update_done(void)
 
 	rc = oplus_chg_ic_func(g_mms_gauge->gauge_ic, OPLUS_IC_FUNC_GAUGE_GET_AFI_UPDATE_DONE, &status);
 	if (rc < 0) {
-		chg_err("afi_update_done, rc=%d\n", rc);
+		if (rc != -ENOTSUPP)
+			chg_err("afi_update_done, rc=%d\n", rc);
 		return true;
 	}
 	return status;
@@ -891,7 +690,8 @@ bool oplus_gauge_check_reset_condition(void)
 
 	rc = oplus_chg_ic_func(g_mms_gauge->gauge_ic, OPLUS_IC_FUNC_GAUGE_CHECK_RESET, &need_reset);
 	if (rc < 0) {
-		chg_err("need_reset, rc=%d\n", rc);
+		if (rc != -ENOTSUPP)
+			chg_err("need_reset, rc=%d\n", rc);
 		return false;
 	}
 	return need_reset;
@@ -916,6 +716,44 @@ bool oplus_gauge_reset(void)
 	return reset_done;
 }
 
+int oplus_gauge_get_real_time_current(void)
+{
+	int rc;
+	int curr_ma;
+	int main_curr = 0, sub_curr = 0;
+
+	if (!g_mms_gauge)
+		return 0;
+
+	rc = oplus_chg_ic_func(g_mms_gauge->gauge_ic_comb[g_mms_gauge->main_gauge],
+		OPLUS_IC_FUNC_GAUGE_GET_REAL_TIME_CURR, &main_curr);
+	if (rc < 0) {
+		rc = oplus_chg_ic_func(g_mms_gauge->gauge_ic_comb[g_mms_gauge->main_gauge],
+			OPLUS_IC_FUNC_GAUGE_GET_BATT_CURR, &main_curr);
+		if (rc < 0) {
+			chg_err("get main battery current error, rc=%d\n", rc);
+			main_curr = 0;
+		}
+	}
+	if (g_mms_gauge->sub_gauge) {
+		rc = oplus_chg_ic_func(g_mms_gauge->gauge_ic_comb[__ffs(g_mms_gauge->sub_gauge)],
+			OPLUS_IC_FUNC_GAUGE_GET_REAL_TIME_CURR, &sub_curr);
+		if (rc < 0) {
+			rc = oplus_chg_ic_func(g_mms_gauge->gauge_ic_comb[__ffs(g_mms_gauge->sub_gauge)],
+				OPLUS_IC_FUNC_GAUGE_GET_BATT_CURR, &sub_curr);
+			if (rc < 0) {
+				chg_err("get sub battery current error, rc=%d\n", rc);
+				sub_curr = 0;
+			}
+		}
+	}
+	if (g_mms_gauge->connect_type == OPLUS_CHG_IC_CONNECT_SERIAL)
+		curr_ma = (main_curr + sub_curr) / 2;
+	else
+		curr_ma = main_curr + sub_curr;
+
+	return curr_ma;
+}
 
 int oplus_gauge_get_batt_current(void)
 {
@@ -926,21 +764,24 @@ int oplus_gauge_get_batt_current(void)
 	if (!g_mms_gauge)
 		return 0;
 
-	rc = oplus_chg_ic_func(g_mms_gauge->gauge_ic_parallel[g_mms_gauge->main_gauge],
+	rc = oplus_chg_ic_func(g_mms_gauge->gauge_ic_comb[g_mms_gauge->main_gauge],
 		OPLUS_IC_FUNC_GAUGE_GET_BATT_CURR, &main_curr);
 	if (rc < 0) {
 		chg_err("get main battery current error, rc=%d\n", rc);
 		main_curr = 0;
 	}
 	if (g_mms_gauge->sub_gauge) {
-		rc = oplus_chg_ic_func(g_mms_gauge->gauge_ic_parallel[__ffs(g_mms_gauge->sub_gauge)],
+		rc = oplus_chg_ic_func(g_mms_gauge->gauge_ic_comb[__ffs(g_mms_gauge->sub_gauge)],
 			OPLUS_IC_FUNC_GAUGE_GET_BATT_CURR, &sub_curr);
 		if (rc < 0) {
 			chg_err("get sub battery current error, rc=%d\n", rc);
 			sub_curr = 0;
 		}
 	}
-	curr_ma = main_curr + sub_curr;
+	if (g_mms_gauge->connect_type == OPLUS_CHG_IC_CONNECT_SERIAL)
+		curr_ma = (main_curr + sub_curr) / 2;
+	else
+		curr_ma = main_curr + sub_curr;
 
 	return curr_ma;
 }
@@ -1066,21 +907,41 @@ bool oplus_gauge_get_batt_authenticate(void)
 
 bool oplus_gauge_is_exist(struct oplus_mms *topic)
 {
+	int rc = 0;
+	int i;
 	struct oplus_mms_gauge *chip;
-	bool exist;
-	int rc;
+	struct oplus_chg_ic_dev *ic;
+	bool exist = true;
 
 	if (topic == NULL) {
 		chg_err("topic is NULL");
 		return false;
 	}
+
 	chip = oplus_mms_get_drvdata(topic);
 
-	rc = oplus_chg_ic_func(chip->gauge_ic,
-			       OPLUS_IC_FUNC_GAUGE_GET_BATT_EXIST, &exist);
-	if (rc < 0) {
-		chg_err("get battery exist status error, rc=%d\n", rc);
-		exist = false;
+	if (topic == chip->gauge_topic) {
+		for (i = 0; i < chip->child_num; i++) {
+			ic = chip->child_list[i].ic_dev;
+			rc = oplus_chg_ic_func(ic, OPLUS_IC_FUNC_GAUGE_GET_BATT_EXIST, &exist);
+			if (rc < 0) {
+				chg_err("gauge[%d](%s): can't get batt exist, rc=%d\n", i, ic->manu_name, rc);
+				exist = false;
+				break;
+			}
+		}
+	} else {
+		for (i = 0; i < chip->child_num; i++) {
+			if (topic != chip->gauge_topic_parallel[i])
+				continue;
+			ic = chip->gauge_ic_comb[i];
+			rc = oplus_chg_ic_func(ic, OPLUS_IC_FUNC_GAUGE_GET_BATT_EXIST, &exist);
+			if (rc < 0) {
+				chg_err("gauge[%d](%s): can't get batt exist, rc=%d\n", i, ic->manu_name, rc);
+				exist = false;
+			}
+			break;
+		}
 	}
 
 	return exist;
@@ -1101,7 +962,7 @@ int oplus_gauge_get_batt_capacity_mah(struct oplus_mms *topic)
 	chip = oplus_mms_get_drvdata(topic);
 
 	for (i = 0; i < chip->child_num; i++) {
-		rc = oplus_chg_ic_func(chip->gauge_ic_parallel[i],
+		rc = oplus_chg_ic_func(chip->gauge_ic_comb[i],
 			OPLUS_IC_FUNC_GAUGE_GET_BATT_CAP, &cap_temp);
 		if (rc < 0) {
 			chg_err("get battery capacity_mah error, rc=%d\n", rc);
@@ -1127,7 +988,7 @@ int oplus_gauge_get_battinfo_sn(struct oplus_mms *topic, char *sn_buff, int size
 	if (!chip || !sn_buff || size_buffer < OPLUS_BATT_SERIAL_NUM_SIZE)
 		return -EINVAL;
 
-	rc = oplus_chg_ic_func(chip->gauge_ic_parallel[chip->main_gauge],
+	rc = oplus_chg_ic_func(chip->gauge_ic_comb[chip->main_gauge],
 		OPLUS_IC_FUNC_GAUGE_GET_BATT_SN, sn_buff, size_buffer);
 	len = rc;
 	if (rc < 0) {
@@ -1138,7 +999,7 @@ int oplus_gauge_get_battinfo_sn(struct oplus_mms *topic, char *sn_buff, int size
 			/* change the end of main_gauge '\0' to '\n', and add 1 to the length */
 			sn_buff[len] = '\n';
 			len += 1;
-			rc = oplus_chg_ic_func(chip->gauge_ic_parallel[__ffs(chip->sub_gauge)],
+			rc = oplus_chg_ic_func(chip->gauge_ic_comb[__ffs(chip->sub_gauge)],
 				OPLUS_IC_FUNC_GAUGE_GET_BATT_SN, &sn_buff[len], (size_buffer - len));
 			if (rc < 0)
 				chg_err("get sub battery serial number error, rc=%d\n", rc);
@@ -1147,6 +1008,285 @@ int oplus_gauge_get_battinfo_sn(struct oplus_mms *topic, char *sn_buff, int size
 		}
 	}
 	return len;
+}
+
+int oplus_gauge_get_battinfo_manu_date(struct oplus_mms *topic, char *buff, int size_buffer)
+{
+	int rc = 0;
+	int len = 0;
+	struct oplus_mms_gauge *chip;
+
+	if (topic == NULL) {
+		chg_err("topic is NULL");
+		return 0;
+	}
+	chip = oplus_mms_get_drvdata(topic);
+	if (!chip || !buff || size_buffer < OPLUS_BATTINFO_DATE_SIZE)
+		return -EINVAL;
+
+	rc = oplus_chg_ic_func(chip->gauge_ic_comb[chip->main_gauge],
+		OPLUS_IC_FUNC_GAUGE_GET_MANU_DATE, buff, size_buffer);
+	len = rc;
+	if (rc < 0) {
+		chg_err("get main battery manu date error, rc=%d\n", rc);
+	} else {
+		if (chip->sub_gauge
+		    && ((size_buffer - len) > OPLUS_BATTINFO_DATE_SIZE)) {
+			/* change the end of main_gauge '\0' to '\n', and add 1 to the length */
+			buff[len] = '\n';
+			len += 1;
+			rc = oplus_chg_ic_func(chip->gauge_ic_comb[__ffs(chip->sub_gauge)],
+				OPLUS_IC_FUNC_GAUGE_GET_MANU_DATE, &buff[len], (size_buffer - len));
+			if (rc < 0)
+				chg_err("get sub battery manu date error, rc=%d\n", rc);
+			else
+				len += rc;
+		}
+	}
+	return len;
+}
+
+/* first usage date store in main gauge */
+int oplus_gauge_get_battinfo_first_usage_date(struct oplus_mms *topic, char *buff, int size_buffer)
+{
+	int rc = 0;
+	struct oplus_mms_gauge *chip;
+
+	if (topic == NULL) {
+		chg_err("topic is NULL");
+		return 0;
+	}
+	chip = oplus_mms_get_drvdata(topic);
+	if (!chip || !buff || size_buffer < OPLUS_BATTINFO_DATE_SIZE)
+		return -EINVAL;
+
+	rc = oplus_chg_ic_func(chip->gauge_ic,
+		OPLUS_IC_FUNC_GAUGE_GET_FIRST_USAGE_DATE, buff, size_buffer);
+
+	if (rc < 0)
+		chg_err("get main battery first usage date error, rc=%d\n", rc);
+
+	return rc;
+}
+
+int oplus_gauge_set_battinfo_first_usage_date(struct oplus_mms *topic, const char *buff)
+{
+	int rc = 0;
+	struct oplus_mms_gauge *chip;
+
+	if (topic == NULL) {
+		chg_err("topic is NULL");
+		return -ENODEV;
+	}
+	chip = oplus_mms_get_drvdata(topic);
+	if (!chip || !buff)
+		return -EINVAL;
+
+	rc = oplus_chg_ic_func(chip->gauge_ic,
+		OPLUS_IC_FUNC_GAUGE_SET_FIRST_USAGE_DATE, buff);
+
+	if (rc < 0)
+		chg_err("set battery first usage date error, rc=%d\n", rc);
+
+	return rc;
+}
+
+int oplus_gauge_get_ui_cc(struct oplus_mms *topic)
+{
+	int rc;
+	u16 cyc_cnt;
+	struct oplus_mms_gauge *chip;
+
+	if (topic == NULL) {
+		chg_err("topic is NULL");
+		return 0;
+	}
+	chip = oplus_mms_get_drvdata(topic);
+	if (!chip)
+		return 0;
+
+	rc = oplus_chg_ic_func(g_mms_gauge->gauge_ic, OPLUS_IC_FUNC_GAUGE_GET_UI_CC, &cyc_cnt);
+	if (rc < 0) {
+		chg_err("get battery ui cycle count error, rc=%d\n", rc);
+		return 0;
+	}
+
+	return cyc_cnt;
+}
+
+int oplus_gauge_set_ui_cc(struct oplus_mms *topic, int count)
+{
+	int rc = 0;
+	u16 cyc_cnt = count & 0xFFFF;
+	struct oplus_mms_gauge *chip;
+
+	if (topic == NULL) {
+		chg_err("topic is NULL");
+		return -ENODEV;
+	}
+	chip = oplus_mms_get_drvdata(topic);
+	if (!chip)
+		return -EINVAL;
+
+	rc = oplus_chg_ic_func(g_mms_gauge->gauge_ic, OPLUS_IC_FUNC_GAUGE_SET_UI_CC, cyc_cnt);
+	if (rc < 0) {
+		chg_err("set battery ui cycle count error, rc=%d\n", rc);
+	}
+
+	return rc;
+}
+
+int oplus_gauge_get_ui_soh(struct oplus_mms *topic)
+{
+	int rc;
+	u8 soh;
+	struct oplus_mms_gauge *chip;
+
+	if (topic == NULL) {
+		chg_err("topic is NULL");
+		return 0;
+	}
+	chip = oplus_mms_get_drvdata(topic);
+	if (!chip)
+		return 0;
+
+	rc = oplus_chg_ic_func(g_mms_gauge->gauge_ic, OPLUS_IC_FUNC_GAUGE_GET_UI_SOH, &soh);
+	if (rc < 0) {
+		chg_err("get battery ui soh error, rc=%d\n", rc);
+		return 0;
+	}
+
+	return soh;
+}
+
+int oplus_gauge_set_ui_soh(struct oplus_mms *topic, int ui_soh)
+{
+	int rc = 0;
+	u8 soh = ui_soh & 0xFF;
+	struct oplus_mms_gauge *chip;
+
+	if (topic == NULL) {
+		chg_err("topic is NULL");
+		return -ENODEV;
+	}
+	chip = oplus_mms_get_drvdata(topic);
+	if (!chip)
+		return -EINVAL;
+
+	rc = oplus_chg_ic_func(g_mms_gauge->gauge_ic, OPLUS_IC_FUNC_GAUGE_SET_UI_SOH, soh);
+	if (rc < 0) {
+		chg_err("set battery ui cycle count error, rc=%d\n", rc);
+	}
+
+	return rc;
+}
+
+int oplus_gauge_get_used_flag(struct oplus_mms *topic)
+{
+	int rc;
+	u8 flag;
+	struct oplus_mms_gauge *chip;
+
+	if (topic == NULL) {
+		chg_err("topic is NULL");
+		return 0;
+	}
+	chip = oplus_mms_get_drvdata(topic);
+	if (!chip)
+		return 0;
+
+	rc = oplus_chg_ic_func(g_mms_gauge->gauge_ic, OPLUS_IC_FUNC_GAUGE_GET_USED_FLAG, &flag);
+	if (rc < 0) {
+		chg_err("get battery used flag error, rc=%d\n", rc);
+		return 0;
+	}
+
+	return flag;
+}
+
+int oplus_gauge_set_used_flag(struct oplus_mms *topic, int used_flag)
+{
+	int rc = 0;
+	u8 flag = used_flag & 0xFF;
+	struct oplus_mms_gauge *chip;
+
+	if (topic == NULL) {
+		chg_err("topic is NULL");
+		return -ENODEV;
+	}
+	chip = oplus_mms_get_drvdata(topic);
+	if (!chip)
+		return -EINVAL;
+
+	rc = oplus_chg_ic_func(g_mms_gauge->gauge_ic, OPLUS_IC_FUNC_GAUGE_SET_USED_FLAG, flag);
+	if (rc < 0) {
+		chg_err("set battery used flag error, rc=%d\n", rc);
+	}
+
+	return rc;
+}
+
+static const char *physical_gauge_name_array[] = {
+	"bq27541", "bq27411", "bq27426", "bq27z561", "bq28z610",
+	"zy0602", "zy0603",
+	"nfg1000a", "nfg8011b",
+};
+
+int oplus_gauge_get_physical_name(struct oplus_mms *mms, char *name, int len)
+{
+	int i, j;
+	struct oplus_mms_gauge *chip;
+	struct oplus_chg_ic_dev *ic;
+	struct device_node *node;
+	char extracted_name[OPLUS_CHG_IC_MANU_NAME_MAX] = { 0 };
+	int child_num = 0;
+	int rc = 0;
+
+	if (!mms) {
+		chg_err("mms is NULL\n");
+		return -EINVAL;
+	}
+
+	if (len <= 0) {
+		chg_err("len %d invalid\n", len);
+		return -EINVAL;
+	}
+
+	chip = oplus_mms_get_drvdata(mms);
+	if (!chip) {
+		chg_err("chip is null\n");
+		return -EINVAL;
+	}
+
+	node = chip->child_list[0].ic_dev->dev->of_node;
+	child_num = of_property_count_elems_of_size(node, "oplus,gauge_ic", sizeof(u32));
+	if (child_num <= 0) {
+		chg_err("oplus,gauge_ic elems %d invalid\n", child_num);
+		return -ENODATA;
+	}
+
+	for (i = 0; i < child_num; i++) {
+		ic = of_get_oplus_chg_ic(node, "oplus,gauge_ic", i);
+		if (!ic) {
+			chg_err("ic is NULL for index %d\n", i);
+			continue;
+		}
+		memset(extracted_name, 0, sizeof(extracted_name));
+		rc = sscanf(ic->manu_name, "gauge-%127[^:]", extracted_name);
+		chg_debug("%s i=%d %s extracted_name=%s rc=%d\n", chip->child_list[0].ic_dev->manu_name, i,
+			 ic->manu_name, extracted_name, rc);
+		if (rc != 1)
+			continue;
+		for (j = 0; j < ARRAY_SIZE(physical_gauge_name_array); j++) {
+			if (!strcmp(extracted_name, physical_gauge_name_array[j])) {
+				snprintf(name, len, "%s", extracted_name);
+				chg_debug("found %s\n", name);
+				return 0;
+			}
+		}
+	}
+
+	return -ENODATA;
 }
 
 void oplus_gauge_set_batt_full(bool full)
@@ -1174,12 +1314,9 @@ static void oplus_mms_gauge_set_batt_full_work(struct work_struct *work)
 				&data, false);
 	chip->batt_temp_region = data.intval;
 
-	if ((chip->batt_temp_region == TEMP_REGION_COLD ||
-	     chip->batt_temp_region == TEMP_REGION_LITTLE_COLD ||
-	     chip->batt_temp_region == TEMP_REGION_COOL ||
-	     chip->batt_temp_region == TEMP_REGION_LITTLE_COOL ||
-	     chip->batt_temp_region == TEMP_REGION_PRE_NORMAL ||
-	     chip->batt_temp_region == TEMP_REGION_NORMAL) && chip->batt_full) {
+	if (chip->batt_temp_region >= TEMP_REGION_COLD &&
+	    chip->batt_temp_region <= TEMP_REGION_NORMAL_HIGH &&
+	    chip->batt_full) {
 		oplus_gauge_set_batt_full(true);
 	} else {
 		oplus_gauge_set_batt_full(false);
@@ -1283,7 +1420,7 @@ int oplus_gauge_get_dod0(struct oplus_mms *mms, int index, int *val)
 	if (is_support_parallel(chip)) {
 		switch (index) {
 		case 0:
-			rc = oplus_chg_ic_func(chip->gauge_ic_parallel[chip->main_gauge],
+			rc = oplus_chg_ic_func(chip->gauge_ic_comb[chip->main_gauge],
 				OPLUS_IC_FUNC_GAUGE_GET_DOD0, 0, val);
 			if (rc < 0) {
 				chg_err("get main battery dod0 error, rc=%d\n", rc);
@@ -1291,7 +1428,7 @@ int oplus_gauge_get_dod0(struct oplus_mms *mms, int index, int *val)
 			}
 			break;
 		case 1:
-			rc = oplus_chg_ic_func(chip->gauge_ic_parallel[__ffs(chip->sub_gauge)],
+			rc = oplus_chg_ic_func(chip->gauge_ic_comb[__ffs(chip->sub_gauge)],
 				OPLUS_IC_FUNC_GAUGE_GET_DOD0, 0, val);
 			if (rc < 0) {
 				chg_err("get sub battery dod0 error, rc=%d\n", rc);
@@ -1327,7 +1464,7 @@ int oplus_gauge_get_dod0_passed_q(struct oplus_mms *mms, int index, int *val)
 	if (is_support_parallel(chip)) {
 		switch (index) {
 		case 0:
-			rc = oplus_chg_ic_func(chip->gauge_ic_parallel[chip->main_gauge],
+			rc = oplus_chg_ic_func(chip->gauge_ic_comb[chip->main_gauge],
 				OPLUS_IC_FUNC_GAUGE_GET_DOD0_PASSED_Q, val);
 			if (rc < 0) {
 				chg_err("get main battery _dod0_passed_q error, rc=%d\n", rc);
@@ -1335,7 +1472,7 @@ int oplus_gauge_get_dod0_passed_q(struct oplus_mms *mms, int index, int *val)
 			}
 			break;
 		case 1:
-			rc = oplus_chg_ic_func(chip->gauge_ic_parallel[__ffs(chip->sub_gauge)],
+			rc = oplus_chg_ic_func(chip->gauge_ic_comb[__ffs(chip->sub_gauge)],
 				OPLUS_IC_FUNC_GAUGE_GET_DOD0_PASSED_Q, val);
 			if (rc < 0) {
 				chg_err("get sub battery _dod0_passed_q error, rc=%d\n", rc);
@@ -1371,7 +1508,7 @@ int oplus_gauge_get_qmax(struct oplus_mms *mms, int index, int *val)
 	if (is_support_parallel(chip)) {
 		switch (index) {
 		case 0:
-			rc = oplus_chg_ic_func(chip->gauge_ic_parallel[chip->main_gauge],
+			rc = oplus_chg_ic_func(chip->gauge_ic_comb[chip->main_gauge],
 				OPLUS_IC_FUNC_GAUGE_GET_QMAX, 0, val);
 			if (rc < 0) {
 				chg_err("get main battery qmax error, rc=%d\n", rc);
@@ -1379,7 +1516,7 @@ int oplus_gauge_get_qmax(struct oplus_mms *mms, int index, int *val)
 			}
 			break;
 		case 1:
-			rc = oplus_chg_ic_func(chip->gauge_ic_parallel[__ffs(chip->sub_gauge)],
+			rc = oplus_chg_ic_func(chip->gauge_ic_comb[__ffs(chip->sub_gauge)],
 				OPLUS_IC_FUNC_GAUGE_GET_QMAX, 0, val);
 			if (rc < 0) {
 				chg_err("get sub battery qmax error, rc=%d\n", rc);
@@ -1415,7 +1552,7 @@ int oplus_gauge_get_qmax_passed_q(struct oplus_mms *mms, int index, int *val)
 	if (is_support_parallel(chip)) {
 		switch (index) {
 		case 0:
-			rc = oplus_chg_ic_func(chip->gauge_ic_parallel[chip->main_gauge],
+			rc = oplus_chg_ic_func(chip->gauge_ic_comb[chip->main_gauge],
 				OPLUS_IC_FUNC_GAUGE_GET_QMAX_PASSED_Q, val);
 			if (rc < 0) {
 				chg_err("get main battery qmax_passed_q error, rc=%d\n", rc);
@@ -1423,7 +1560,7 @@ int oplus_gauge_get_qmax_passed_q(struct oplus_mms *mms, int index, int *val)
 			}
 			break;
 		case 1:
-			rc = oplus_chg_ic_func(chip->gauge_ic_parallel[__ffs(chip->sub_gauge)],
+			rc = oplus_chg_ic_func(chip->gauge_ic_comb[__ffs(chip->sub_gauge)],
 				OPLUS_IC_FUNC_GAUGE_GET_QMAX_PASSED_Q, val);
 			if (rc < 0) {
 				chg_err("get sub battery qmax_passed_q error, rc=%d\n", rc);
@@ -1459,7 +1596,7 @@ int oplus_gauge_get_volt(struct oplus_mms *mms, int index, int *val)
 	if (is_support_parallel(chip)) {
 		switch (index) {
 		case 0:
-			rc = oplus_chg_ic_func(chip->gauge_ic_parallel[chip->main_gauge],
+			rc = oplus_chg_ic_func(chip->gauge_ic_comb[chip->main_gauge],
 				OPLUS_IC_FUNC_GAUGE_GET_BATT_VOL, 0, val);
 			if (rc < 0) {
 				chg_err("get main battery volt error, rc=%d\n", rc);
@@ -1467,7 +1604,7 @@ int oplus_gauge_get_volt(struct oplus_mms *mms, int index, int *val)
 			}
 			break;
 		case 1:
-			rc = oplus_chg_ic_func(chip->gauge_ic_parallel[__ffs(chip->sub_gauge)],
+			rc = oplus_chg_ic_func(chip->gauge_ic_comb[__ffs(chip->sub_gauge)],
 				OPLUS_IC_FUNC_GAUGE_GET_BATT_VOL, 0, val);
 			if (rc < 0) {
 				chg_err("get sub battery volt error, rc=%d\n", rc);
@@ -1503,7 +1640,7 @@ int oplus_gauge_get_gauge_type(struct oplus_mms *mms, int index, int *val)
 	if (is_support_parallel(chip)) {
 		switch (index) {
 		case 0:
-			rc = oplus_chg_ic_func(chip->gauge_ic_parallel[chip->main_gauge],
+			rc = oplus_chg_ic_func(chip->gauge_ic_comb[chip->main_gauge],
 				OPLUS_IC_FUNC_GAUGE_GET_DEVICE_TYPE_FOR_BCC, val);
 			if (rc < 0) {
 				chg_err("get main battery gauge_type error, rc=%d\n", rc);
@@ -1511,7 +1648,7 @@ int oplus_gauge_get_gauge_type(struct oplus_mms *mms, int index, int *val)
 			}
 			break;
 		case 1:
-			rc = oplus_chg_ic_func(chip->gauge_ic_parallel[__ffs(chip->sub_gauge)],
+			rc = oplus_chg_ic_func(chip->gauge_ic_comb[__ffs(chip->sub_gauge)],
 				OPLUS_IC_FUNC_GAUGE_GET_DEVICE_TYPE_FOR_BCC, val);
 			if (rc < 0) {
 				chg_err("get sub battery gauge_type error, rc=%d\n", rc);
@@ -1616,6 +1753,23 @@ int oplus_gauge_get_batt_num(void)
 	return num;
 }
 
+int oplus_get_gauge_type(void)
+{
+	int rc;
+	int gauge_type = GAUGE_TYPE_UNKNOW;
+
+	if (!g_mms_gauge)
+		return GAUGE_TYPE_UNKNOW;
+
+	rc = oplus_chg_ic_func(g_mms_gauge->gauge_ic, OPLUS_IC_FUNC_GAUGE_GET_GAUGE_TYPE, &gauge_type);
+	if (rc < 0) {
+		chg_err("can't get gauge type, rc=%d\n", rc);
+		return GAUGE_TYPE_UNKNOW;
+	}
+
+	return gauge_type;
+}
+
 static int oplus_mms_gauge_set_err_code(struct oplus_mms_gauge *chip,
 					unsigned int err_code)
 {
@@ -1643,73 +1797,67 @@ static int oplus_mms_gauge_set_err_code(struct oplus_mms_gauge *chip,
 	return rc;
 }
 
-static int oplus_gauge_parse_deep_spec(struct oplus_mms_gauge *chip)
+static bool oplus_mms_gauge_get_batt_hmac(struct oplus_mms_gauge *chip)
 {
-	struct device_node *node;
-	int rc = 0, length;
+	int rc = 0;
+	int i;
+	struct oplus_chg_ic_dev *ic;
+	bool pass = false;
+	bool result = true;
 
 	if (!chip)
-		return -ENODEV;
+		return false;
 
-	node = chip->dev->of_node;
-
-	rc = of_property_read_u32(node, "deep_spec,uv_thr",
-			&chip->deep_spec.config.uv_thr);
-	if (rc < 0)
-		chip->deep_spec.config.uv_thr = 3000;
-
-	rc = of_property_read_u32(node, "deep_spec,count_cali",
-			&chip->deep_spec.config.count_cali);
-	if (rc < 0)
-		chip->deep_spec.config.count_cali = 0;
-
-	rc = of_property_read_u32(node, "deep_spec,count_thr",
-			&chip->deep_spec.config.count_thr);
-	if (rc < 0)
-		chip->deep_spec.config.count_thr = 1;
-
-	rc = of_property_read_u32(node, "deep_spec,vbat_soc",
-			&chip->deep_spec.config.soc);
-	if (rc < 0)
-		chip->deep_spec.config.soc = 10;
-
-	chip->deep_spec.support = of_property_read_bool(node, "deep_spec,support");
-
-	rc = of_property_count_elems_of_size(node, "deep_spec,batt_curve", sizeof(u32));
-	if (rc < 0)
-		return rc;
-
-	length = rc;
-	rc = of_property_read_u32_array(node, "deep_spec,batt_curve",
-							(u32 *)chip->deep_spec.batt_curves.limits, length);
-	chip->deep_spec.batt_curves.nums = length / 3;
-
-	rc = of_property_count_elems_of_size(node, "deep_spec,count_curve", sizeof(u32));
-	if (rc < 0) {
-		chg_err("Count deep spec count curve failed, rc=%d\n", rc);
-		return rc;
+	for (i = 0; i < chip->child_num; i++) {
+		ic = chip->child_list[i].ic_dev;
+		rc = oplus_chg_ic_func(ic, OPLUS_IC_FUNC_GAUGE_GET_BATT_HMAC, &pass);
+		if (rc < 0) {
+			result = false;
+			chg_err("gauge[%d](%s): can't get battery hmac status, rc=%d\n", i, ic->manu_name, rc);
+			break;
+		}
+		result &= pass;
 	}
 
-	length = rc;
-	rc = of_property_read_u32_array(node, "deep_spec,count_curve",
-							(u32 *)chip->deep_spec.count_curves.limits, length);
-	chip->deep_spec.count_curves.nums = length / 4;
-	return rc;
+	return result;
 }
 
 static int oplus_mms_gauge_virq_register(struct oplus_mms_gauge *chip);
 static int oplus_mms_gauge_topic_init(struct oplus_mms_gauge *chip);
-
 static void oplus_mms_gauge_init_work(struct work_struct *work)
 {
 	struct delayed_work *dwork = to_delayed_work(work);
 	struct oplus_mms_gauge *chip = container_of(dwork,
 		struct oplus_mms_gauge, hal_gauge_init_work);
 	struct device_node *node = chip->dev->of_node;
+	struct device_node *level_shift_node = NULL;
 	static int retry = OPLUS_CHG_IC_INIT_RETRY_MAX;
 	int rc;
 	int i = 0;
 	int j;
+
+	rc = of_property_read_u32(node, "oplus,gauge_ic_connect", &chip->connect_type);
+	if (rc < 0)
+		chip->connect_type = 0;
+
+	level_shift_node = of_find_node_by_name(node, "oplus,level_shift_ic");
+	if (level_shift_node) {
+		chip->level_shift_ic = of_get_oplus_chg_ic(node, "oplus,level_shift_ic", 0);
+		if (chip->level_shift_ic == NULL) {
+			chg_err("not find level shift ic\n");
+			goto init_try_again;
+		}
+		rc = oplus_chg_ic_func(chip->level_shift_ic, OPLUS_IC_FUNC_INIT);
+		if (rc == -EAGAIN) {
+			chg_err("level_shift_ic init timeout\n");
+			goto init_try_again;
+		} else if (rc < 0) {
+			chg_err("level_shift_ic init error, rc=%d\n", rc);
+			retry = 0;
+		}
+	} else {
+		chip->level_shift_ic = NULL;
+	}
 
 	rc = of_property_count_elems_of_size(node, "oplus,gauge_ic",
 					     sizeof(u32));
@@ -1761,7 +1909,7 @@ static void oplus_mms_gauge_init_work(struct work_struct *work)
 		chip->main_gauge = 0;
 	}
 	chip->gauge_ic = chip->child_list[chip->main_gauge].ic_dev;
-	chip->gauge_ic_parallel[chip->main_gauge] = chip->child_list[chip->main_gauge].ic_dev;
+	chip->gauge_ic_comb[chip->main_gauge] = chip->child_list[chip->main_gauge].ic_dev;
 	if (chip->child_num >= GAUGE_PARALLEL_IC_NUM_MIN) {
 		for (j = 0;j < chip->child_num; j++){
 			if (j != chip->main_gauge) {
@@ -1769,7 +1917,7 @@ static void oplus_mms_gauge_init_work(struct work_struct *work)
 			}
 		}
 		chg_err(" sub_gauge: %lu\n", __ffs(chip->sub_gauge));
-		chip->gauge_ic_parallel[__ffs(chip->sub_gauge)] = chip->child_list[__ffs(chip->sub_gauge)].ic_dev;
+		chip->gauge_ic_comb[__ffs(chip->sub_gauge)] = chip->child_list[__ffs(chip->sub_gauge)].ic_dev;
 	} else {
 		chip->sub_gauge = 0;
 	}
@@ -1788,18 +1936,12 @@ static void oplus_mms_gauge_init_work(struct work_struct *work)
 		chg_err("can't get device type for vooc, rc=%d\n", rc);
 		chip->device_type_for_vooc = 0;
 	}
-	rc = oplus_chg_ic_func(chip->gauge_ic,
-			       OPLUS_IC_FUNC_GAUGE_GET_BATT_HMAC,
-			       &chip->hmac);
-	if (rc < 0) {
-		chg_err("get battery hmac status error, rc=%d\n", rc);
-		chip->hmac = 0;
-	} else {
-		chg_err("hmac=%d\n", chip->hmac);
-	}
+	chip->hmac = oplus_mms_gauge_get_batt_hmac(chip);
+	chip->parallel_hamc = true;
 
 	chip->support_subboard_ntc = of_property_read_bool(node, "oplus,support_subboard_ntc");
-	chg_info("support_subboard_ntc=%d \n", chip->support_subboard_ntc);
+	chg_info("hmac=%d, support_subboard_ntc=%d \n",
+		  chip->hmac, chip->support_subboard_ntc);
 
 	chip->check_subboard_ntc_err = false;
 
@@ -1851,7 +1993,36 @@ static void oplus_mms_gauge_err_handler_work(struct work_struct *work)
 		if (is_err_topic_available(chip))
 			oplus_mms_publish_ic_err_msg(chip->err_topic,
 						     ERR_ITEM_IC, msg);
+		if (msg->type == OPLUS_IC_ERR_I2C && chip->level_shift_ic)
+			oplus_chg_ic_func(chip->level_shift_ic, OPLUS_IC_FUNC_REG_DUMP);
 		oplus_mms_gauge_err_analyze(chip, msg);
+		oplus_print_ic_err(msg);
+		list_del(&msg->list);
+		kfree(msg);
+	}
+}
+
+static void oplus_mms_level_shift_err_handler_work(struct work_struct *work)
+{
+	struct oplus_mms_gauge *chip = container_of(work, struct oplus_mms_gauge,
+						ls_err_handler_work);
+	struct oplus_chg_ic_err_msg *msg, *tmp;
+	struct list_head msg_list;
+
+	if (!chip->level_shift_ic)
+		return;
+
+	INIT_LIST_HEAD(&msg_list);
+	spin_lock(&chip->level_shift_ic->err_list_lock);
+	if (!list_empty(&chip->level_shift_ic->err_list))
+		list_replace_init(&chip->level_shift_ic->err_list, &msg_list);
+	spin_unlock(&chip->level_shift_ic->err_list_lock);
+
+	list_for_each_entry_safe(msg, tmp, &msg_list, list) {
+		if (is_err_topic_available(chip))
+			oplus_mms_publish_ic_err_msg(chip->err_topic,
+						     ERR_ITEM_IC, msg);
+		oplus_chg_ic_func(chip->level_shift_ic, OPLUS_IC_FUNC_REG_DUMP);
 		oplus_print_ic_err(msg);
 		list_del(&msg->list);
 		kfree(msg);
@@ -1935,6 +2106,13 @@ static void oplus_mms_gauge_err_handler(struct oplus_chg_ic_dev *ic_dev,
 	schedule_work(&chip->err_handler_work);
 }
 
+static void oplus_mms_level_shift_err_handler(struct oplus_chg_ic_dev *ic_dev,
+					void *virq_data)
+{
+	struct oplus_mms_gauge *chip = virq_data;
+	schedule_work(&chip->ls_err_handler_work);
+}
+
 static void oplus_mms_gauge_online_handler(struct oplus_chg_ic_dev *ic_dev,
 					    void *virq_data)
 {
@@ -1985,6 +2163,12 @@ static int oplus_mms_gauge_virq_register(struct oplus_mms_gauge *chip)
 		if (rc < 0)
 			chg_err("register OPLUS_IC_VIRQ_RESUME error, rc=%d", rc);
 	}
+	if (chip->level_shift_ic) {
+		rc = oplus_chg_ic_virq_register(chip->level_shift_ic, OPLUS_IC_VIRQ_ERR,
+			oplus_mms_level_shift_err_handler, chip);
+		if (rc < 0)
+			chg_err("register level shift OPLUS_IC_VIRQ_ERR error, rc=%d", rc);
+	}
 
 	return 0;
 }
@@ -2007,7 +2191,7 @@ static int oplus_mms_gauge_update_soc(struct oplus_mms *mms, union mms_msg_data 
 	}
 	chip = oplus_mms_get_drvdata(mms);
 
-	rc = oplus_chg_ic_func(chip->gauge_ic_parallel[chip->main_gauge],
+	rc = oplus_chg_ic_func(chip->gauge_ic_comb[chip->main_gauge],
 		OPLUS_IC_FUNC_GAUGE_GET_BATT_SOC, &main_soc);
 	if (rc < 0) {
 		chg_err("get battery soc error, rc=%d\n", rc);
@@ -2015,7 +2199,7 @@ static int oplus_mms_gauge_update_soc(struct oplus_mms *mms, union mms_msg_data 
 		goto end;
 	}
 	if (chip->sub_gauge) {
-		rc = oplus_chg_ic_func(chip->gauge_ic_parallel[__ffs(chip->sub_gauge)],
+		rc = oplus_chg_ic_func(chip->gauge_ic_comb[__ffs(chip->sub_gauge)],
 			OPLUS_IC_FUNC_GAUGE_GET_BATT_SOC, &sub_soc);
 		if (rc < 0) {
 			chg_err("get battery sub soc error, rc=%d\n", rc);
@@ -2063,13 +2247,13 @@ static int oplus_mms_sub_gauge_update_soc(struct oplus_mms *mms, union mms_msg_d
 		gauge_index = chip->main_gauge;
 	else
 		gauge_index = __ffs(chip->sub_gauge);
-	if (!chip->gauge_ic_parallel[gauge_index]) {
+	if (!chip->gauge_ic_comb[gauge_index]) {
 		chg_err("sub_gauge_ic is NULL");
 		soc = 0;
 		goto end;
 	}
 
-	rc = oplus_chg_ic_func(chip->gauge_ic_parallel[gauge_index],
+	rc = oplus_chg_ic_func(chip->gauge_ic_comb[gauge_index],
 		OPLUS_IC_FUNC_GAUGE_GET_BATT_SOC, &soc);
 	if (rc < 0) {
 		chg_err("get battery soc error, rc=%d\n", rc);
@@ -2079,6 +2263,38 @@ static int oplus_mms_sub_gauge_update_soc(struct oplus_mms *mms, union mms_msg_d
 end:
 	data->intval = soc;
 	return 0;
+}
+
+static int oplus_mms_sub_gauge_update_cc(
+			struct oplus_mms *mms, union mms_msg_data *data)
+{
+	int rc = -1;
+	int i;
+	int cc = 0;
+	struct oplus_mms_gauge *chip;
+	struct oplus_chg_ic_dev *ic;
+
+	if (mms == NULL) {
+		chg_err("mms is NULL");
+		return -EINVAL;
+	}
+
+	chip = oplus_mms_get_drvdata(mms);
+
+	for (i = 0; i < chip->child_num; i++) {
+		if (mms != chip->gauge_topic_parallel[i])
+			continue;
+		ic = chip->gauge_ic_comb[i];
+		rc = oplus_chg_ic_func(ic, OPLUS_IC_FUNC_GAUGE_GET_BATT_CC, &cc);
+		if (rc < 0)
+			chg_err("gauge[%d](%s): can't get gauge cc, rc=%d\n", i, ic->manu_name, rc);
+		break;
+	}
+
+	if (rc == 0)
+		data->intval = cc;
+
+	return rc;
 }
 
 static bool is_voocphy_ic_available(struct oplus_mms_gauge *chip)
@@ -2180,13 +2396,13 @@ static int oplus_mms_sub_gauge_update_vol_max(struct oplus_mms *mms, union mms_m
 		gauge_index = chip->main_gauge;
 	else
 		gauge_index = __ffs(chip->sub_gauge);
-	if (!chip->gauge_ic_parallel[gauge_index]) {
+	if (!chip->gauge_ic_comb[gauge_index]) {
 		chg_err("sub_gauge_ic is NULL");
 		vol = 0;
 		goto end;
 	}
 
-	rc = oplus_chg_ic_func(chip->gauge_ic_parallel[gauge_index],
+	rc = oplus_chg_ic_func(chip->gauge_ic_comb[gauge_index],
 		OPLUS_IC_FUNC_GAUGE_GET_BATT_MAX, &vol);
 	if (rc < 0) {
 		chg_err("get battery voltage max error, rc=%d\n", rc);
@@ -2283,17 +2499,20 @@ static int oplus_mms_gauge_update_curr(struct oplus_mms *mms, union mms_msg_data
 	}
 	chip = oplus_mms_get_drvdata(mms);
 
-	rc = oplus_chg_ic_func(chip->gauge_ic_parallel[chip->main_gauge],
+	rc = oplus_chg_ic_func(chip->gauge_ic_comb[chip->main_gauge],
 		OPLUS_IC_FUNC_GAUGE_GET_BATT_CURR, &main_curr);
 	if (rc < 0)
 		main_curr = 0;
 	if (chip->sub_gauge) {
-		rc = oplus_chg_ic_func(chip->gauge_ic_parallel[__ffs(chip->sub_gauge)],
+		rc = oplus_chg_ic_func(chip->gauge_ic_comb[__ffs(chip->sub_gauge)],
 			OPLUS_IC_FUNC_GAUGE_GET_BATT_CURR, &sub_curr);
 		if (rc < 0)
 			sub_curr = 0;
 	}
-	curr = main_curr + sub_curr;
+	if (chip->connect_type == OPLUS_CHG_IC_CONNECT_SERIAL)
+		curr = (main_curr + sub_curr) / 2;
+	else
+		curr = main_curr + sub_curr;
 end:
 	data->intval = curr;
 	return 0;
@@ -2319,13 +2538,13 @@ static int oplus_mms_sub_gauge_update_curr(struct oplus_mms *mms, union mms_msg_
 		gauge_index = chip->main_gauge;
 	else
 		gauge_index = __ffs(chip->sub_gauge);
-	if (!chip->gauge_ic_parallel[gauge_index]) {
+	if (!chip->gauge_ic_comb[gauge_index]) {
 		chg_err("sub_gauge_ic is NULL");
 		curr = 0;
 		goto end;
 	}
 
-	rc = oplus_chg_ic_func(chip->gauge_ic_parallel[gauge_index],
+	rc = oplus_chg_ic_func(chip->gauge_ic_comb[gauge_index],
 		OPLUS_IC_FUNC_GAUGE_GET_BATT_CURR, &curr);
 	if (rc < 0) {
 		chg_err("get battery current error, rc=%d\n", rc);
@@ -2358,7 +2577,6 @@ static int oplus_mms_gauge_push_subboard_temp_err(struct oplus_mms_gauge *chip, 
 #define SUBBOARD_LOW_ABNORMAL_TEMP (-300)
 #define SUBBOARD_HIGH_ABNORMAL_TEMP 1000
 #define GAUGE_LOW_ABNORMAL_TEMP (-200)
-
 static void oplus_mms_subboard_ntc_err_work(struct work_struct *work)
 {
 	struct delayed_work *dwork = to_delayed_work(work);
@@ -2391,200 +2609,12 @@ static void oplus_mms_subboard_ntc_err_work(struct work_struct *work)
 	}
 }
 
-#define REG_INFO_LEN 640
-static int mms_gauge_debug_track = 0;
-module_param(mms_gauge_debug_track, int, 0644);
-MODULE_PARM_DESC(mms_gauge_debug_track, "debug track");
-#define TRACK_UPLOAD_COUNT_MAX 1000
-#define TRACK_LOCAL_T_NS_TO_S_THD 1000000000
-#define TRACK_DEVICE_ABNORMAL_UPLOAD_PERIOD (24 * 3600)
-
-static int oplus_mms_gauge_track_check(char *deep_msg)
-{
-	struct oplus_mms *err_topic;
-	struct mms_msg *msg;
-	int rc;
-	static int upload_count = 0;
-	static int pre_upload_time = 0;
-	int curr_time;
-	struct oplus_mms_gauge *chip= g_mms_gauge;
-
-	if (!chip)
-		return -ENODEV;
-
-	curr_time = local_clock() / TRACK_LOCAL_T_NS_TO_S_THD;
-	if (curr_time - pre_upload_time > TRACK_DEVICE_ABNORMAL_UPLOAD_PERIOD)
-		upload_count = 0;
-
-	if (upload_count >= TRACK_UPLOAD_COUNT_MAX)
-		return -ENODEV;
-
-	pre_upload_time = local_clock() / TRACK_LOCAL_T_NS_TO_S_THD;
-
-	err_topic = oplus_mms_get_by_name("error");
-	if (!err_topic) {
-		chg_err("error topic not found\n");
-		return -ENODEV;
-	}
-
-	msg = oplus_mms_alloc_str_msg(
-		MSG_TYPE_ITEM, MSG_PRIO_MEDIUM, ERR_ITEM_DEEP_DISCHG_INFO, deep_msg);
-	if (msg == NULL) {
-		chg_err("alloc usbtemp error msg error\n");
-		return -ENOMEM;
-	}
-
-	rc = oplus_mms_publish_msg(err_topic, msg);
-	if (rc < 0) {
-		chg_err("publish usbtemp error msg error, rc=%d\n", rc);
-		kfree(msg);
-	}
-	upload_count++;
-
-	return rc;
-}
-
-static void oplus_gauge_update_deep_dischg(struct oplus_mms_gauge *chip)
-{
-	union mms_msg_data data = { 0 };
-	unsigned long update_delay = 0;
-	static int cnts = 0;
-	int ui_soc, vbat_min_mv, batt_temp, ibat_ma;
-	int bybid = 0, batt_id = 0;
-	int index, rc, i, iterm, vterm, ctime;
-	bool charging, low_curr = false, track_check = false;
-	char reg_info[REG_INFO_LEN] = { 0 };
-
-	charging = chip->wired_online || chip->wls_online;
-	if (charging) {
-		cnts = 0;
-		return;
-	}
-
-	ui_soc = chip->ui_soc;
-	rc = oplus_mms_get_item_data(chip->comm_topic, COMM_ITEM_UI_SOC, &data,
-					true);
-	if (rc < 0) {
-		chg_err("can't get ui_soc, rc=%d\n", rc);
-		chip->ui_soc = 0;
-	} else {
-		chip->ui_soc = data.intval;
-	}
-	rc = oplus_mms_get_item_data(chip->gauge_topic, GAUGE_ITEM_VOL_MIN, &data,
-				     false);
-	if (rc < 0) {
-		chg_err("can't get vbat_min, rc=%d\n", rc);
-		vbat_min_mv = 0;
-	} else {
-		vbat_min_mv = data.intval;
-	}
-	rc = oplus_mms_get_item_data(chip->gauge_topic, GAUGE_ITEM_TEMP, &data,
-				     false);
-	if (rc < 0) {
-		chg_err("can't get batt_temp, rc=%d\n", rc);
-		batt_temp = 0;
-	} else {
-		batt_temp = data.intval;
-	}
-	rc = oplus_mms_get_item_data(chip->gauge_topic, GAUGE_ITEM_CURR, &data,
-				     false);
-	if (rc < 0) {
-		chg_err("can't get ibat_ma, rc=%d\n", rc);
-		ibat_ma = 0;
-	} else {
-		ibat_ma = data.intval;
-	}
-
-	for (i = 0; i < chip->deep_spec.batt_curves.nums; i++) {
-		iterm = chip->deep_spec.batt_curves.limits[i].iterm;
-		vterm = chip->deep_spec.batt_curves.limits[i].vterm;
-		ctime = chip->deep_spec.batt_curves.limits[i].ctime;
-		if ((ibat_ma <= iterm) && (vbat_min_mv <= vterm)) {
-			low_curr = true;
-			break;
-		}
-	}
-
-	if (low_curr) {
-		if (++cnts >= ctime) {
-			cnts = 0;
-			chip->deep_spec.counts++;
-			track_check = true;
-			oplus_gauge_set_deep_dischg_count(chip->gauge_topic, chip->deep_spec.counts);
-			if (chip->deep_spec.counts >= chip->deep_spec.config.count_thr)
-				oplus_gauge_get_deep_limits(chip);
-		} else {
-			update_delay = msecs_to_jiffies(5000);
-		}
-	} else {
-		cnts = 0;
-		update_delay = msecs_to_jiffies(5000);
-	}
-
-	if (track_check || mms_gauge_debug_track) {
-		bybid = oplus_wired_get_byb_id_info(chip->wired_topic);
-		batt_id = oplus_gauge_get_batt_id_info(chip);
-		index = snprintf(reg_info, REG_INFO_LEN, "$$dischg_counts@@%d$$count_thr@@%d$$count_cali@@%d$$vbat_uv@@%d$$vbat_min@@%d$$ui_soc@@%d$$ibat_ma@@%d$$bybid@@%d$$batt_id@@%d$$sili_err@@%d",
-			chip->deep_spec.counts, chip->deep_spec.config.count_thr, chip->deep_spec.config.count_cali, chip->deep_spec.config.uv_thr, vbat_min_mv,
-			chip->ui_soc, ibat_ma, bybid, batt_id, chip->deep_spec.sili_err);
-
-		rc = oplus_mms_get_item_data(chip->gauge_topic, GAUGE_ITEM_REG_INFO, &data, true);
-
-		if (rc == 0 && data.strval && strlen(data.strval)) {
-			chg_err("[main_gauge_reg_info] %s", data.strval);
-			index = snprintf(reg_info + index, REG_INFO_LEN - index, "$$maingaugeinfo@@%s", data.strval);
-		}
-
-		oplus_mms_gauge_track_check(reg_info);
-		track_check = false;
-		mms_gauge_debug_track = 0;
-	}
-
-	if (update_delay > 0)
-		schedule_delayed_work(&chip->deep_dischg_work, update_delay);
-}
-
-static void oplus_gauge_deep_dischg_work(struct work_struct *work)
-{
-	struct delayed_work *dwork = to_delayed_work(work);
-	struct oplus_mms_gauge *chip =
-		container_of(dwork, struct oplus_mms_gauge, deep_dischg_work);
-
-	oplus_gauge_update_deep_dischg(chip);
-}
-
-static void oplus_gauge_deep_dischg_check(struct oplus_mms_gauge *chip)
-{
-	union mms_msg_data data = { 0 };
-
-	oplus_mms_get_item_data(chip->comm_topic, COMM_ITEM_UI_SOC, &data, true);
-	chip->ui_soc = data.intval;
-
-	if (!chip->deep_spec.support)
-		return;
-
-	if (!chip->wired_online && (chip->ui_soc >= chip->deep_spec.config.soc))
-		schedule_delayed_work(&chip->deep_dischg_work, 0);
-	else
-		cancel_delayed_work(&chip->deep_dischg_work);
-}
-
-static void oplus_gauge_deep_id_work(struct work_struct *work)
-{
-	struct delayed_work *dwork = to_delayed_work(work);
-	struct oplus_mms_gauge *chip =
-		container_of(dwork, struct oplus_mms_gauge, deep_id_work);
-
-	oplus_chg_ic_creat_err_msg(chip->child_list[chip->main_gauge].ic_dev, OPLUS_IC_ERR_BATT_ID, 0, deep_id_info);
-	oplus_chg_ic_virq_trigger(chip->child_list[chip->main_gauge].ic_dev, OPLUS_IC_VIRQ_ERR);
-}
-
 #define SUBBOARD_NTC_ERR_CHECK 100
 static int oplus_mms_gauge_update_temp(struct oplus_mms *mms, union mms_msg_data *data)
 {
 	struct oplus_mms_gauge *chip;
 	int temp, gauge_temp;
-	static int last_temp;
+	static int last_temp = GAUGE_INVALID_TEMP;
 
 	if (mms == NULL) {
 		chg_err("mms is NULL");
@@ -2596,12 +2626,14 @@ static int oplus_mms_gauge_update_temp(struct oplus_mms *mms, union mms_msg_data
 	}
 
 	chip = oplus_mms_get_drvdata(mms);
+#ifndef CONFIG_DISABLE_OPLUS_FUNCTION
 	if (get_eng_version() == FACTORY && chip->support_subboard_ntc) {
 		temp = oplus_gauge_get_subboard_temp(chip);
 		chg_info("is factory mode, use subboard temp directly! temp = %d\n", temp);
 		data->intval = temp;
 		return 0;
 	}
+#endif
 
 	if (chip->support_subboard_ntc && !chip->check_subboard_ntc_err) {
 		temp = oplus_gauge_get_subboard_temp(chip);
@@ -2629,7 +2661,7 @@ static int oplus_mms_gauge_update_temp(struct oplus_mms *mms, union mms_msg_data
 
 	data->intval = temp;
 
-	chg_info("support_subboard_ntc = %d, temp = %d\n", chip->support_subboard_ntc, temp);
+	chg_debug("support_subboard_ntc = %d, temp = %d\n", chip->support_subboard_ntc, temp);
 	return 0;
 }
 
@@ -2675,13 +2707,13 @@ static int oplus_mms_sub_gauge_update_temp(struct oplus_mms *mms, union mms_msg_
 		gauge_index = chip->main_gauge;
 	else
 		gauge_index = __ffs(chip->sub_gauge);
-	if (!chip->gauge_ic_parallel[gauge_index]) {
+	if (!chip->gauge_ic_comb[gauge_index]) {
 		chg_err("sub_gauge_ic is NULL");
 		temp = GAUGE_INVALID_TEMP;
 		goto end;
 	}
 
-	rc = oplus_chg_ic_func(chip->gauge_ic_parallel[gauge_index],
+	rc = oplus_chg_ic_func(chip->gauge_ic_comb[gauge_index],
 		OPLUS_IC_FUNC_GAUGE_GET_BATT_TEMP, &temp);
 	if (rc < 0) {
 		chg_err("get battery current error, rc=%d\n", rc);
@@ -2689,8 +2721,7 @@ static int oplus_mms_sub_gauge_update_temp(struct oplus_mms *mms, union mms_msg_
 	}
 #ifndef CONFIG_DISABLE_OPLUS_FUNCTION
 	if (get_eng_version() == HIGH_TEMP_AGING || oplus_is_ptcrb_version()) {
-		chg_info("[OPLUS_CHG]CONFIG_HIGH_TEMP_VERSION enable here, "
-			 "disable high tbat shutdown\n");
+		chg_info("HIGH_TEMP_AGING, disable high tbat shutdown,temp %d -> 690\n", temp);
 		if (temp > 690)
 			temp = 690;
 	}
@@ -2761,7 +2792,7 @@ static int oplus_mms_sub_gauge_get_reg_info(struct oplus_mms *mms, union mms_msg
 		return -EINVAL;
 	}
 
-	rc = oplus_chg_ic_func(chip->gauge_ic_parallel[gauge_index], OPLUS_IC_FUNC_GAUGE_GET_REG_INFO,
+	rc = oplus_chg_ic_func(chip->gauge_ic_comb[gauge_index], OPLUS_IC_FUNC_GAUGE_GET_REG_INFO,
 				chip->gauge_reg_info[gauge_index], GAUGE_REG_INFO_SIZE);
 	if (rc == -ENOTSUPP)
 		rc = 0;
@@ -2775,10 +2806,113 @@ static int oplus_mms_sub_gauge_get_reg_info(struct oplus_mms *mms, union mms_msg
 	return rc;
 }
 
-static int oplus_mms_gauge_get_calib_time(struct oplus_mms *mms, union mms_msg_data *data)
+static int oplus_mms_gauge_get_lifetime_status(
+				struct oplus_mms *mms, union mms_msg_data *data)
 {
 	struct oplus_mms_gauge *chip;
 	int rc = 0;
+
+	if (mms == NULL) {
+		chg_err("mms is NULL");
+		return -EINVAL;
+	}
+
+	if (data == NULL) {
+		chg_err("data is NULL");
+		return -EINVAL;
+	}
+
+	chip = oplus_mms_get_drvdata(mms);
+	rc = oplus_chg_ic_func(chip->gauge_ic,
+		OPLUS_IC_FUNC_GAUGE_GET_SILI_LIFETIME_STATUS, &chip->lifetime[0]);
+
+	data->strval = (char *)&chip->lifetime[0];
+
+	return rc;
+}
+
+static int oplus_mms_sub_gauge_get_lifetime_status(
+				struct oplus_mms *mms, union mms_msg_data *data)
+{
+	int gauge_index = 0;
+	int rc = -1;
+	int i;
+	struct oplus_mms_gauge *chip;
+	struct oplus_chg_ic_dev *ic;
+
+	if (mms == NULL) {
+		chg_err("mms is NULL");
+		return -EINVAL;
+	}
+
+	chip = oplus_mms_get_drvdata(mms);
+
+	for (i = 0; i < chip->child_num; i++) {
+		if (mms != chip->gauge_topic_parallel[i])
+			continue;
+		gauge_index = i;
+		ic = chip->gauge_ic_comb[i];
+		rc = oplus_chg_ic_func(ic, OPLUS_IC_FUNC_GAUGE_GET_SILI_LIFETIME_STATUS, &chip->lifetime[gauge_index]);
+		if (rc < 0)
+			chg_err("gauge[%d](%s): can't get gauge lifetime status, rc=%d\n", i, ic->manu_name, rc);
+		break;
+	}
+
+	data->strval = (char *)&chip->lifetime[gauge_index];
+
+	return rc;
+}
+
+static void oplus_mms_gauge_check_calib_time_update(struct oplus_mms *mms,
+			int dod_calib_time, int qmax_calib_time, struct gauge_calib_info *calib_info)
+{
+	int i;
+	bool update;
+	bool calib_info_init = false;
+	struct oplus_mms_gauge *chip;
+
+	if (calib_info == NULL)
+		return;
+
+	if (mms == NULL) {
+		chg_err("mms is NULL");
+		return;
+	}
+
+	chip = oplus_mms_get_drvdata(mms);
+	if (chip->child_num > GAUGE_IC_NUM_MAX)
+		return;
+
+	if (mms == chip->gauge_topic) {
+		calib_info_init = chip->calib_info_init[0];
+	} else {
+		for (i = 0; i < chip->child_num; i++) {
+			if (mms != chip->gauge_topic_parallel[i])
+				continue;
+			calib_info_init = chip->calib_info_init[i];
+			break;
+		}
+	}
+
+	if (calib_info_init && (dod_calib_time != -1 && calib_info->dod_time != dod_calib_time)) {
+		calib_info->dod_time = dod_calib_time;
+		update = true;
+	}
+
+	if (calib_info_init && (qmax_calib_time != -1 && calib_info->qmax_time != qmax_calib_time)) {
+		calib_info->qmax_time = qmax_calib_time;
+		update = true;
+	}
+
+	if (update)
+		queue_work(system_highpri_wq, &chip->set_reserve_calib_info_work);
+}
+
+static int oplus_mms_gauge_get_calib_time(struct oplus_mms *mms, union mms_msg_data *data)
+{
+	int rc = 0;
+	struct oplus_mms_gauge *chip;
+	struct gauge_calib_info *calib_info;
 	int qmax_calib_time = -1, dod_calib_time = -1;
 
 	if (mms == NULL) {
@@ -2791,21 +2925,26 @@ static int oplus_mms_gauge_get_calib_time(struct oplus_mms *mms, union mms_msg_d
 	}
 
 	chip = oplus_mms_get_drvdata(mms);
+	calib_info = chip->calib_info_load.calib_info;
 	rc = oplus_chg_ic_func(chip->gauge_ic, OPLUS_IC_FUNC_GAUGE_GET_CALIB_TIME,
-				&dod_calib_time, &qmax_calib_time);
+				&dod_calib_time, &qmax_calib_time, calib_info->calib_args, GAUGE_CALIB_ARGS_LEN);
 	if (rc == -ENOTSUPP)
 		rc = 0;
 
-	snprintf(chip->calib_time_str, CALIB_TIME_STR_LEN, "%d,%d", dod_calib_time, qmax_calib_time);
-	data->strval = chip->calib_time_str;
+	oplus_mms_gauge_check_calib_time_update(mms, dod_calib_time, qmax_calib_time, calib_info);
+	snprintf((char *)&(chip->calib_time_str[0]), CALIB_TIME_STR_LEN, "%d,%d", dod_calib_time, qmax_calib_time);
+	data->strval = (char *)&(chip->calib_time_str[0]);
+
 	return rc;
 }
 
 static int oplus_mms_sub_gauge_get_calib_time(struct oplus_mms *mms, union mms_msg_data *data)
 {
-	struct oplus_mms_gauge *chip;
-	unsigned long gauge_index;
+	int i;
 	int rc = 0;
+	struct oplus_mms_gauge *chip;
+	struct gauge_calib_info *calib_info;
+	struct oplus_chg_ic_dev *ic;
 	int qmax_calib_time = -1, dod_calib_time = -1;
 
 	if (mms == NULL) {
@@ -2818,61 +2957,74 @@ static int oplus_mms_sub_gauge_get_calib_time(struct oplus_mms *mms, union mms_m
 	}
 
 	chip = oplus_mms_get_drvdata(mms);
-	if (strcmp("gauge:0", mms->desc->name) == 0)
-		gauge_index = chip->main_gauge;
-	else
-		gauge_index = __ffs(chip->sub_gauge);
+	if (chip->child_num > GAUGE_IC_NUM_MAX)
+		return rc;
 
-	if (!chip->gauge_reg_info[gauge_index]) {
-		chg_err("gauge_reg_info[%ld] is NULL", gauge_index);
-		return -EINVAL;
+	for (i = 0; i < chip->child_num; i++) {
+		if (mms != chip->gauge_topic_parallel[i])
+			continue;
+		ic = chip->gauge_ic_comb[i];
+		calib_info = &(chip->calib_info_load.calib_info[i]);
+		rc = oplus_chg_ic_func(ic, OPLUS_IC_FUNC_GAUGE_GET_CALIB_TIME,
+				&dod_calib_time, &qmax_calib_time, calib_info->calib_args, GAUGE_CALIB_ARGS_LEN);
+		if (rc < 0)
+			chg_err("gauge[%d](%s): can't get gauge calib time, rc=%d\n", i, ic->manu_name, rc);
+		oplus_mms_gauge_check_calib_time_update(mms, dod_calib_time, qmax_calib_time, calib_info);
+		snprintf((char *)&(chip->calib_time_str[i]), CALIB_TIME_STR_LEN, "%d,%d",  dod_calib_time, qmax_calib_time);
+		data->strval = (char *)&(chip->calib_time_str[i]);
+		break;
 	}
 
-	rc = oplus_chg_ic_func(chip->gauge_ic_parallel[gauge_index], OPLUS_IC_FUNC_GAUGE_GET_CALIB_TIME,
-				&dod_calib_time, &qmax_calib_time);
-	if (rc == -ENOTSUPP)
-		rc = 0;
-
-	snprintf(chip->calib_time_str, CALIB_TIME_STR_LEN, "%d,%d",  dod_calib_time, qmax_calib_time);
-	data->strval = chip->calib_time_str;
 	return rc;
 }
 
-
 static int oplus_mms_gauge_update_fcc(struct oplus_mms *mms, union mms_msg_data *data)
 {
-	struct oplus_mms_gauge *chip;
-	int fcc = 0, main_fcc = 0, sub_fcc = 0;
+	int i;
 	int rc;
+	struct oplus_chg_ic_dev *ic;
+	struct oplus_mms_gauge *chip;
+	int fcc = 0, temp_fcc = 0;
 	int batt_num = oplus_gauge_get_batt_num();
 
 	if (mms == NULL) {
 		chg_err("mms is NULL");
 		return -EINVAL;
 	}
+
 	if (data == NULL) {
 		chg_err("data is NULL");
 		return -EINVAL;
 	}
-	chip = oplus_mms_get_drvdata(mms);
 
-	rc = oplus_chg_ic_func(chip->gauge_ic_parallel[chip->main_gauge],
-		OPLUS_IC_FUNC_GAUGE_GET_BATT_FCC, &main_fcc);
-	if (rc < 0) {
-		chg_err("get battery fcc error, rc=%d\n", rc);
-		main_fcc = 0;
-	}
-	if (chip->sub_gauge) {
-		rc = oplus_chg_ic_func(chip->gauge_ic_parallel[__ffs(chip->sub_gauge)],
-			OPLUS_IC_FUNC_GAUGE_GET_BATT_FCC, &sub_fcc);
-		if (rc < 0) {
-			chg_err("get sub battery fcc error, rc=%d\n", rc);
-			sub_fcc = 0;
+	chip = oplus_mms_get_drvdata(mms);
+	if (strcmp("gauge", mms->desc->name) == 0) {
+		for (i = 0; i < chip->child_num; i++) {
+			temp_fcc = 0;
+			ic = chip->child_list[i].ic_dev;
+			rc = oplus_chg_ic_func(ic, OPLUS_IC_FUNC_GAUGE_GET_BATT_FCC, &temp_fcc);
+			if (rc < 0) {
+				chg_err("gauge[%d](%s): can't get batt fcc, rc=%d\n", i, ic->manu_name, rc);
+				continue;
+			}
+			fcc += temp_fcc;
+		}
+	} else {
+		for (i = 0; i < chip->child_num; i++) {
+			if (mms != chip->gauge_topic_parallel[i])
+				continue;
+			ic = chip->gauge_ic_comb[i];
+			rc = oplus_chg_ic_func(ic, OPLUS_IC_FUNC_GAUGE_GET_BATT_FCC, &fcc);
+			if (rc < 0)
+				chg_err("gauge[%d](%s): can't get batt fcc, rc=%d\n", i, ic->manu_name, rc);
+			break;
 		}
 	}
+	if (is_support_parallel(chip))
+		data->intval = fcc;
+	else
+		data->intval = fcc * batt_num;
 
-	fcc = main_fcc + sub_fcc;
-	data->intval = fcc * batt_num;
 	return 0;
 }
 
@@ -2895,14 +3047,14 @@ static int oplus_mms_gauge_update_rm(struct oplus_mms *mms, union mms_msg_data *
 	}
 	chip = oplus_mms_get_drvdata(mms);
 
-	rc = oplus_chg_ic_func(chip->gauge_ic_parallel[chip->main_gauge],
+	rc = oplus_chg_ic_func(chip->gauge_ic_comb[chip->main_gauge],
 		OPLUS_IC_FUNC_GAUGE_GET_BATT_RM, &main_rm);
 	if (rc < 0) {
 		chg_err("get battery remaining capacity error, rc=%d\n", rc);
 		main_rm = 0;
 	}
 	if (chip->sub_gauge) {
-		rc = oplus_chg_ic_func(chip->gauge_ic_parallel[__ffs(chip->sub_gauge)],
+		rc = oplus_chg_ic_func(chip->gauge_ic_comb[__ffs(chip->sub_gauge)],
 			OPLUS_IC_FUNC_GAUGE_GET_BATT_RM, &sub_rm);
 		if (rc < 0) {
 			chg_err("get sub battery remaining capacity error, rc=%d\n", rc);
@@ -2910,8 +3062,11 @@ static int oplus_mms_gauge_update_rm(struct oplus_mms *mms, union mms_msg_data *
 		}
 	}
 	rm = main_rm + sub_rm;
+	if (is_support_parallel(chip))
+		data->intval = rm;
+	else
+		data->intval = rm * batt_num;
 
-	data->intval = rm * batt_num;
 	return 0;
 }
 
@@ -2930,21 +3085,24 @@ static int oplus_mms_gauge_update_cc(struct oplus_mms *mms, union mms_msg_data *
 		return -EINVAL;
 	}
 	chip = oplus_mms_get_drvdata(mms);
-	rc = oplus_chg_ic_func(chip->gauge_ic_parallel[chip->main_gauge],
+	rc = oplus_chg_ic_func(chip->gauge_ic_comb[chip->main_gauge],
 		OPLUS_IC_FUNC_GAUGE_GET_BATT_CC, &main_cc);
-	if (rc < 0) {
+	if ((rc < 0) || (main_cc <= 0)) {
 		chg_err("get battery cc error, rc=%d\n", rc);
 		main_cc = 0;
 	}
 	if (chip->sub_gauge) {
-		rc = oplus_chg_ic_func(chip->gauge_ic_parallel[__ffs(chip->sub_gauge)],
+		rc = oplus_chg_ic_func(chip->gauge_ic_comb[__ffs(chip->sub_gauge)],
 			OPLUS_IC_FUNC_GAUGE_GET_BATT_CC, &sub_cc);
-		if (rc < 0) {
+		if ((rc < 0) || (sub_cc <= 0)) {
 			chg_err("get sub battery cc error, rc=%d\n", rc);
-			sub_cc = 0;
+			cc = main_cc;
+		} else if (main_cc > 0 && sub_cc > 0) {
+			cc = (main_cc * chip->child_list[chip->main_gauge].capacity_ratio +
+				sub_cc * chip->child_list[__ffs(chip->sub_gauge)].capacity_ratio) / 100;
+		} else {
+			cc = sub_cc;
 		}
-		cc = (main_cc * chip->child_list[chip->main_gauge].capacity_ratio +
-			sub_cc * chip->child_list[__ffs(chip->sub_gauge)].capacity_ratio) / 100;
 		chg_info("main_cc:%d, sub_cc:%d, main_ratio:%d, sub_ratio:%d, cc:%d\n",
 			 main_cc, sub_cc, chip->child_list[chip->main_gauge].capacity_ratio,
 			 chip->child_list[__ffs(chip->sub_gauge)].capacity_ratio, cc);
@@ -2988,9 +3146,23 @@ static int oplus_mms_gauge_get_zy_gauge_soh(struct oplus_mms *mms, int gauge_typ
 		if (is_support_parallel(chip)) {
 			oplus_gauge_get_qmax(mms, 0, &batt_qmax_1);
 			oplus_gauge_get_qmax(mms, 1, &batt_qmax_2);
+			if (batt_qmax_1 > 0 && batt_qmax_2 >= 0) {
+				batt_qmax = batt_qmax_1 + batt_qmax_2;
+				batt_soh = batt_qmax * 100 / batt_capacity_mah;
+			} else if (batt_qmax_1 > 0 && batt_qmax_2 <= 0 &&
+			    chip->child_list[chip->main_gauge].capacity_ratio > 0) {
+				batt_capacity_mah = batt_capacity_mah *
+					chip->child_list[chip->main_gauge].capacity_ratio / 100;
+				batt_soh = batt_qmax_1  / batt_capacity_mah;
+			} else if (batt_qmax_1 <= 0 && batt_qmax_2 > 0 &&
+			    chip->child_list[__ffs(chip->sub_gauge)].capacity_ratio > 0) {
+				batt_capacity_mah = batt_capacity_mah *
+					chip->child_list[__ffs(chip->sub_gauge)].capacity_ratio / 100;
+				batt_soh = batt_qmax_2 / batt_capacity_mah;
+			} else if (batt_qmax_1 <= 0 && batt_qmax_2 <= 0) {
+				batt_soh = 0;
+			}
 
-			batt_qmax = batt_qmax_1 + batt_qmax_2;
-			batt_soh = batt_qmax * 100 / batt_capacity_mah;
 			chg_info("parallel qmax_1:%d, qmax_2:%d, capacity_mah:%d, soh:%d, gauge_type:%d\n",
 				batt_qmax_1, batt_qmax_2, batt_capacity_mah, batt_soh, gauge_type);
 		} else {
@@ -3007,21 +3179,28 @@ static int oplus_mms_gauge_get_zy_gauge_soh(struct oplus_mms *mms, int gauge_typ
 	return batt_soh;
 }
 
+#define SOH_LIST_NUMBER		5
 static int oplus_mms_gauge_update_soh(struct oplus_mms *mms, union mms_msg_data *data)
 {
-	struct oplus_mms_gauge *chip;
-	int soh, main_soh, sub_soh;
+	int i;
 	int rc;
 	int gauge_type = 0;
+	struct oplus_chg_ic_dev *ic;
+	struct oplus_mms_gauge *chip;
+	int soh = 0, temp_soh;
+	int pre_soh = 0;
+	int soh_list[SOH_LIST_NUMBER] = {0, 0, 0, 0, 0};
 
 	if (mms == NULL) {
 		chg_err("mms is NULL");
 		return -EINVAL;
 	}
+
 	if (data == NULL) {
 		chg_err("data is NULL");
 		return -EINVAL;
 	}
+
 	chip = oplus_mms_get_drvdata(mms);
 	if (chip == NULL)
 		return  -EINVAL;
@@ -3033,29 +3212,46 @@ static int oplus_mms_gauge_update_soh(struct oplus_mms *mms, union mms_msg_data 
 		return 0;
 	}
 
-	rc = oplus_chg_ic_func(chip->gauge_ic_parallel[chip->main_gauge],
-		OPLUS_IC_FUNC_GAUGE_GET_BATT_SOH, &main_soh);
-	if (rc < 0) {
-		chg_err("get main battery soh error, rc=%d\n", rc);
-		main_soh = 0;
-	}
-	if (chip->sub_gauge) {
-		rc = oplus_chg_ic_func(chip->gauge_ic_parallel[__ffs(chip->sub_gauge)],
-			OPLUS_IC_FUNC_GAUGE_GET_BATT_SOH, &sub_soh);
-		if (rc < 0) {
-			chg_err("get sub battery soh error, rc=%d\n", rc);
-			sub_soh = 0;
-		}
-		soh = (main_soh * chip->child_list[chip->main_gauge].capacity_ratio +
-			sub_soh * chip->child_list[__ffs(chip->sub_gauge)].capacity_ratio) / 100;
-		chg_info("main_soh:%d, sub_soh:%d, main_ratio:%d, sub_ratio:%d, soh:%d\n",
-			 main_soh, sub_soh, chip->child_list[chip->main_gauge].capacity_ratio,
-			 chip->child_list[__ffs(chip->sub_gauge)].capacity_ratio, soh);
-	} else {
-		soh = main_soh;
-	}
+	if (strcmp("gauge", mms->desc->name) == 0) {
+		for (i = 0; i < chip->child_num; i++) {
+			temp_soh = 0;
+			ic = chip->child_list[i].ic_dev;
+			rc = oplus_chg_ic_func(ic, OPLUS_IC_FUNC_GAUGE_GET_BATT_SOH, &temp_soh);
+			if (rc < 0) {
+				chg_err("gauge[%d](%s): can't get batt soh, rc=%d\n", i, ic->manu_name, rc);
+				continue;
+			}
 
+			if (temp_soh > 0) {
+				soh_list[i] = temp_soh;
+				pre_soh = temp_soh;
+			}
+		}
+
+		for (i = 0; i < chip->child_num; i++) {
+			if (soh_list[i] <= 0) {
+				soh_list[i] = pre_soh;
+			}
+
+			if (chip->child_list[i].capacity_ratio)
+				soh += soh_list[i] * chip->child_list[i].capacity_ratio;
+			else
+				soh += soh_list[i] * 100;
+		}
+		soh /= 100;
+	} else {
+		for (i = 0; i < chip->child_num; i++) {
+			if (mms != chip->gauge_topic_parallel[i])
+				continue;
+			ic = chip->gauge_ic_comb[i];
+			rc = oplus_chg_ic_func(ic, OPLUS_IC_FUNC_GAUGE_GET_BATT_SOH, &soh);
+			if (rc < 0)
+				chg_err("gauge[%d](%s): can't get batt soh, rc=%d\n", i, ic->manu_name, rc);
+			break;
+		}
+	}
 	data->intval = soh;
+
 	return 0;
 }
 
@@ -3113,6 +3309,7 @@ static int oplus_mms_gauge_update_hmac(struct oplus_mms *mms,
 				       union mms_msg_data *data)
 {
 	struct oplus_mms_gauge *chip;
+	bool hmac = true;
 
 	if (mms == NULL) {
 		chg_err("mms is NULL");
@@ -3124,8 +3321,12 @@ static int oplus_mms_gauge_update_hmac(struct oplus_mms *mms,
 	}
 	chip = oplus_mms_get_drvdata(mms);
 
-	data->intval = chip->hmac;
+	hmac = chip->hmac;
 
+	if (is_support_parallel(chip) && chip->connect_type != OPLUS_CHG_IC_CONNECT_SERIAL)
+		hmac = chip->parallel_hamc;
+
+	data->intval = hmac;
 	return 0;
 }
 
@@ -3194,45 +3395,6 @@ static int oplus_mms_gauge_real_temp(struct oplus_mms *mms, union mms_msg_data *
 	return 0;
 }
 
-static int oplus_mms_gauge_update_vbat_uv(struct oplus_mms *mms, union mms_msg_data *data)
-{
-	struct oplus_mms_gauge *chip;
-
-	if (mms == NULL) {
-		chg_err("mms is NULL");
-		return -EINVAL;
-	}
-	if (data == NULL) {
-		chg_err("data is NULL");
-		return -EINVAL;
-	}
-	chip = oplus_mms_get_drvdata(mms);
-	if (chip->deep_spec.counts < chip->deep_spec.config.count_thr)
-		return 0;
-	data->intval = chip->deep_spec.config.uv_thr;
-	chg_info("[%d, %d]\n", chip->deep_spec.config.uv_thr, chip->deep_spec.config.count_thr);
-	return 0;
-}
-
-static int oplus_mms_gauge_get_si_prop(struct oplus_mms *mms, union mms_msg_data *data)
-{
-	struct oplus_mms_gauge *chip;
-	int rc = 0;
-
-	if (mms == NULL) {
-		chg_err("mms is NULL");
-		return -EINVAL;
-	}
-	if (data == NULL) {
-		chg_err("data is NULL");
-		return -EINVAL;
-	}
-
-	chip = oplus_mms_get_drvdata(mms);
-	data->intval = chip->deep_spec.support;
-	return rc;
-}
-
 static void oplus_mms_gauge_update(struct oplus_mms *mms, bool publish)
 {
 	struct oplus_mms_gauge *chip;
@@ -3262,6 +3424,112 @@ static void oplus_mms_gauge_update(struct oplus_mms *mms, bool publish)
 			return;
 		}
 	}
+}
+
+static int oplus_gauge_ic_get_qmax(struct oplus_chg_ic_dev *ic_dev, int *qmax)
+{
+	int rc;
+	int batt_num;
+	int temp_qmax;
+	int i;
+
+	if (ic_dev == NULL || qmax == NULL) {
+		chg_err("ic_dev or qmax is NULL\n");
+		return -EINVAL;
+	}
+
+	*qmax = 0;
+	rc = oplus_chg_ic_func(ic_dev, OPLUS_IC_FUNC_GAUGE_GET_BATT_NUM, &batt_num);
+	if (rc < 0) {
+		chg_err("can't get batt_num from ic:%s, set default to 1\n", ic_dev->name);
+		batt_num = 1;
+	}
+	for (i = 0; i < batt_num; i++) {
+		rc = oplus_chg_ic_func(ic_dev, OPLUS_IC_FUNC_GAUGE_GET_QMAX, i, &temp_qmax);
+		if (rc < 0) {
+			if (rc != -ENOTSUPP)
+				chg_err("can't get qmax from ic:%s, set default to 0\n", ic_dev->name);
+			temp_qmax = 0;
+		}
+		*qmax += temp_qmax;
+	}
+	return 0;
+}
+
+static int oplus_mms_gauge_update_qmax(struct oplus_mms *mms, union mms_msg_data *data)
+{
+	struct oplus_mms_gauge *chip;
+	struct oplus_chg_ic_dev *ic;
+	int batt_qmax = 0;
+	int temp_qmax = 0;
+	int rc = 0;
+	int i;
+
+	if (mms == NULL) {
+		chg_err("mms is NULL\n");
+		return -EINVAL;
+	}
+
+	if (data == NULL) {
+		chg_err("data is NULL\n");
+		return -EINVAL;
+	}
+
+	chip = oplus_mms_get_drvdata(mms);
+	if (strcmp("gauge", mms->desc->name) == 0) {
+		for (i = 0; i < chip->child_num; i++) {
+			temp_qmax = 0;
+			ic = chip->child_list[i].ic_dev;
+			rc = oplus_gauge_ic_get_qmax(ic, &temp_qmax);
+			if (rc < 0) {
+				chg_err("gauge[%d](%s): can't get batt qmax, rc=%d\n",
+					i, ic->manu_name, rc);
+				continue;
+			}
+			batt_qmax += temp_qmax;
+		}
+	} else {
+		for (i = 0; i < chip->child_num; i++) {
+			if (mms != chip->gauge_topic_parallel[i])
+				continue;
+			ic = chip->gauge_ic_comb[i];
+			rc = oplus_gauge_ic_get_qmax(ic, &batt_qmax);
+			if (rc < 0) {
+				chg_err("gauge[%d](%s): can't get batt qmax, rc=%d\n", i, ic->manu_name, rc);
+				batt_qmax = 0;
+				return -EINVAL;
+			}
+			break;
+		}
+	}
+	data->intval = batt_qmax;
+	return 0;
+}
+
+static int oplus_mms_gauge_update_car_c(struct oplus_mms *mms, union mms_msg_data *data)
+{
+	struct oplus_mms_gauge *chip;
+	int rc = 0;
+	int car_c = 0;
+
+	if (mms == NULL) {
+		chg_err("mms is NULL\n");
+		return -EINVAL;
+	}
+
+	if (data == NULL) {
+		chg_err("data is NULL\n");
+		return -EINVAL;
+	}
+	chip = oplus_mms_get_drvdata(mms);
+	rc = oplus_chg_ic_func(chip->gauge_ic, OPLUS_IC_FUNC_GAUGE_GET_GAUGE_CAR_C, &car_c);
+	if (rc < 0) {
+		if (rc != -ENOTSUPP)
+			chg_err("get mtk car_c failed, rc = %d", rc);
+		return rc;
+	}
+	data->intval = car_c;
+	return 0;
 }
 
 static void oplus_mms_sub_gauge_update(struct oplus_mms *mms, bool publish)
@@ -3467,6 +3735,87 @@ static struct mms_item oplus_mms_gauge_item[] = {
 			.str_data = true,
 			.update = oplus_mms_gauge_get_calib_time,
 		}
+	}, {
+		.desc = {
+			.item_id = GAUGE_ITEM_FCC_COEFF,
+		}
+	}, {
+		.desc = {
+			.item_id = GAUGE_ITEM_SOH_COEFF,
+		}
+	}, {
+		.desc = {
+			.item_id = GAUGE_ITEM_SPARE_POWER_ENABLE,
+			.str_data = false,
+			.up_thr_enable = false,
+			.down_thr_enable = false,
+			.dead_thr_enable = false,
+			.update = oplus_mms_gauge_update_spare_power_enable,
+		}
+	}, {
+		.desc = {
+			.item_id = GAUGE_ITEM_SILI_IC_ALG_CFG,
+		}
+	}, {
+		.desc = {
+			.item_id = GAUGE_ITEM_SILI_IC_ALG_DSG_ENABLE,
+			.str_data = false,
+			.up_thr_enable = false,
+			.down_thr_enable = false,
+			.dead_thr_enable = false,
+			.update = oplus_mms_gauge_update_sili_ic_alg_dsg_enable,
+		}
+	}, {
+		.desc = {
+			.item_id = GAUGE_ITEM_SILI_IC_ALG_TERM_VOLT,
+			.str_data = false,
+			.up_thr_enable = false,
+			.down_thr_enable = false,
+			.dead_thr_enable = false,
+			.update = oplus_mms_gauge_update_sili_ic_alg_term_volt_data,
+		}
+	}, {
+		.desc = {
+			.item_id = GAUGE_ITEM_LIFETIME_STATUS,
+			.str_data = true,
+			.update = oplus_mms_gauge_get_lifetime_status,
+		}
+	}, {
+		.desc = {
+			.item_id = GAUGE_ITEM_RATIO_VALUE,
+			.str_data = false,
+			.up_thr_enable = false,
+			.down_thr_enable = false,
+			.dead_thr_enable = false,
+			.update = oplus_mms_gauge_update_deep_ratio,
+		}
+	}, {
+		.desc = {
+			.item_id = GAUGE_ITEM_RATIO_TRANGE,
+			.str_data = false,
+			.up_thr_enable = false,
+			.down_thr_enable = false,
+			.dead_thr_enable = false,
+			.update = oplus_mms_gauge_update_ratio_trange,
+		}
+	}, {
+		.desc = {
+			.item_id = GAUGE_ITEM_QMAX,
+			.str_data = false,
+			.up_thr_enable = false,
+			.down_thr_enable = false,
+			.dead_thr_enable = false,
+			.update = oplus_mms_gauge_update_qmax,
+		}
+	}, {
+		.desc = {
+			.item_id = GAUGE_ITEM_CAR_C,
+			.str_data = false,
+			.up_thr_enable = false,
+			.down_thr_enable = false,
+			.dead_thr_enable = false,
+			.update = oplus_mms_gauge_update_car_c,
+		}
 	}
 };
 
@@ -3483,6 +3832,15 @@ static struct mms_item oplus_mms_sub_gauge_item[] = {
 	}, {
 		.desc = {
 			.item_id = GAUGE_ITEM_VOL_MAX,
+			.str_data = false,
+			.up_thr_enable = false,
+			.down_thr_enable = false,
+			.dead_thr_enable = false,
+			.update = oplus_mms_sub_gauge_update_vol_max,
+		}
+	}, {
+		.desc = {
+			.item_id = GAUGE_ITEM_VOL_MIN,
 			.str_data = false,
 			.up_thr_enable = false,
 			.down_thr_enable = false,
@@ -3519,6 +3877,66 @@ static struct mms_item oplus_mms_sub_gauge_item[] = {
 			.str_data = true,
 			.update = oplus_mms_sub_gauge_get_calib_time,
 		}
+	}, {
+		.desc = {
+			.item_id = GAUGE_ITEM_SILI_IC_ALG_DSG_ENABLE,
+			.str_data = false,
+			.up_thr_enable = false,
+			.down_thr_enable = false,
+			.dead_thr_enable = false,
+			.update = oplus_mms_gauge_update_sili_ic_alg_dsg_enable,
+		}
+	}, {
+		.desc = {
+			.item_id = GAUGE_ITEM_CC,
+			.str_data = false,
+			.up_thr_enable = false,
+			.down_thr_enable = false,
+			.dead_thr_enable = false,
+			.update = oplus_mms_sub_gauge_update_cc, /* todo not read when xxx_subscribe_main(sub)_gauge_topic  */
+		}
+	}, {
+		.desc = {
+			.item_id = GAUGE_ITEM_SILI_IC_ALG_TERM_VOLT,
+			.str_data = false,
+			.up_thr_enable = false,
+			.down_thr_enable = false,
+			.dead_thr_enable = false,
+			.update = oplus_mms_sub_gauge_update_sili_ic_alg_term_volt,
+		}
+	}, {
+		.desc = {
+			.item_id = GAUGE_ITEM_LIFETIME_STATUS,
+			.str_data = true,
+			.update = oplus_mms_sub_gauge_get_lifetime_status,
+		}
+	}, {
+		.desc = {
+			.item_id = GAUGE_ITEM_SOH,
+			.str_data = false,
+			.up_thr_enable = false,
+			.down_thr_enable = false,
+			.dead_thr_enable = false,
+			.update = oplus_mms_gauge_update_soh, /* todo not read when xxx_subscribe_main(sub)_gauge_topic  */
+		}
+	}, {
+		.desc = {
+			.item_id = GAUGE_ITEM_FCC,
+			.str_data = false,
+			.up_thr_enable = false,
+			.down_thr_enable = false,
+			.dead_thr_enable = false,
+			.update = oplus_mms_gauge_update_fcc, /* todo not read when xxx_subscribe_main(sub)_gauge_topic  */
+		}
+	}, {
+		.desc = {
+			.item_id = GAUGE_ITEM_QMAX,
+			.str_data = false,
+			.up_thr_enable = false,
+			.down_thr_enable = false,
+			.dead_thr_enable = false,
+			.update = oplus_mms_gauge_update_qmax,
+		}
 	}
 };
 
@@ -3526,6 +3944,7 @@ static const u32 oplus_mms_gauge_update_item[] = {
 	GAUGE_ITEM_SOC,
 	GAUGE_ITEM_VOL_MAX,
 	GAUGE_ITEM_VOL_MIN,
+	GAUGE_ITEM_GAUGE_VBAT,
 	GAUGE_ITEM_CURR,
 	GAUGE_ITEM_TEMP,
 	GAUGE_ITEM_FCC,
@@ -3533,6 +3952,8 @@ static const u32 oplus_mms_gauge_update_item[] = {
 	GAUGE_ITEM_SOH,
 	GAUGE_ITEM_RM,
 	GAUGE_ITEM_REAL_TEMP,
+	GAUGE_ITEM_QMAX,
+	GAUGE_ITEM_CAR_C,
 };
 
 static const u32 oplus_mms_main_sub_gauge_update_item[] = {
@@ -3551,6 +3972,7 @@ static const struct oplus_mms_desc oplus_mms_gauge_desc = {
 	.update_items_num = ARRAY_SIZE(oplus_mms_gauge_update_item),
 	.update_interval = 10000, /* ms */
 	.update = oplus_mms_gauge_update,
+	.set_update_mode = oplus_mms_gauge_read_mode_set,
 };
 
 #define CHARGE_UPDATE_INTERVAL		5000
@@ -3558,6 +3980,8 @@ static void oplus_mms_gauge_update_change_work(struct work_struct *work)
 {
 	struct oplus_mms_gauge *chip =
 		container_of(work, struct oplus_mms_gauge, update_change_work);
+	union mms_msg_data data = { 0 };
+	int rc;
 
 /* TODO: factory mode app adaptation
 	if (chip->factory_test_mode)
@@ -3570,13 +3994,28 @@ static void oplus_mms_gauge_update_change_work(struct work_struct *work)
 		chip->check_subboard_ntc_err = false;
 		oplus_mms_gauge_push_subboard_temp_err(chip, false);
 		vote(chip->gauge_update_votable, USER_VOTER, true, CHARGE_UPDATE_INTERVAL, false);
+
+		rc = oplus_mms_get_item_data(chip->gauge_topic, GAUGE_ITEM_AUTH, &data, false);
+		if (!rc && !!data.intval == false) {
+			chg_info("retry auth\n");
+			oplus_mms_gauge_push_auth(chip);
+		}
+
+		rc = oplus_mms_get_item_data(chip->gauge_topic, GAUGE_ITEM_HMAC, &data, false);
+		if (!rc && !!data.intval == false) {
+			chg_info("retry hmac\n");
+			chip->hmac = oplus_mms_gauge_get_batt_hmac(chip);
+			chg_info("hmac=%d\n", chip->hmac);
+			if (!!data.intval != chip->hmac)
+				oplus_mms_gauge_push_hmac(chip);
+		}
 	} else {
 		vote(chip->gauge_update_votable, USER_VOTER, false, 0, false);
 	}
 }
 
 static void oplus_mms_gauge_comm_subs_callback(struct mms_subscribe *subs,
-					       enum mms_msg_type type, u32 id)
+					       enum mms_msg_type type, u32 id, bool sync)
 {
 	struct oplus_mms_gauge *chip = subs->priv_data;
 	union mms_msg_data data = { 0 };
@@ -3597,6 +4036,18 @@ static void oplus_mms_gauge_comm_subs_callback(struct mms_subscribe *subs,
 			oplus_mms_get_item_data(chip->comm_topic, id, &data,
 						false);
 			chip->ui_soc = data.intval;
+			break;
+		case COMM_ITEM_SUPER_ENDURANCE_STATUS:
+			oplus_mms_get_item_data(chip->comm_topic, id, &data, false);
+			chip->super_endurance_mode_status = !!data.intval;
+			schedule_work(&chip->update_super_endurance_mode_status_work);
+			break;
+		case COMM_ITEM_SUPER_ENDURANCE_COUNT:
+			oplus_mms_get_item_data(chip->comm_topic, id, &data, false);
+			chip->super_endurance_mode_count = data.intval;
+			break;
+		case COMM_ITEM_BOOT_COMPLETED:
+			oplus_mms_gauge_get_reserve_calib_info(chip);
 			break;
 		default:
 			break;
@@ -3627,6 +4078,12 @@ static void oplus_mms_gauge_subscribe_comm_topic(struct oplus_mms *topic,
 	oplus_mms_get_item_data(chip->comm_topic, COMM_ITEM_FACTORY_TEST, &data,
 				true);
 	chip->factory_test_mode = data.intval;
+
+	oplus_mms_get_item_data(chip->comm_topic, COMM_ITEM_BOOT_COMPLETED, &data,
+				true);
+	if (data.intval)
+		oplus_mms_gauge_get_reserve_calib_info(chip);
+
 	schedule_work(&chip->update_change_work);
 }
 
@@ -3636,46 +4093,94 @@ static void oplus_mms_gauge_set_curve_work(struct work_struct *work)
 		container_of(work, struct oplus_mms_gauge, gauge_set_curve_work);
 	int type;
 	unsigned int adapter_id;
+	union mms_msg_data data = { 0 };
+	int rc;
+	int batt_temp_region;
 
-	type = oplus_wired_get_chg_type();
-	if ((type != OPLUS_CHG_USB_TYPE_VOOC) &&
-	    (type != OPLUS_CHG_USB_TYPE_SVOOC)) {
-		if (sid_to_adapter_chg_type(chip->vooc_sid) == CHARGER_TYPE_VOOC)
-			type = OPLUS_CHG_USB_TYPE_VOOC;
-		else if (sid_to_adapter_chg_type(chip->vooc_sid) == CHARGER_TYPE_SVOOC)
-			type = OPLUS_CHG_USB_TYPE_SVOOC;
+	if (chip->wired_online) {
+		type = oplus_wired_get_chg_type();
+		if ((type != OPLUS_CHG_USB_TYPE_VOOC) &&
+			(type != OPLUS_CHG_USB_TYPE_SVOOC)) {
+			if (sid_to_adapter_chg_type(chip->vooc_sid) == CHARGER_TYPE_VOOC)
+				type = OPLUS_CHG_USB_TYPE_VOOC;
+			else if (sid_to_adapter_chg_type(chip->vooc_sid) == CHARGER_TYPE_SVOOC)
+				type = OPLUS_CHG_USB_TYPE_SVOOC;
+		}
+
+		switch (type) {
+		case OPLUS_CHG_USB_TYPE_UNKNOWN:
+			type = CHARGER_SUBTYPE_DEFAULT;
+			break;
+		case OPLUS_CHG_USB_TYPE_QC2:
+		case OPLUS_CHG_USB_TYPE_QC3:
+			type = CHARGER_SUBTYPE_QC;
+			break;
+		case OPLUS_CHG_USB_TYPE_PD:
+		case OPLUS_CHG_USB_TYPE_PD_DRP:
+			type = CHARGER_SUBTYPE_PD;
+			break;
+		case OPLUS_CHG_USB_TYPE_PD_PPS:
+			type = CHARGER_SUBTYPE_PPS;
+			break;
+		case OPLUS_CHG_USB_TYPE_VOOC:
+			type = CHARGER_SUBTYPE_FASTCHG_VOOC;
+			break;
+		case OPLUS_CHG_USB_TYPE_SVOOC:
+			type = CHARGER_SUBTYPE_FASTCHG_SVOOC;
+			break;
+		case OPLUS_CHG_USB_TYPE_UFCS:
+			type = CHARGER_SUBTYPE_UFCS;
+			break;
+		default:
+			type = CHARGER_SUBTYPE_DEFAULT;
+			break;
+		}
+
+		adapter_id = sid_to_adapter_id(chip->vooc_sid);
+	} else if (chip->wls_online) {
+		rc = oplus_mms_get_item_data(chip->wls_topic, WLS_ITEM_WLS_TYPE, &data, false);
+		if (rc < 0) {
+			type = OPLUS_CHG_WLS_UNKNOWN;
+			chg_err("get wls type err\n");
+		}
+		adapter_id = 0;
+		type = data.intval;
+
+		oplus_mms_get_item_data(chip->comm_topic, COMM_ITEM_TEMP_REGION, &data, false);
+		batt_temp_region = data.intval;
+		if ((batt_temp_region <= TEMP_REGION_LITTLE_COLD || batt_temp_region >= TEMP_REGION_WARM) &&
+		    (type == OPLUS_CHG_WLS_SVOOC || type == OPLUS_CHG_WLS_PD_65W)) {
+			type = OPLUS_CHG_WLS_BPP;
+		}
+
+		chg_info("oplus_mms_gauge_set_curve_work, wls_online:%d, type:%d, batt_temp_region:%d\n",
+		         chip->wls_online, type, batt_temp_region);
+
+		switch (type) {
+		case OPLUS_CHG_WLS_UNKNOWN:
+			type = CHARGER_SUBTYPE_DEFAULT;
+			break;
+		case OPLUS_CHG_WLS_BPP:
+		case OPLUS_CHG_WLS_EPP:
+		case OPLUS_CHG_WLS_EPP_PLUS:
+		case OPLUS_CHG_WLS_VOOC:
+			type = CHARGER_SUBTYPE_DEFAULT;
+			break;
+		case OPLUS_CHG_WLS_SVOOC:
+		case OPLUS_CHG_WLS_PD_65W:
+			type = CHARGER_SUBTYPE_FASTCHG_VOOC;
+			break;
+		default:
+			type = CHARGER_SUBTYPE_DEFAULT;
+			break;
+		}
 	}
-
-	switch (type) {
-	case OPLUS_CHG_USB_TYPE_UNKNOWN:
-		return;
-	case OPLUS_CHG_USB_TYPE_QC2:
-	case OPLUS_CHG_USB_TYPE_QC3:
-		type = CHARGER_SUBTYPE_QC;
-		break;
-	case OPLUS_CHG_USB_TYPE_PD:
-	case OPLUS_CHG_USB_TYPE_PD_DRP:
-	case OPLUS_CHG_USB_TYPE_PD_PPS:
-		type = CHARGER_SUBTYPE_PD;
-		break;
-	case OPLUS_CHG_USB_TYPE_VOOC:
-		type = CHARGER_SUBTYPE_FASTCHG_VOOC;
-		break;
-	case OPLUS_CHG_USB_TYPE_SVOOC:
-		type = CHARGER_SUBTYPE_FASTCHG_SVOOC;
-		break;
-	default:
-		type = CHARGER_SUBTYPE_DEFAULT;
-		break;
-	}
-
-	adapter_id = sid_to_adapter_id(chip->vooc_sid);
 	(void)oplus_chg_ic_func(chip->gauge_ic, OPLUS_IC_FUNC_GAUGE_SET_BATTERY_CURVE,
 				type, adapter_id, chip->pd_svooc);
 }
 
 static void oplus_mms_gauge_wired_subs_callback(struct mms_subscribe *subs,
-						enum mms_msg_type type, u32 id)
+						enum mms_msg_type type, u32 id, bool sync)
 {
 	struct oplus_mms_gauge *chip = subs->priv_data;
 	union mms_msg_data data = { 0 };
@@ -3711,16 +4216,6 @@ static void oplus_mms_gauge_wired_subs_callback(struct mms_subscribe *subs,
 	}
 }
 
-static int oplus_mms_gauge_push_auth(struct oplus_mms_gauge *chip);
-static void oplus_mms_gauge_deep_dischg_init(struct oplus_mms_gauge *chip)
-{
-	oplus_gauge_deep_dischg_check(chip);
-	oplus_gauge_init_sili_status(chip);
-	schedule_delayed_work(&chip->deep_id_work, PUSH_DELAY_MS);
-	if (chip->deep_spec.sili_err)
-		oplus_mms_gauge_push_auth(chip);
-}
-
 static void oplus_mms_gauge_subscribe_wired_topic(struct oplus_mms *topic,
 						  void *prv_data)
 {
@@ -3743,6 +4238,8 @@ static void oplus_mms_gauge_subscribe_wired_topic(struct oplus_mms *topic,
 	chip->wired_online = !!data.intval;
 	schedule_work(&chip->update_change_work);
 	oplus_mms_gauge_deep_dischg_init(chip);
+	if (chip->deep_spec.sili_err)
+		oplus_mms_gauge_push_auth(chip);
 
 	if (chip->wired_online && is_voocphy_ic_available(chip)) {
 		oplus_mms_get_item_data(chip->wired_topic,
@@ -3867,18 +4364,31 @@ static void oplus_mms_gauge_gauge_update_work(struct work_struct *work)
 {
 	struct oplus_mms_gauge *chip =
 		container_of(work, struct oplus_mms_gauge, gauge_update_work);
-	
+
 	oplus_mms_gauge_check_batt_vol_diff(chip);
+	oplus_mms_gauge_update_sili_ic_alg_term_volt(chip, false);
 }
 
 static void oplus_mms_gauge_gauge_subs_callback(struct mms_subscribe *subs,
-						enum mms_msg_type type, u32 id)
+						enum mms_msg_type type, u32 id, bool sync)
 {
 	struct oplus_mms_gauge *chip = subs->priv_data;
 
 	switch (type) {
 	case MSG_TYPE_TIMER:
 		schedule_work(&chip->gauge_update_work);
+		break;
+	case MSG_TYPE_ITEM:
+		switch (id) {
+		case GAUGE_ITEM_SPARE_POWER_ENABLE:
+			schedule_work(&chip->update_sili_spare_power_enable_work);
+			break;
+		case GAUGE_ITEM_SILI_IC_ALG_CFG:
+			schedule_work(&chip->update_sili_ic_alg_cfg_work);
+			break;
+		default:
+			break;
+		}
 		break;
 	default:
 		break;
@@ -3901,7 +4411,7 @@ static int oplus_mms_gauge_subscribe_gauge_topic(struct oplus_mms_gauge *chip)
 }
 
 static void oplus_mms_gauge_vooc_subs_callback(struct mms_subscribe *subs,
-					       enum mms_msg_type type, u32 id)
+					       enum mms_msg_type type, u32 id, bool sync)
 {
 	struct oplus_mms_gauge *chip = subs->priv_data;
 	union mms_msg_data data = { 0 };
@@ -3950,7 +4460,7 @@ static void oplus_mms_gauge_subscribe_vooc_topic(struct oplus_mms *topic,
 }
 
 static void oplus_mms_gauge_parallel_subs_callback(struct mms_subscribe *subs,
-						enum mms_msg_type type, u32 id)
+						   enum mms_msg_type type, u32 id, bool sync)
 {
 	struct oplus_mms_gauge *chip = subs->priv_data;
 	union mms_msg_data data = { 0 };
@@ -3962,7 +4472,7 @@ static void oplus_mms_gauge_parallel_subs_callback(struct mms_subscribe *subs,
 			oplus_mms_get_item_data(chip->parallel_topic, id, &data,
 						false);
 			if (data.intval == PARALLEL_BAT_BALANCE_ERROR_STATUS8) {
-				chip->hmac = false;
+				chip->parallel_hamc = false;
 				chg_err(" ERROR_STATUS8, hmac set false\n");
 				oplus_mms_gauge_push_hmac(chip);
 			}
@@ -3996,14 +4506,63 @@ static void oplus_mms_gauge_subscribe_parallel_topic(struct oplus_mms *topic,
 	oplus_mms_get_item_data(chip->parallel_topic, SWITCH_ITEM_STATUS, &data,
 				 true);
 	if (data.intval == PARALLEL_BAT_BALANCE_ERROR_STATUS8) {
-		chip->hmac = false;
+		chip->parallel_hamc = false;
 		chg_err(" ERROR_STATUS8, hmac set false\n");
 		oplus_mms_gauge_push_hmac(chip);
 	}
 }
 
+static void oplus_mms_gauge_batt_bal_subs_callback(struct mms_subscribe *subs,
+						   enum mms_msg_type type, u32 id, bool sync)
+{
+	struct oplus_mms_gauge *chip = subs->priv_data;
+	union mms_msg_data data = { 0 };
+
+	switch (type) {
+	case MSG_TYPE_ITEM:
+		switch (id) {
+		case BATT_BAL_ITEM_ABNORMAL_STATE:
+			oplus_mms_get_item_data(chip->batt_bal_topic, id, &data, false);
+			if (data.intval) {
+				chg_err("batt bal abnormal state\n");
+			}
+			break;
+		default:
+			break;
+		}
+		break;
+	default:
+		break;
+	}
+}
+
+static void oplus_mms_gauge_subscribe_batt_bal_topic(
+	struct oplus_mms *topic, void *prv_data)
+{
+	struct oplus_mms_gauge *chip = prv_data;
+	union mms_msg_data data = { 0 };
+
+	chip->batt_bal_topic = topic;
+	chip->batt_bal_subs =
+		oplus_mms_subscribe(chip->batt_bal_topic, chip,
+				    oplus_mms_gauge_batt_bal_subs_callback,
+				    "mms_gauge");
+	if (IS_ERR_OR_NULL(chip->batt_bal_subs)) {
+		chg_err("subscribe batt bal topic error, rc=%ld\n",
+			PTR_ERR(chip->batt_bal_subs));
+		return;
+	}
+
+	oplus_mms_get_item_data(chip->batt_bal_topic,
+		BATT_BAL_ITEM_ABNORMAL_STATE, &data, true);
+	chg_info("abnormal state=%d\n", data.intval);
+	if (data.intval) {
+		chg_err("batt bal abnormal state\n");
+	}
+}
+
 static void oplus_mms_gauge_wls_subs_callback(struct mms_subscribe *subs,
-						enum mms_msg_type type, u32 id)
+					      enum mms_msg_type type, u32 id, bool sync)
 {
 	struct oplus_mms_gauge *chip = subs->priv_data;
 	union mms_msg_data data = { 0 };
@@ -4015,6 +4574,11 @@ static void oplus_mms_gauge_wls_subs_callback(struct mms_subscribe *subs,
 			oplus_mms_get_item_data(chip->wls_topic, id, &data, false);
 			chip->wls_online = !!data.intval;
 			schedule_work(&chip->update_change_work);
+			oplus_gauge_deep_dischg_check(chip);
+			break;
+		case WLS_ITEM_WLS_TYPE:
+			if (chip->wls_online && is_voocphy_ic_available(chip))
+				schedule_work(&chip->gauge_set_curve_work);
 			break;
 		default:
 			break;
@@ -4103,6 +4667,7 @@ static int oplus_mms_gauge_topic_init(struct oplus_mms_gauge *chip)
 			mms_desc[i].update_items_num = ARRAY_SIZE(oplus_mms_main_sub_gauge_update_item);
 			mms_desc[i].update_interval = 0;
 			mms_desc[i].update = oplus_mms_sub_gauge_update;
+			mms_desc[i].set_update_mode = oplus_mms_gauge_read_mode_set;
 			if (strcmp("gauge:0", mms_desc[i].name) == 0) {
 				chip->gauge_topic_parallel[chip->main_gauge] =
 					devm_oplus_mms_register(chip->dev, &mms_desc[i], &mms_cfg);
@@ -4125,13 +4690,14 @@ static int oplus_mms_gauge_topic_init(struct oplus_mms_gauge *chip)
 	oplus_mms_gauge_push_hmac(chip);
 	oplus_mms_wait_topic("common", oplus_mms_gauge_subscribe_comm_topic, chip);
 
-	chip->deep_spec.counts = oplus_gauge_get_deep_dischg_count(chip);
-	oplus_gauge_get_deep_limits(chip);
+	oplus_mms_gauge_sili_init(chip);
+	oplus_mms_gauge_sili_ic_alg_cfg_init(chip);
 
 	oplus_mms_wait_topic("wired", oplus_mms_gauge_subscribe_wired_topic, chip);
 	oplus_mms_wait_topic("vooc", oplus_mms_gauge_subscribe_vooc_topic, chip);
 	oplus_mms_wait_topic("parallel", oplus_mms_gauge_subscribe_parallel_topic, chip);
 	oplus_mms_wait_topic("wireless", oplus_mms_gauge_subscribe_wls_topic, chip);
+	oplus_mms_wait_topic("batt_bal", oplus_mms_gauge_subscribe_batt_bal_topic, chip);
 
 	return 0;
 }
@@ -4158,6 +4724,147 @@ static int oplus_gauge_update_vote_callback(struct votable *votable, void *data,
 	return rc;
 }
 
+static void oplus_mms_gauge_get_reserve_calib_info(
+			struct oplus_mms_gauge *chip)
+{
+	static bool update = false;
+
+	if (!update) {
+		update = true;
+		schedule_delayed_work(&chip->get_reserve_calib_info_work, msecs_to_jiffies(2000));
+	}
+}
+
+static void oplus_mms_gauge_set_reserve_calib_info_work(struct work_struct *work)
+{
+	int rc;
+	struct oplus_mms_gauge *chip = container_of(work, struct oplus_mms_gauge,
+		set_reserve_calib_info_work);
+
+	rc = oplus_chg_set_mutual_cmd(CMD_GAUGE_CALIB_UPDATE,
+		sizeof(chip->calib_info_load), &(chip->calib_info_load));
+	if (rc == CMD_ACK_OK)
+		chg_info("success\n");
+	else
+		chg_info("fail\n");
+}
+
+static void oplus_mms_gauge_get_reserve_calib_info_work(
+				struct work_struct *work)
+{
+	int i;
+	int mutual_rc;
+	int func_rc;
+	struct oplus_chg_ic_dev *ic;
+	struct gauge_calib_info *calib_info;
+	static int try_count = GAUGE_CALIB_OBTAIN_COUNTS;
+	struct delayed_work *dwork = to_delayed_work(work);
+	struct oplus_mms_gauge *chip = container_of(dwork, struct oplus_mms_gauge, get_reserve_calib_info_work);
+
+	if (chip->child_num > GAUGE_IC_NUM_MAX)
+		return;
+
+	mutual_rc = oplus_chg_set_mutual_cmd(CMD_GAUGE_CALIB_OBTAIN, 0, NULL);
+	if (mutual_rc != CMD_ACK_OK && try_count--) {
+		schedule_delayed_work(&chip->get_reserve_calib_info_work, msecs_to_jiffies(2000));
+		return;
+	}
+
+	for (i = 0; i < chip->child_num; i++) {
+		calib_info = &chip->calib_info_load.calib_info[i];
+		ic = chip->child_list[i].ic_dev;
+		func_rc = oplus_chg_ic_func(ic, OPLUS_IC_FUNC_GAUGE_SET_CALIB_TIME,
+			calib_info->dod_time, calib_info->qmax_time,
+			calib_info->calib_args, sizeof(calib_info->calib_args));
+		if (func_rc == 0 && mutual_rc == CMD_ACK_OK)
+			chip->calib_info_init[i] = true;
+	}
+}
+
+static int oplus_mms_gauge_calib_obtain_mutual_notifier_call(
+		struct notifier_block *nb, unsigned long param, void *v)
+{
+	int i;
+	struct oplus_mms_gauge *chip;
+	struct gauge_calib_info_load *calib_info_load;
+	struct oplus_chg_mutual_notifier *notifier;
+
+	notifier = container_of(nb, struct oplus_chg_mutual_notifier, nb);
+	chip = container_of(notifier, struct oplus_mms_gauge, calib_obtain_mutual);
+
+	if (mutual_info_to_cmd(param) != CMD_GAUGE_CALIB_OBTAIN) {
+		chg_err("cmd is not matching, should return\n");
+		return NOTIFY_OK;
+	}
+
+	if (mutual_info_to_data_size(param) != sizeof(struct gauge_calib_info_load)) {
+		chg_err("data_len is not ok, datas is invalid\n");
+		return NOTIFY_DONE;
+	}
+
+	calib_info_load = (struct gauge_calib_info_load *)v;
+	if (calib_info_load)
+		memcpy(&chip->calib_info_load, calib_info_load, sizeof(struct gauge_calib_info_load));
+
+	for (i = 0; i < GAUGE_IC_NUM_MAX; i++)
+		chg_info("index:%d, tag:%s, dod_time:%d, qmax_time:%d, calib_args:[%*ph]", i,
+			chip->calib_info_load.tag_info, chip->calib_info_load.calib_info[i].dod_time,
+			chip->calib_info_load.calib_info[i].qmax_time, GAUGE_CALIB_ARGS_LEN,
+			chip->calib_info_load.calib_info[i].calib_args);
+
+	return NOTIFY_OK;
+}
+
+static int oplus_mms_gauge_calib_update_mutual_notifier_call(
+		struct notifier_block *nb, unsigned long param, void *v)
+{
+	struct oplus_mms_gauge *chip;
+	struct oplus_chg_mutual_notifier *notifier;
+
+	notifier = container_of(nb, struct oplus_chg_mutual_notifier, nb);
+	chip = container_of(notifier, struct oplus_mms_gauge, calib_update_mutual);
+
+	if (mutual_info_to_cmd(param) != CMD_GAUGE_CALIB_UPDATE) {
+		chg_err("cmd is not matching, should return\n");
+		return NOTIFY_OK;
+	}
+	chg_info("success\n");
+
+	return NOTIFY_OK;
+}
+
+static int oplus_mms_gauge_calib_obtain_mutual_notify_reg(struct oplus_mms_gauge *chip)
+{
+	int rc = 0;
+
+	chip->calib_obtain_mutual.name = "gauge_calib_obtain";
+	chip->calib_obtain_mutual.cmd = CMD_GAUGE_CALIB_OBTAIN;
+	chip->calib_obtain_mutual.nb.notifier_call = oplus_mms_gauge_calib_obtain_mutual_notifier_call;
+	rc = oplus_chg_reg_mutual_notifier(&chip->calib_obtain_mutual);
+	if (rc < 0) {
+		chg_err("register gauge calib obtain mutual event notifier error, rc=%d\n", rc);
+		return rc;
+	}
+
+	return 0;
+}
+
+static int oplus_mms_gauge_calib_update_mutual_notify_reg(struct oplus_mms_gauge *chip)
+{
+	int rc = 0;
+
+	chip->calib_update_mutual.name = "gauge_calib_update";
+	chip->calib_update_mutual.cmd = CMD_GAUGE_CALIB_UPDATE;
+	chip->calib_update_mutual.nb.notifier_call = oplus_mms_gauge_calib_update_mutual_notifier_call;
+	rc = oplus_chg_reg_mutual_notifier(&chip->calib_update_mutual);
+	if (rc < 0) {
+		chg_err("register gauge calib update mutual event notifier error, rc=%d\n", rc);
+		return rc;
+	}
+
+	return 0;
+}
+
 static int oplus_mms_gauge_probe(struct platform_device *pdev)
 {
 	struct oplus_mms_gauge *chip;
@@ -4174,6 +4881,8 @@ static int oplus_mms_gauge_probe(struct platform_device *pdev)
 
 	of_platform_populate(chip->dev->of_node, NULL, NULL, chip->dev);
 
+	mutex_init(&chip->deep_spec.lock);
+
 	chip->gauge_update_votable =
 		create_votable("GAUGE_UPDATE", VOTE_MIN,
 			       oplus_gauge_update_vote_callback, chip);
@@ -4183,8 +4892,35 @@ static int oplus_mms_gauge_probe(struct platform_device *pdev)
 		goto create_vote_err;
 	}
 
+	chip->gauge_shutdown_voltage_votable =
+		create_votable("GAUGE_SHUTDOWN_VOLTAGE", VOTE_MAX, oplus_gauge_shutdown_voltage_vote_callback, chip);
+	if (IS_ERR(chip->gauge_shutdown_voltage_votable)) {
+		rc = PTR_ERR(chip->gauge_shutdown_voltage_votable);
+		chip->gauge_shutdown_voltage_votable = NULL;
+		goto creat_gauge_shutdown_voltage_votable_err;
+	}
+
+	chip->gauge_term_voltage_votable =
+		create_votable("GAUGE_TERM_VOLTAGE", VOTE_MAX, oplus_gauge_term_voltage_vote_callback, chip);
+	if (IS_ERR(chip->gauge_term_voltage_votable)) {
+		rc = PTR_ERR(chip->gauge_term_voltage_votable);
+		chip->gauge_term_voltage_votable = NULL;
+		goto creat_gauge_term_voltage_votable_err;
+	}
+
+	rc = oplus_mms_gauge_calib_obtain_mutual_notify_reg(chip);
+	if (rc < 0)
+		goto calib_obtain_mutual_nb_reg_err;
+
+	rc = oplus_mms_gauge_calib_update_mutual_notify_reg(chip);
+	if (rc < 0)
+		goto calib_update_mutual_nb_reg_err;
+
 	INIT_DELAYED_WORK(&chip->hal_gauge_init_work, oplus_mms_gauge_init_work);
+	INIT_DELAYED_WORK(&chip->get_reserve_calib_info_work, oplus_mms_gauge_get_reserve_calib_info_work);
+	INIT_WORK(&chip->set_reserve_calib_info_work, oplus_mms_gauge_set_reserve_calib_info_work);
 	INIT_WORK(&chip->err_handler_work, oplus_mms_gauge_err_handler_work);
+	INIT_WORK(&chip->ls_err_handler_work, oplus_mms_level_shift_err_handler_work);
 	INIT_WORK(&chip->online_handler_work, oplus_mms_gauge_online_handler_work);
 	INIT_WORK(&chip->offline_handler_work, oplus_mms_gauge_offline_handler_work);
 	INIT_WORK(&chip->resume_handler_work, oplus_mms_gauge_resume_handler_work);
@@ -4192,15 +4928,38 @@ static int oplus_mms_gauge_probe(struct platform_device *pdev)
 	INIT_WORK(&chip->gauge_update_work, oplus_mms_gauge_gauge_update_work);
 	INIT_WORK(&chip->gauge_set_curve_work, oplus_mms_gauge_set_curve_work);
 	INIT_WORK(&chip->set_gauge_batt_full_work, oplus_mms_gauge_set_batt_full_work);
+	INIT_WORK(&chip->update_super_endurance_mode_status_work,
+		  oplus_mms_gauge_update_super_endurance_mode_status_work);
 	INIT_DELAYED_WORK(&chip->subboard_ntc_err_work, oplus_mms_subboard_ntc_err_work);
 	INIT_DELAYED_WORK(&chip->deep_dischg_work, oplus_gauge_deep_dischg_work);
+	INIT_DELAYED_WORK(&chip->sub_deep_dischg_work, oplus_gauge_sub_deep_dischg_work);
 	INIT_DELAYED_WORK(&chip->deep_id_work, oplus_gauge_deep_id_work);
+	INIT_DELAYED_WORK(&chip->deep_track_work, oplus_gauge_deep_track_work);
+	INIT_DELAYED_WORK(&chip->sub_deep_track_work, oplus_gauge_sub_deep_track_work);
+	INIT_DELAYED_WORK(&chip->deep_ratio_work, oplus_gauge_deep_ratio_work);
+	INIT_WORK(&chip->update_sili_ic_alg_cfg_work,
+		  oplus_mms_gauge_update_sili_ic_alg_cfg_work);
+	INIT_WORK(&chip->update_sili_spare_power_enable_work,
+		  oplus_mms_gauge_update_sili_spare_power_enable_work);
+	INIT_DELAYED_WORK(&chip->sili_spare_power_effect_check_work,
+		  oplus_mms_gauge_sili_spare_power_effect_check_work);
+	INIT_DELAYED_WORK(&chip->sili_term_volt_effect_check_work,
+		  oplus_mms_gauge_sili_term_volt_effect_check_work);
+	INIT_DELAYED_WORK(&chip->deep_temp_work, oplus_gauge_deep_temp_work);
 
 	schedule_delayed_work(&chip->hal_gauge_init_work, 0);
 
 	chg_info("probe success\n");
 	return 0;
 
+calib_update_mutual_nb_reg_err:
+	oplus_chg_unreg_mutual_notifier(&chip->calib_obtain_mutual);
+calib_obtain_mutual_nb_reg_err:
+	destroy_votable(chip->gauge_term_voltage_votable);
+creat_gauge_term_voltage_votable_err:
+	destroy_votable(chip->gauge_shutdown_voltage_votable);
+creat_gauge_shutdown_voltage_votable_err:
+	destroy_votable(chip->gauge_update_votable);
 create_vote_err:
 	devm_kfree(&pdev->dev, chip);
 	platform_set_drvdata(pdev, NULL);
@@ -4217,7 +4976,14 @@ static int oplus_mms_gauge_remove(struct platform_device *pdev)
 		oplus_mms_unsubscribe(chip->wired_subs);
 	if (!IS_ERR_OR_NULL(chip->gauge_subs))
 		oplus_mms_unsubscribe(chip->gauge_subs);
+	if (chip->ddrc_strategy != NULL)
+		oplus_chg_strategy_release(chip->ddrc_strategy);
 
+	oplus_chg_unreg_mutual_notifier(&chip->calib_update_mutual);
+	oplus_chg_unreg_mutual_notifier(&chip->calib_obtain_mutual);
+
+	destroy_votable(chip->gauge_term_voltage_votable);
+	destroy_votable(chip->gauge_shutdown_voltage_votable);
 	destroy_votable(chip->gauge_update_votable);
 	devm_kfree(&pdev->dev, chip);
 	platform_set_drvdata(pdev, NULL);

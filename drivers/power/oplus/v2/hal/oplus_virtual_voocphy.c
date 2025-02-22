@@ -15,6 +15,7 @@
 #include <linux/regmap.h>
 #include <linux/list.h>
 #include <linux/of_irq.h>
+#include <linux/pinctrl/consumer.h>
 #ifndef CONFIG_DISABLE_OPLUS_FUNCTION
 #include <soc/oplus/system/boot_mode.h>
 #include <soc/oplus/device_info.h>
@@ -752,6 +753,23 @@ static int oplus_chg_vphy_set_shutdown_switch_mode(struct oplus_chg_ic_dev *ic_d
 	return rc;
 }
 
+static int oplus_chg_vphy_get_frame_head(struct oplus_chg_ic_dev *ic_dev, int *head)
+{
+	struct oplus_virtual_vphy_ic *va;
+	int rc;
+
+	if (ic_dev == NULL) {
+		chg_err("oplus_chg_ic_dev is NULL");
+		return -ENODEV;
+	}
+	va = oplus_chg_ic_get_drvdata(ic_dev);
+	rc = oplus_chg_ic_func(va->vphy, OPLUS_IC_FUNC_VOOCPHY_GET_FRAME_HEAD, head);
+	if (rc < 0)
+		chg_err("failed to get frame head, rc=%d\n", rc);
+
+	return rc;
+}
+
 static void *oplus_chg_vphy_get_func(struct oplus_chg_ic_dev *ic_dev,
 				   enum oplus_chg_ic_func func_id)
 {
@@ -857,6 +875,31 @@ static void *oplus_chg_vphy_get_func(struct oplus_chg_ic_dev *ic_dev,
 	case OPLUS_IC_FUNC_VOOC_SET_SHUTDOW_SWITCH_MODE:
 		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_VOOC_SET_SHUTDOW_SWITCH_MODE,
 					       oplus_chg_vphy_set_shutdown_switch_mode);
+		break;
+	case OPLUS_IC_FUNC_VOOCPHY_GET_FRAME_HEAD:
+		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_VOOCPHY_GET_FRAME_HEAD,
+					       oplus_chg_vphy_get_frame_head);
+		break;
+	case OPLUS_IC_FUNC_VOOC_FW_UPGRADE:
+	case OPLUS_IC_FUNC_VOOC_USER_FW_UPGRADE:
+	case OPLUS_IC_FUNC_VOOC_FW_CHECK_THEN_RECOVER:
+	case OPLUS_IC_FUNC_VOOC_FW_CHECK_THEN_RECOVER_FIX:
+	case OPLUS_IC_FUNC_VOOC_GET_FW_VERSION:
+	case OPLUS_IC_FUNC_VOOC_EINT_REGISTER:
+	case OPLUS_IC_FUNC_VOOC_EINT_UNREGISTER:
+	case OPLUS_IC_FUNC_VOOC_SET_DATA_ACTIVE:
+	case OPLUS_IC_FUNC_VOOC_SET_DATA_SLEEP:
+	case OPLUS_IC_FUNC_VOOC_SET_CLOCK_ACTIVE:
+	case OPLUS_IC_FUNC_VOOC_SET_CLOCK_SLEEP:
+	case OPLUS_IC_FUNC_VOOC_GET_DATA_GPIO_VAL:
+	case OPLUS_IC_FUNC_VOOC_GET_RESET_GPIO_VAL:
+	case OPLUS_IC_FUNC_VOOC_GET_CLOCK_GPIO_VAL:
+	case OPLUS_IC_FUNC_VOOC_RESET_ACTIVE:
+	case OPLUS_IC_FUNC_VOOC_RESET_ACTIVE_FORCE:
+	case OPLUS_IC_FUNC_VOOC_BOOT_BY_GPIO:
+	case OPLUS_IC_FUNC_VOOC_UPGRADING:
+	case OPLUS_IC_FUNC_VOOC_CHECK_FW_STATUS:
+		func = NULL;
 		break;
 	default:
 		chg_err("this func(=%d) is not supported\n", func_id);

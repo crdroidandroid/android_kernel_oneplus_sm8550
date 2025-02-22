@@ -484,7 +484,7 @@ struct batt_sys_curve {
 	unsigned int chg_time;
 };
 
-#define BATT_SYS_ROW_MAX        20
+#define BATT_SYS_ROW_MAX        30
 #define BATT_SYS_COL_MAX        7
 #define BATT_SYS_MAX            6
 
@@ -524,6 +524,7 @@ enum {
 	CP_WORKMODE_DEFAULT,
 	CP_WORKMODE_VOOCPHY = CP_WORKMODE_DEFAULT,
 	CP_WORKMODE_PPS,
+	CP_WORKMODE_UFCS,
 	CP_WORKMODE_INVALID,
 };
 
@@ -642,6 +643,7 @@ struct oplus_voocphy_manager {
 	unsigned int vooc_cool_down_current_limit[COOL_DOWN_NUM_MAX];
 	unsigned int vooc_cool_down_num;
 	unsigned int current_default;
+	unsigned int limit_current_area_current_max;
 	unsigned int current_expect;
 	unsigned int current_recovery_limit;
 	unsigned int current_bcc_ext;
@@ -667,6 +669,8 @@ struct oplus_voocphy_manager {
 	unsigned int master_cp_ichg;
 	unsigned int cp_vbat;
 	unsigned int cp_vac;
+	int cp_tsbus;
+	int cp_tsbat;
 	unsigned int slave_cp_ichg;
 	unsigned int slave_cp_vbus;
 	unsigned int slave_cp_vsys;
@@ -829,12 +833,14 @@ struct oplus_voocphy_manager {
 	int low_curr_full_t3;
 	u32 fastchg_timeout_time_init;
 	unsigned int vooc_little_cold_full_voltage;
+	unsigned int vooc_little_cool_full_voltage;
 	unsigned int vooc_cool_full_voltage;
 	unsigned int vooc_warm_full_voltage;
 	unsigned int vooc_1time_full_voltage;
 	unsigned int vooc_ntime_full_voltage;
 	int ovp_reg;
 	int ocp_reg;
+	int reg_ctrl_1;
 	int adapter_check_vooc_head_count;
 	int adapter_check_cmd_data_count;
 
@@ -888,6 +894,7 @@ struct oplus_voocphy_manager {
 	bool high_curr_setting;
 	bool copycat_vooc_support;
 	int identify_algorithm_version;
+	int copycat_vooc_count;
 	enum oplus_fastchg_copycat_type copycat_type;
 	enum oplus_adapter_abnormal_type adapter_abnormal_type;
 
@@ -901,6 +908,9 @@ struct oplus_voocphy_manager {
 	int cp_work_mode;
 	int pps_ocp_max;
 	bool workaround_for_100w;
+
+	bool cancel_primary_switch; /* cancel usb primary switch */
+	bool vooc_direct_charge; /* inform tcpc to ignore pd vbus irq */
 };
 
 struct oplus_voocphy_operations {
@@ -946,6 +956,7 @@ struct oplus_voocphy_operations {
 	bool (*get_chg_pmid2out)(void);
 	int (*clk_err_clean)(void);
 	int (*set_ufcs_enable)(struct oplus_voocphy_manager *chip, bool enable);
+	void (*set_fix_mode)(bool val);
 };
 
 #define VOOCPHY_LOG_BUF_LEN 1024
@@ -1059,5 +1070,6 @@ void oplus_voocphy_clear_variables(void);
 void oplus_voocphy_turn_off_fastchg(void);
 int oplus_voocphy_get_cp_enable(void);
 int oplus_voocphy_set_ufcs_enable(bool enable);
+bool oplus_get_vooc_direct_charge_en(void);
 bool oplus_voocphy_get_vbatt_ovp_status(void);
 #endif /* _OPLUS_VOOCPHY_H_ */

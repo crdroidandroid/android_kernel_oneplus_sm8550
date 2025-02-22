@@ -122,10 +122,14 @@ static int __init start_reason_init(void)
 {
 #if IS_MODULE(CONFIG_OPLUS_FEATURE_PROJECTINFO)	
 #if IS_MODULE(CONFIG_OPLUS_FEATURE_OPLUSBOOT)
-	pr_err("startup_mode from cmdline : %s\n", startup_mode);
-	strcpy(pwron_event, startup_mode);
-	pwron_event[strlen(startup_mode)] = '\0';
-	pr_info("parse poweron reason %s i = %llu\n", pwron_event, strlen(startup_mode));
+	unsigned int cpy_len = 0;
+
+	cpy_len = strlen(startup_mode);
+	cpy_len = (cpy_len < MAX_CMD_LENGTH) ? cpy_len:MAX_CMD_LENGTH;
+	pr_err("startup_mode from cmdline : %s, len=%u\n", startup_mode, cpy_len);
+	strncpy(pwron_event, startup_mode, cpy_len);
+	pwron_event[cpy_len] = '\0';
+	pr_info("parse poweron reason %s\n", pwron_event);
 #endif
 #else
     int i;
@@ -192,9 +196,13 @@ static int __init oplus_charger_reboot(void)
 {
 #if IS_MODULE(CONFIG_OPLUS_FEATURE_PROJECTINFO)
 #ifdef CONFIG_OPLUS_FEATURE_CHARGERPRESENT
-	pr_err("charger present from cmdline : %s\n", charger_present);
-	strcpy(charger_reboot, charger_present);
-	charger_reboot[strlen(charger_present)] = '\0';
+	unsigned int cpy_len = 0;
+
+	cpy_len = strlen(charger_present);
+	cpy_len = (cpy_len < MAX_CMD_LENGTH) ? cpy_len:MAX_CMD_LENGTH;
+	pr_err("charger present from cmdline : %s, len=%u\n", charger_present, cpy_len);
+	strncpy(charger_reboot, charger_present, cpy_len);
+	charger_reboot[cpy_len] = '\0';
 	pr_info("%s: parse charger_reboot %s\n", __func__, charger_reboot);
 #endif
 #else
@@ -217,9 +225,13 @@ int __init  board_boot_mode_init(void)
 {
 #if IS_MODULE(CONFIG_OPLUS_FEATURE_PROJECTINFO)
 #if IS_MODULE(CONFIG_OPLUS_FEATURE_OPLUSBOOT)
-	pr_err("mode from cmdline : %s\n", bootmode);
-	strcpy(boot_mode, bootmode);
-	boot_mode[strlen(bootmode)] = '\0';
+	unsigned int cpy_len = 0;
+
+	cpy_len = strlen(bootmode);
+	cpy_len = (cpy_len < MAX_CMD_LENGTH) ? cpy_len:MAX_CMD_LENGTH;
+	pr_err("mode from cmdline : %s, len =%u\n", bootmode, cpy_len);
+	strncpy(boot_mode, bootmode, cpy_len);
+	boot_mode[cpy_len] = '\0';
 	pr_err("oplusboot.mode= %s\n", boot_mode);
 #endif
 #else

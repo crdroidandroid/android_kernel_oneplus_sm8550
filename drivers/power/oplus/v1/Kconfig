@@ -57,3 +57,8 @@ config OPLUS_SM8450_CHARGER
 	help
 	  Enables support for the sm8450 charging
 
+config OPLUS_CHARGER_OPTIGA
+	bool "OPLUS OPTIGA soc node"
+	help
+	  Say Y to include support
+

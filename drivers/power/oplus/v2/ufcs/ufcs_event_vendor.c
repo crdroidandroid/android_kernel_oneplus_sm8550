@@ -31,18 +31,6 @@ static const char *const oplus_msg_name[] = {
 	[OPLUS_MSG_RESP_POWER_INFO_EXT]		= "resp_power_info_ext",
 };
 
-static const char *const oplus_emark_info_str[] = {
-	[UFCS_OPLUS_EMARK_INFO_ERR]		= "error",
-	[UFCS_OPLUS_EMARK_INFO_OTHER_CABLE]	= "other",
-	[UFCS_OPLUS_EMARK_INFO_OPLUS_CABLE]	= "oplus",
-	[UFCS_OPLUS_EMARK_INFO_OTHER]		= "unknown",
-};
-
-static const char *const oplus_power_info_type_str[] = {
-	[UFCS_OPLUS_POWER_INFO_UFCS]		= "UFCS",
-	[UFCS_OPLUS_POWER_INFO_PPS]		= "PPS",
-	[UFCS_OPLUS_POWER_INFO_SVOOC]		= "SVOOC",
-};
 
 const char *ufcs_get_oplus_msg_name(enum ufcs_oplus_vnd_msg_type type)
 {
@@ -57,35 +45,6 @@ const char *ufcs_get_oplus_msg_name(enum ufcs_oplus_vnd_msg_type type)
 	}
 	return oplus_msg_name[type];
 }
-
-const char *ufcs_get_oplus_emark_info_str(enum ufcs_oplus_vnd_emark_info info)
-{
-	switch (info) {
-	case UFCS_OPLUS_EMARK_INFO_ERR:
-	case UFCS_OPLUS_EMARK_INFO_OTHER_CABLE:
-	case UFCS_OPLUS_EMARK_INFO_OPLUS_CABLE:
-	case UFCS_OPLUS_EMARK_INFO_OTHER:
-		break;
-	default:
-		return "invalid";
-	}
-	return oplus_emark_info_str[info];
-}
-EXPORT_SYMBOL(ufcs_get_oplus_emark_info_str);
-
-const char *ufcs_get_oplus_power_info_type_str(enum ufcs_oplus_vnd_power_info_type type)
-{
-	switch (type) {
-	case UFCS_OPLUS_POWER_INFO_UFCS:
-	case UFCS_OPLUS_POWER_INFO_PPS:
-	case UFCS_OPLUS_POWER_INFO_SVOOC:
-		break;
-	default:
-		return "invalid";
-	}
-	return oplus_power_info_type_str[type];
-}
-EXPORT_SYMBOL(ufcs_get_oplus_power_info_type_str);
 
 int ufcs_oplus_send_ctrl_msg(struct ufcs_class *class,
 	enum ufcs_oplus_vnd_msg_type type, bool retry)

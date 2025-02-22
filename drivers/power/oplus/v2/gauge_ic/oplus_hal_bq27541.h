@@ -6,7 +6,13 @@
 #ifndef __OPLUS_BQ27541_H__
 #define __OPLUS_BQ27541_H__
 
+#include <linux/regmap.h>
 #include <oplus_chg_ic.h>
+#include <oplus_mms_gauge.h>
+
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_CHG_DEBUG_KIT)
+#include <debug-kit.h>
+#endif
 
 #define OPLUS_USE_FAST_CHARGER
 #define DRIVER_VERSION			"1.1.0"
@@ -170,6 +176,7 @@
 #define DEVICE_BQ28Z610				2
 #define DEVICE_ZY0602				3
 #define DEVICE_ZY0603				4
+#define DEVICE_NFG8011B			5
 
 #define DEVICE_TYPE_FOR_VOOC_BQ27541		0
 #define DEVICE_TYPE_FOR_VOOC_BQ27411		1
@@ -234,7 +241,6 @@
 
 #define ZY602_MAC_CELL_DOD0_EN_ADDR		0x00
 #define ZY602_MAC_CELL_DOD0_CMD			0x00E3
-
 #define ZY602_MAC_CELL_DOD0_ADDR		0x40
 #define ZY602_MAC_CELL_DOD0_SIZE		12
 
@@ -276,8 +282,8 @@
 #define BQ28Z610_DEEP_DISCHG_CHECK 		0xFF
 #define BQ28Z610_DEEP_DISCHG_NUM_CMD		0x4082
 #define BQ28Z610_DEEP_DISCHG_NAME_CMD		0x004A
-#define BQ28Z610_DEEP_DISCHG_SIZE		9
-#define BQ28Z610_DEEP_DISCHG_CEHECK_SIZE	11
+#define BQ28Z610_DEEP_DISCHG_SIZE		12
+#define BQ28Z610_DEEP_DISCHG_CEHECK_SIZE	14
 #define BQ28Z610_TERM_VOLT_CMD			0x45BE
 #define BQ28Z610_TERM_VOLT_SIZE			4
 #define BQ28Z610_TERM_VOLT_S_CMD		0x45C3
@@ -288,7 +294,7 @@
 #define BQ28Z610_BATT_SN_EN_ADDR		0x3E
 #define BQ28Z610_BATT_SN_CMD			0x004C
 #define BQ28Z610_BATT_SN_READ_BUF_LEN		22
-#define BQ28Z610_BATT_SN_NO_CHECKSUM		0x00
+#define BQ28Z610_BATTINFO_NO_CHECKSUM		0x00
 #define BQ28Z610_BATT_SN_RETRY_MAX		3
 
 #define ZY0602_BATT_SN_EN_ADDR			0x3F
@@ -339,6 +345,7 @@ typedef enum {
 typedef enum {
 	TI_GAUGE = 0,
 	SW_GAUGE,
+	NFG_GAUGE,
 	UNKNOWN_GAUGE_TYPE,
 } SCC_GAUGE_TYPE;
 
@@ -356,6 +363,10 @@ typedef enum {
 #define BQ28Z610_SUBCMD_CB_STATUS	0x0076
 #define BQ28Z610_SUBCMD_TRY_COUNT	3
 #define CALIB_TIME_CHECK_ARGS		6
+
+#define GAUGE_SUBCMD_TRY_COUNT	3
+#define GAUGE_EXTERN_DATAFLASHBLOCK	0x3e
+#define GAUGE_SUBCMD_DEVICE_TYPE	0X0001
 
 struct cmd_address {
 	/*      bq27411 standard cmds     */
@@ -456,6 +467,8 @@ struct bq27541_authenticate_data {
 #define GAUGE_AUTH_MSG_LEN			20
 #define WLS_AUTH_RANDOM_LEN			8
 #define WLS_AUTH_ENCODE_LEN			8
+#define GAUGE_SHA256_AUTH_MSG_LEN		32
+#define UFCS_AUTH_MSG_LEN			16
 
 typedef struct {
 	int result;
@@ -469,16 +482,37 @@ struct wls_chg_auth_result {
 };
 
 typedef struct {
+	unsigned char msg[UFCS_AUTH_MSG_LEN];
+} oplus_ufcs_auth_result;
+
+struct oplus_gauge_sha256_auth_result {
+	unsigned char msg[GAUGE_SHA256_AUTH_MSG_LEN];
+	unsigned char rcv_msg[GAUGE_SHA256_AUTH_MSG_LEN];
+};
+
+typedef struct {
 	oplus_gauge_auth_result rst_k0;
 	oplus_gauge_auth_result rst_k1;
 	struct wls_chg_auth_result wls_auth_data;
 	oplus_gauge_auth_result rst_k2;
+	oplus_ufcs_auth_result ufcs_k0;
+	struct oplus_gauge_sha256_auth_result sha256_rst_k0;
 } oplus_gauge_auth_info_type;
+
+struct oplus_gauge_sha256_auth{
+	unsigned char random[GAUGE_SHA256_AUTH_MSG_LEN];
+	unsigned char ap_encode[GAUGE_SHA256_AUTH_MSG_LEN];
+	unsigned char gauge_encode[GAUGE_SHA256_AUTH_MSG_LEN];
+};
 
 struct chip_bq27541 {
 	struct i2c_client *client;
 	struct device *dev;
 	struct oplus_chg_ic_dev *ic_dev;
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_CHG_DEBUG_KIT)
+	struct regmap *regmap;
+	struct oplus_device_bus *odb;
+#endif
 
 	atomic_t locked;
 
@@ -526,6 +560,7 @@ struct chip_bq27541 {
 
 	bool modify_soc_smooth;
 	bool modify_soc_calibration;
+	bool remove_iterm_taper;
 
 	bool battery_full_param; /* only for wite battery full param in guage dirver probe on 7250 platform */
 	int sha1_key_index;
@@ -544,6 +579,7 @@ struct chip_bq27541 {
 	unsigned int *afi_buf_len;
 	bool batt_bq28z610;
 	bool batt_bq27z561;
+	bool batt_nfg8011b;
 	bool batt_zy0603;
 	bool bq28z610_need_balancing;
 	bool enable_sleep_mode;
@@ -558,6 +594,7 @@ struct chip_bq27541 {
 	bool i2c_err;
 	oplus_gauge_auth_result auth_data;
 	struct bq27541_authenticate_data *authenticate_data;
+	struct oplus_gauge_sha256_auth *sha256_authenticate_data;
 	struct file_operations *authenticate_ops;
 
 	int batt_dod0_1;
@@ -569,11 +606,18 @@ struct chip_bq27541 {
 	int batt_qmax_passed_q;
 	int bcc_buf[BCC_PARMS_COUNT];
 
+	bool calib_info_init;
+	bool calib_info_save_support;
 	int dod_time;
 	int qmax_time;
 	int dod_time_pre;
 	int qmax_time_pre;
 	int calib_check_args_pre[CALIB_TIME_CHECK_ARGS];
+
+	bool support_sha256_hmac;
+	bool support_extern_cmd;
+
+	bool support_eco_design;
 
 	struct delayed_work check_iic_recover;
 	/* workaround for I2C pull SDA can't trigger error issue 230504153935012779 */
@@ -589,13 +633,39 @@ struct chip_bq27541 {
 	int id_gpio;
 	int id_match_status;
 	int id_value;
+	bool fpga_test_support;
 #if IS_ENABLED(CONFIG_OPLUS_CHG_TEST_KIT)
 	struct test_feature *battery_id_gpio_test;
+	struct test_feature *fpga_fg_test;
 #endif
 	struct battery_manufacture_info battinfo;
+	struct delayed_work get_manu_battinfo_work;
+	int deep_dischg_count_pre;
+	int deep_term_volt_pre;
+	bool dsg_enable;
+	u8 chem_id[CHEM_ID_LENGTH + 1];
+	int last_cc_pre;
+	int gauge_type;
+};
+
+struct gauge_track_info_reg {
+	int addr;
+	int len;
+	int start_index;
+	int end_index;
+};
+
+struct gauge_sili_ic_alg_cfg_map {
+	u32 map_src;
+	u32 map_des;
 };
 
 extern bool oplus_gauge_ic_chip_is_null(
 	struct oplus_chg_ic_dev *ic_dev);
+int bq27541_i2c_txsubcmd(struct chip_bq27541 *chip, int cmd, int writeData);
+int bq27541_read_i2c(struct chip_bq27541 *chip, int cmd, int *returnData);
+int bq27541_read_i2c_block(struct chip_bq27541 *chip, u8 cmd, u8 length, u8 *returnData);
+int bq27541_write_i2c_block(struct chip_bq27541 *chip, u8 cmd, u8 length, u8 *writeData);
+int bq27541_i2c_txsubcmd_onebyte(struct chip_bq27541 *chip, u8 cmd, u8 writeData);
 
 #endif /* __OPLUS_BQ27541_H__ */

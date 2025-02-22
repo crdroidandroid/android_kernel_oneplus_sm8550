@@ -52,6 +52,8 @@
 #include <oplus_chg_ic.h>
 #include <oplus_hal_vooc.h>
 
+#ifndef CONFIG_DISABLE_OPLUS_FUNCTION
+
 struct op10_chip {
 	struct i2c_client *client;
 	struct device *dev;
@@ -946,6 +948,10 @@ static int op10_exit(struct oplus_chg_ic_dev *ic_dev)
 		return 0;
 
 	chip = oplus_chg_ic_get_drvdata(ic_dev);
+	if (chip == NULL) {
+		chg_err("chip is NULL");
+		return -ENODEV;
+	}
 	ic_dev->online = false;
 	wakeup_source_remove(op10_update_wake_lock);
 #ifdef CONFIG_OPLUS_CHARGER_MTK
@@ -1202,7 +1208,11 @@ static int init_voocbin_proc(struct op10_chip *chip)
 	return 0;
 }
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0))
+static int op10_driver_probe(struct i2c_client *client)
+#else
 static int op10_driver_probe(struct i2c_client *client, const struct i2c_device_id *id)
+#endif
 {
 	struct op10_chip *chip;
 	struct device_node *node = client->dev.of_node;
@@ -1385,3 +1395,5 @@ oplus_chg_module_register(op10_driver);
 
 MODULE_DESCRIPTION("Driver for oplus vooc op10 fast mcu");
 MODULE_LICENSE("GPL v2");
+
+#endif /*CONFIG_DISABLE_OPLUS_FUNCTION*/

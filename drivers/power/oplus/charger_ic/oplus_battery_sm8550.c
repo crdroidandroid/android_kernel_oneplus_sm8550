@@ -3410,7 +3410,7 @@ static int battery_psy_get_prop(struct power_supply *psy,
 		pval->intval = chip->limits.temp_normal_vfloat_mv;
 		break;
 	case POWER_SUPPLY_PROP_CURRENT_NOW:
-		if (chip->voocphy_support == ADSP_VOOCPHY) {
+		if (chip->voocphy_support == ADSP_VOOCPHY || chip->read_by_reg == 1) {
 			pval->intval = oplus_gauge_get_batt_current();
 		} else {
 			pval->intval = oplus_gauge_get_prev_batt_current();
@@ -9632,6 +9632,16 @@ int oplus_chg_wired_get_break_sub_crux_info(char *crux_info)
 	return bcdev->real_chg_type;
 }
 
+int oplus_abnormal_adapter_disconnect_keep(void)
+{
+	int ret_val = 0;
+	if ((oplus_chg_get_voocphy_support() == ADSP_VOOCPHY) &&
+		(oplus_chg_get_fast_chg_type() == ADAPTER_ID_65W_0X14) &&
+		oplus_is_pd_svooc() && !oplus_voocphy_get_fastchg_start())
+			ret_val = 1;
+	return ret_val;
+}
+
 #define MAX_VBUS_CHECK_COUNTS			4
 #define VOLTAGE_800MV				800
 #define GET_INFO_FROMADS_MAXIMIT		3
@@ -9787,6 +9797,7 @@ static void oplus_plugin_irq_work(struct work_struct *work)
 				    oplus_vooc_get_fastchg_to_warm() == false) {      /*plug out by normal*/
 					printk(KERN_ERR "[%s]: plug out normal\n", __func__);
 					smbchg_set_chargerid_switch_val(0);
+					oplus_ufcs_variables_reset(0);
 					chip->chargerid_volt = 0;
 					chip->chargerid_volt_got = false;
 					chip->charger_type = POWER_SUPPLY_TYPE_UNKNOWN;
@@ -11052,6 +11063,34 @@ u32 oplus_chg_get_pps_status(void)
 	return pst->prop[USB_GET_PPS_STATUS];
 }
 
+int oplus_check_cc_mode(void) {
+	int rc = 0;
+	struct battery_chg_dev *bcdev = NULL;
+	struct oplus_chg_chip *chip = g_oplus_chip;
+	struct psy_state *pst = NULL;
+
+	if (!chip) {
+		chg_err("[OPLUS_CHG][%s]: chip not ready!\n", __func__);
+		return MODE_DEFAULT;
+	}
+
+	bcdev = chip->pmic_spmi.bcdev_chip;
+	pst = &bcdev->psy_list[PSY_TYPE_USB];
+
+	rc = read_property_id(bcdev, pst, USB_TYPEC_MODE);
+	if (rc < 0) {
+		chg_err("[OPLUS_CHG][%s]: 111 Couldn't read 0x2b44 rc=%d\n", __func__, rc);
+		return MODE_DEFAULT;
+	}
+
+	chg_err("[OPLUS_CHG][%s]:111 reg0x2b44[0x%x]\n", __func__, pst->prop[USB_TYPEC_MODE]);
+
+	if (pst->prop[USB_TYPEC_MODE] == 0)
+		return MODE_SINK;
+	else
+		return MODE_SRC;
+}
+
 int oplus_chg_set_pps_config(int vbus_mv, int ibus_ma)
 {
 	int rc1, rc2 = 0;
@@ -11427,6 +11466,7 @@ struct oplus_chg_operations  battery_chg_ops = {
 	.set_bcc_curr_to_voocphy = oplus_set_bcc_curr_to_voocphy,
 	.pdo_5v = oplus_chg_set_pdo_5v,
 	.get_subboard_temp = oplus_get_subboard_temp,
+	.check_cc_mode = oplus_check_cc_mode,
 	.get_ccdetect_online = sm8550_get_ccdetect_online,
 	.get_abnormal_adapter_disconnect_cnt = oplus_get_abnormal_adapter_disconnect_cnt,
 };
@@ -11691,7 +11731,7 @@ static int fg_bq27541_get_average_current(void)
 	bcdev = chip->pmic_spmi.bcdev_chip;
 	pst = &bcdev->psy_list[PSY_TYPE_BATTERY];
 
-	if (oplus_chg_get_voocphy_support() == ADSP_VOOCPHY && !chip->charger_exist) {
+	if (oplus_chg_get_voocphy_support() == ADSP_VOOCPHY && !chip->charger_exist && !chip->read_by_reg) {
 		curr = DIV_ROUND_CLOSEST((int)bcdev->read_buffer_dump.data_buffer[1], 1000);
 		return curr;
 	}

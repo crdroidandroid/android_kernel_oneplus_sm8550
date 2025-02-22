@@ -9,11 +9,13 @@
 #include <linux/kthread.h>
 #include <linux/gpio.h>
 #include <linux/of_gpio.h>
+#include <linux/pinctrl/consumer.h>
 
 #include "oplus_switching.h"
 #include "../oplus_charger.h"
 #include "../oplus_gauge.h"
 #include "../oplus_vooc.h"
+#include "../vooc_ic/oplus_vooc_fw.h"
 #include "../oplus_ufcs.h"
 #include "../oplus_pps.h"
 
@@ -56,14 +58,26 @@ struct wakeup_source *usbtemp_wakelock;
 
 int __attribute__((weak)) qpnp_get_prop_charger_voltage_now(void) {return 0;}
 
+#ifdef CONFIG_OPLUS_CHARGER_MTK
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 10, 0))
 int __attribute__((weak)) oplus_chg_set_dischg_enable(bool en)
 {
 	return 0;
 }
-#else
+#elif (LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0))
 __attribute__((weak)) int oplus_chg_set_dischg_enable(bool en);
+#else
+__attribute__((weak)) int oplus_chg_set_dischg_enable(bool en)
+{
+	return 0;
+}
 #endif
+#else /* CONFIG_OPLUS_CHARGER_MTK */
+int __attribute__((weak)) oplus_chg_set_dischg_enable(bool en)
+{
+	return 0;
+}
+#endif /* CONFIG_OPLUS_CHARGER_MTK */
 
 static int usbtemp_debug = 0;
 module_param(usbtemp_debug, int, 0644);
@@ -1067,15 +1081,36 @@ bool oplus_usbtemp_temp_rise_fast_with_batt_temp(struct oplus_chg_chip *chip)
 		return false;
 
 	if (chip->usbtemp_curr_status == OPLUS_USBTEMP_LOW_CURR) {
-		if (chip->tbatt_temp / 10 > chip->usbtemp_batt_temp_low &&
-			(((chip->usb_temp_l >= chip->tbatt_temp / 10 +
-				chip->usbtemp_temp_gap_low_with_batt_temp)
-				&& (chip->usb_temp_l < USB_100C))
-			|| ((chip->usb_temp_r >= chip->tbatt_temp / 10 +
-				chip->usbtemp_temp_gap_low_with_batt_temp)
-				&& (chip->usb_temp_r < USB_100C))))
-			return true;
-		return false;
+		if (oplus_is_power_off_charging(NULL) && chip->support_hot_enter_kpoc) {
+			if (chip->tbatt_temp / 10 > chip->usbtemp_batt_temp_low &&
+				chip->tbatt_temp / 10 < chip->usbtemp_batt_temp_over_hot &&
+				(((chip->usb_temp_l >= chip->tbatt_temp / 10 +
+					chip->usbtemp_temp_gap_low_with_batt_temp)
+					&& (chip->usb_temp_l < USB_100C))
+				|| ((chip->usb_temp_r >= chip->tbatt_temp / 10 +
+					chip->usbtemp_temp_gap_low_with_batt_temp)
+					&& (chip->usb_temp_r < USB_100C))))
+				return true;
+			else if (chip->tbatt_temp / 10 > chip->usbtemp_batt_temp_over_hot &&
+					(((chip->usb_temp_l >= chip->tbatt_temp / 10 +
+						chip->usbtemp_temp_gap_with_batt_temp_in_over_hot)
+						&& (chip->usb_temp_l < USB_100C))
+					|| ((chip->usb_temp_r >= chip->tbatt_temp / 10 +
+						chip->usbtemp_temp_gap_with_batt_temp_in_over_hot)
+						&& (chip->usb_temp_r < USB_100C))))
+					return true;
+			return false;
+		} else {
+			if (chip->tbatt_temp / 10 > chip->usbtemp_batt_temp_low &&
+				(((chip->usb_temp_l >= chip->tbatt_temp / 10 +
+					chip->usbtemp_temp_gap_low_with_batt_temp)
+					&& (chip->usb_temp_l < USB_100C))
+				|| ((chip->usb_temp_r >= chip->tbatt_temp / 10 +
+					chip->usbtemp_temp_gap_low_with_batt_temp)
+					&& (chip->usb_temp_r < USB_100C))))
+				return true;
+			return false;
+		}
 	} else if (chip->usbtemp_curr_status == OPLUS_USBTEMP_HIGH_CURR) {
 		if (chip->tbatt_temp / 10 > chip->usbtemp_batt_temp_high &&
 			(((chip->usb_temp_l >= chip->tbatt_temp / 10 +
@@ -1344,7 +1379,7 @@ int oplus_usbtemp_monitor_common_new_method(void *data)
 	struct timespec pre_hi_current_time = (struct timespec){0};
 	struct timespec now_time = (struct timespec){0};
 	bool usbtemp_first_time_in_curr_range = false;
-	static current_read_count = 0;
+	static int current_read_count = 0;
 	struct oplus_chg_chip *chip = (struct oplus_chg_chip *) data;
 #ifndef CONFIG_OPLUS_CHARGER_MTK
 	struct smb_charger *chg = NULL;
@@ -1441,7 +1476,7 @@ int oplus_usbtemp_monitor_common_new_method(void *data)
 			if (now_time.tv_sec - pre_hi_current_time.tv_sec < OPLUS_USBTEMP_CHANGE_RANGE_TIME) {
 				curr_range_change = true;
 				curr_range_change_first_time = pre_hi_current_time;
-				chg_err("reconnected when hi_current, need keep %d seconds",
+				chg_err("reconnected when hi_current, need keep %ld seconds",
 					OPLUS_USBTEMP_CHANGE_RANGE_TIME + pre_hi_current_time.tv_sec - now_time.tv_sec);
 			}
 		} else if (curr_range_change == true && chip->usbtemp_batt_current >= OPLUS_USBTEMP_HIGH_CURR_THRD

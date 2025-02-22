@@ -18,6 +18,7 @@
 #if IS_ENABLED(CONFIG_OPLUS_DYNAMIC_CONFIG_CHARGER)
 #include "oplus_cfg.h"
 #endif
+#include <oplus_strategy.h>
 
 #define IRQ_EVNET_NUM				8
 #define BIDIRECT_IRQ_EVNET_NUM			12
@@ -91,18 +92,20 @@ enum {
 };
 
 enum {
-	VOOCPHY_BATT_TEMP_HIGH,
-	VOOCPHY_BATT_TEMP_WARM,
-	VOOCPHY_BATT_TEMP_NORMAL,
-	VOOCPHY_BATT_TEMP_LITTLE_COOL,
-	VOOCPHY_BATT_TEMP_COOL,
-	VOOCPHY_BATT_TEMP_LITTLE_COLD,
-	VOOCPHY_BATT_TEMP_COLD,
-	VOOCPHY_BATT_TEMP_REMOVE,
+	VOOCPHY_BATT_TEMP_LITTLE_COLD,		/* 0 ~ 5 */
+	VOOCPHY_BATT_TEMP_COOL,			/* 5 ~ 12 */
+	VOOCPHY_BATT_TEMP_LITTLE_COOL,		/* 12 ~ 16 */
+	VOOCPHY_BATT_TEMP_LITTLE_COOL_HIGH,	/* 16 ~ 20 */
+	VOOCPHY_BATT_TEMP_NORMAL,		/* 20 ~ 35 */
+	VOOCPHY_BATT_TEMP_NORMAL_HIGH,		/* 35 ~ 44 */
+	VOOCPHY_BATT_TEMP_WARM,			/* 44 ~ 51 */
+	VOOCPHY_BATT_TEMP_MAX,
 };
 
 enum {
 	BATT_SOC_0_TO_50,
+	BATT_SOC_0_TO_50_MID,
+	BATT_SOC_0_TO_50_HIGH,
 	BATT_SOC_50_TO_75,
 	BATT_SOC_75_TO_85,
 	BATT_SOC_85_TO_90,
@@ -289,12 +292,16 @@ static struct irqinfo bidirect_int_flag[BIDIRECT_IRQ_EVNET_NUM] = {
 #define LOW_CURRENT_TERM_HI                     1000
 #define LOW_CURRENT_TERM_VBAT_HI                4470
 
-#define VOOC_TEMP_RANGE_THD	20
 #define VOOC_TEMP_OVER_COUNTS	2
 
 struct low_curr_full_condition{
 	u32 curr;
 	u32 vbatt;
+};
+
+struct full_voltage_condition {
+	unsigned int vol_1time;
+	unsigned int vol_ntime;
 };
 
 /* 7.adjust current according to battery voltage */
@@ -465,6 +472,7 @@ struct low_curr_full_condition{
 
 #define VBATT_BASE_FOR_ADAPTER                  3404
 #define VBATT_DIV_FOR_ADAPTER                   10
+#define VBATT_MAX_FOR_ADAPTER                   4654
 
 #define VOOC_RX_RECEIVED_STATUS	0x03
 #define VOOC_RX_STARTED_STATUS  	0X01
@@ -523,9 +531,9 @@ struct batt_sys_curve {
 	unsigned int chg_time;
 };
 
-#define BATT_SYS_ROW_MAX        20
+#define BATT_SYS_ROW_MAX        30
 #define BATT_SYS_COL_MAX        7
-#define BATT_SYS_MAX            6
+#define BATT_SYS_MAX            7
 
 #define DUMP_REG_CNT 49
 
@@ -538,6 +546,7 @@ enum {
 	BATT_SYS_CURVE_TEMP_LITTLE_COLD,
 	BATT_SYS_CURVE_TEMP_COOL,
 	BATT_SYS_CURVE_TEMP_LITTLE_COOL,
+	BATT_SYS_CURVE_TEMP_LITTLE_COOL_HIGH,
 	BATT_SYS_CURVE_TEMP_NORMAL_LOW,
 	BATT_SYS_CURVE_TEMP_NORMAL_HIGH,
 	BATT_SYS_CURVE_TEMP_WARM,
@@ -563,6 +572,7 @@ enum oplus_voocphy_ovp_ctrl {
 	MASTER_CP_ID,
 	SLAVE_CP_ID,
 	INVALID_CP_ID,
+	CHIP_ID_NU2112A,
 };
 
 enum oplus_fastchg_copycat_type {
@@ -635,42 +645,14 @@ struct oplus_voocphy_manager {
 	int vooc_cool_temp_default;
 	int vooc_little_cold_temp_default;
 	int vooc_normal_low_temp_default;
+	int vooc_little_cool_high_temp;
+	int vooc_little_cool_high_temp_default;
 	int vooc_low_temp;
 	int vooc_high_temp;
 	int vooc_low_soc;
 	int vooc_high_soc;
-	int vooc_strategy_normal_current;
-	int vooc_strategy1_batt_high_temp0;
-	int vooc_strategy1_batt_high_temp1;
-	int vooc_strategy1_batt_high_temp2;
-	int vooc_strategy1_batt_low_temp2;
-	int vooc_strategy1_batt_low_temp1;
-	int vooc_strategy1_batt_low_temp0;
-	int vooc_strategy1_high_current0;
-	int vooc_strategy1_high_current1;
-	int vooc_strategy1_high_current2;
-	int vooc_strategy1_low_current2;
-	int vooc_strategy1_low_current1;
-	int vooc_strategy1_low_current0;
-	int vooc_strategy1_high_current0_vooc;
-	int vooc_strategy1_high_current1_vooc;
-	int vooc_strategy1_high_current2_vooc;
-	int vooc_strategy1_low_current2_vooc;
-	int vooc_strategy1_low_current1_vooc;
-	int vooc_strategy1_low_current0_vooc;
-	int vooc_strategy2_batt_up_temp1;
-	int vooc_strategy2_batt_up_down_temp2;
-	int vooc_strategy2_batt_up_temp3;
-	int vooc_strategy2_batt_up_down_temp4;
-	int vooc_strategy2_batt_up_temp5;
-	int vooc_strategy2_batt_up_temp6;
-	int vooc_strategy2_high0_current;
-	int vooc_strategy2_high1_current;
-	int vooc_strategy2_high2_current;
-	int vooc_strategy2_high3_current;
 	int vooc_batt_over_high_temp;
 	int vooc_batt_over_low_temp;
-	int vooc_strategy_change_count;
 	int vooc_warm_allow_vol;
 	int vooc_warm_allow_soc;
 	int cool_down;
@@ -684,10 +666,6 @@ struct oplus_voocphy_manager {
 	unsigned char adapter_model_ver;
 	unsigned char adapter_model_count; /* obtain adapter_model need times */
 	unsigned char ask_batt_sys; /* batt_sys */
-	unsigned int svooc_cool_down_current_limit[16];
-	unsigned int svooc_cool_down_num;
-	unsigned int vooc_cool_down_current_limit[16];
-	unsigned int vooc_cool_down_num;
 	unsigned int current_default;
 	unsigned int current_expect;
 	unsigned int current_recovery_limit;
@@ -725,7 +703,7 @@ struct oplus_voocphy_manager {
 	unsigned int ask_current_first;
 	unsigned int ask_batvol_first;
 	unsigned int vbus;
-	unsigned int current_pwd;	/* copycat adapter current thd */
+	int current_pwd;	/* copycat adapter current thd */
 	unsigned int curr_pwd_count;	/* count for copycat adapter is ornot */
 	bool copycat_icheck;
 
@@ -782,6 +760,17 @@ struct oplus_voocphy_manager {
 	int adapter_type;
 	unsigned int fastchg_notify_status;
 
+
+	/* If ap_control_allow is fasle, oplus_ap_fastchg_allow is always true
+	 * If ap_control_allow is true, oplus_ap_fastchg_allow is controlled by 0x52, fastchg_real_allow is always true
+	 * oplus_ap_fastchg_allow and fastchg_allow both control whether fast charging is really allowed
+	 * Set allow_report_present to true during init_vooc, and set to false after sending 0x52
+	 */
+	bool oplus_ap_fastchg_allow;
+	bool ap_control_allow;
+	bool allow_report_present;
+	int frame_head;
+
 	struct hrtimer monitor_btimer;	/* monitor base timer */
 	ktime_t moniotr_kt;
 
@@ -805,8 +794,6 @@ struct oplus_voocphy_manager {
 	int voocphy_freq_maxcore;
 	int voocphy_current_change_timeout;
 	int voocphy_ibat_over_current;
-	int voocphy_svooc_cp_max_ibus;
-	int voocphy_vooc_cp_max_ibus;
 	int voocphy_cp_max_ibus;
 	int voocphy_vbus_low;
 	int voocphy_vbus_high;
@@ -862,12 +849,15 @@ struct oplus_voocphy_manager {
 	u32 fastchg_timeout_time_init;
 	unsigned int vooc_little_cold_full_voltage;
 	unsigned int vooc_little_cool_full_voltage;
+	unsigned int vooc_little_cool_high_full_voltage;
 	unsigned int vooc_cool_full_voltage;
 	unsigned int vooc_warm_full_voltage;
 	unsigned int vooc_1time_full_voltage;
 	unsigned int vooc_ntime_full_voltage;
+	struct full_voltage_condition full_voltage[VOOCPHY_BATT_TEMP_MAX];
 	int ovp_reg;
 	int ocp_reg;
+	int reg_ctrl_1;
 	int adapter_check_vooc_head_count;
 	int adapter_check_cmd_data_count;
 
@@ -902,6 +892,8 @@ struct oplus_voocphy_manager {
 	u8 int_column[6];
 	u8 int_column_pre[6];
 	bool copycat_vooc_support;
+	int copycat_vooc_count;
+	int copycat_vooc_accuracy_value;
 	int chip_id;
 	int high_curr_setting;
 	enum oplus_voocphy_ovp_ctrl ovp_ctrl_cpindex;
@@ -910,9 +902,17 @@ struct oplus_voocphy_manager {
 	enum oplus_adapter_abnormal_type adapter_abnormal_type;
 	bool workaround_for_100w;
 	enum oplus_fastchg_copycat_type copycat_type;
+	int soc_range_data[BATT_SOC_90_TO_100 + 1];
 #if IS_ENABLED(CONFIG_OPLUS_DYNAMIC_CONFIG_CHARGER)
 	struct oplus_cfg debug_cfg;
 #endif
+	struct oplus_chg_strategy *svooc_lcf_strategy;
+	struct oplus_chg_strategy *svooc_sub_lcf_strategy;
+	bool fastchg_disable_charger;
+	bool v2x_volt_full_open_low;
+	int eis_status;
+	int eis_copycat_detect_cnt;
+	bool cp_err_uploading;
 };
 
 struct oplus_voocphy_operations {
@@ -948,9 +948,13 @@ struct oplus_voocphy_operations {
 	int (*get_voocphy_enable)(struct oplus_voocphy_manager *chip, u8 *data);
 	void (*dump_voocphy_reg)(struct oplus_voocphy_manager *chip);
 	int (*get_chip_id)(struct oplus_voocphy_manager *chip);
+	int (*set_chg_pmid2out)(bool enable);
+	bool (*get_chg_pmid2out)(void);
 	int (*reset_voocphy_ovp)(struct oplus_voocphy_manager *chip);
 	bool (*check_cp_int_happened)(struct oplus_voocphy_manager *chip, bool *dump_reg, bool *send_info);
 	void (*dual_chan_buck_set_ucp)(struct oplus_voocphy_manager *chip, int ucp_value);
+	int (*upload_cp_error)(struct oplus_voocphy_manager *chip, int err_type);
+	int (*get_cp_error_type)(struct oplus_voocphy_manager *chip, int *err_type);
 };
 
 #define VOOCPHY_LOG_BUF_LEN 1024

@@ -1583,7 +1583,7 @@ struct oplus_chg_ic_virq pd_manager_virq_table[] = {
 };
 
 static void tcpc_wired_subs_callback(struct mms_subscribe *subs,
-					   enum mms_msg_type type, u32 id)
+				     enum mms_msg_type type, u32 id, bool sync)
 {
 	struct pd_manager_chip *chip = subs->priv_data;
 	union mms_msg_data data = { 0 };

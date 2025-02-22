@@ -34,6 +34,8 @@
 #include <linux/mtk_panel_ext.h>
 #include <linux/mtk_disp_notify.h>
 #endif
+#include "tri_key_exception.h"
+#include "tri_key_healthinfo.h"
 
 #define THREEAXIS_DATA_NUM 9
 #define HALL_CALIB_NUM 128
@@ -51,10 +53,6 @@
 #define TRIKEY_FB_INTERF_TYPE       "10001"
 #define TRIKEY_FB_BUS_TRANS_TYPE    "10002"
 #define TRIKEY_FB_CALIB_DATA_TYPE   "10003"
-enum debug_level {
-	LEVEL_BASIC,
-	LEVEL_DEBUG,
-};
 
 enum dhall_id {
 	DHALL_0 = 0,
@@ -230,6 +228,8 @@ struct extcon_dev_data {
 	int         default_down_xdata;
 	bool        bus_ready;              /*spi or i2c resume status*/
 	bool        is_suspended;
+	bool        turn_upside_down_support;
+	bool        new_posupdate_support;
 	/* framebuffer callbacks notifier */
 #if IS_ENABLED(CONFIG_DRM_OPLUS_PANEL_NOTIFY)
 	struct drm_panel *active_panel;
@@ -245,6 +245,12 @@ struct extcon_dev_data {
 #endif
 	struct work_struct     speed_up_work;               /*using for speedup resume*/
 	struct workqueue_struct *speedup_resume_wq;
+	/*exception*/
+	bool exception_upload_support;
+	struct tri_exception_data tri_excep_data;
+	/*health monitor*/
+	bool health_monitor_support;
+	struct monitor_data monitor_data;
 };
 
 extern int oplus_register_hall(const char *name,

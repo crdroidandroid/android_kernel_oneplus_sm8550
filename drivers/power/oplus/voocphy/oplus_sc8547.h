@@ -321,7 +321,7 @@
 #define SC8547_PMID2OUT_OVP_FLAG_MASK       0x04
 #define SC8547_PMID2OUT_OVP_FLAG_SHIFT      2
 
-#define SC8547_PMID2OUT_UVP_STAT_MASK       0x01
+#define SC8547_PMID2OUT_UVP_STAT_MASK       0x02
 #define SC8547_PMID2OUT_UVP_STAT_SHIFT      1
 
 #define SC8547_PMID2OUT_OVP_STAT_MASK       0x01
@@ -778,4 +778,8 @@ void sc8547_subsys_exit(void);
 int sc8547_slave_subsys_init(void);
 void sc8547_slave_subsys_exit(void);
 #endif
+struct sc8547_track_check_reg {
+	u8 addr;
+	u8 data;
+};
 #endif

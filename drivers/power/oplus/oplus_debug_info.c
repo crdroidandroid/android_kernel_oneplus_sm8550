@@ -634,16 +634,16 @@ static void oplus_chg_print_debug_info(struct oplus_chg_chip *chip)
 		ret += snprintf(&oplus_chg_debug_msg[ret], OPLUS_CHG_DEBUG_MSG_LEN - ret,
 						"$$flag_reason@@%s", oplus_chg_debug_info.flag_reason);
 		ret += snprintf(&oplus_chg_debug_msg[ret], OPLUS_CHG_DEBUG_MSG_LEN - ret,
-					"$$charging_state@@%s", charging_state_name[chip->prop_status]);
+					"$$charging_state@@%s", (char *)&charging_state_name[chip->prop_status]);
 		ret += snprintf(&oplus_chg_debug_msg[ret], OPLUS_CHG_DEBUG_MSG_LEN - ret,
 				"$$adapter_type@@0x%x", (oplus_chg_debug_info.fast_chg_type << 8) | oplus_chg_debug_info.real_charger_type);
 		if(oplus_chg_get_vooc_adapter_name_index(chip) >= 0) {
 			ret += snprintf(&oplus_chg_debug_msg[ret], OPLUS_CHG_DEBUG_MSG_LEN - ret,
-					"$$vooc_adapter_name@@%s", vooc_adapter_name[oplus_chg_get_vooc_adapter_name_index(chip)]);
+					"$$vooc_adapter_name@@%s", (char *)&vooc_adapter_name[oplus_chg_get_vooc_adapter_name_index(chip)]);
 		}
 
 		ret += snprintf(&oplus_chg_debug_msg[ret], OPLUS_CHG_DEBUG_MSG_LEN - ret,
-					"$$norm_adapter_name@@%s", norm_adapter_name[oplus_chg_debug_info.real_charger_type]);
+					"$$norm_adapter_name@@%s", (char *)&norm_adapter_name[oplus_chg_debug_info.real_charger_type]);
 
 		ret += snprintf(&oplus_chg_debug_msg[ret], OPLUS_CHG_DEBUG_MSG_LEN - ret,
 						"$$rechg_counts@@%d", oplus_chg_debug_info.rechg_counts);/*add for rechg counts*/
@@ -829,7 +829,7 @@ static void oplus_chg_print_debug_info(struct oplus_chg_chip *chip)
 			}
 			if (chip->gauge_iic_err_time_record != 0) {
 				ret += snprintf(&oplus_chg_debug_msg[ret], OPLUS_CHG_DEBUG_MSG_LEN - ret,
-						", gauge_iic_err_%d[%d]", chip->gauge_iic_err,
+						", gauge_iic_err_%d[%ld]", chip->gauge_iic_err,
 						chip->gauge_iic_err_time_record);
 				if (chip->gauge_iic_err == false) {
 					chip->gauge_iic_err_time_record = 0;
@@ -1194,7 +1194,7 @@ static int oplus_chg_set_chg_flag(int index)
 	}
 	if (chg_check_point_debug&OPEN_LOG_BIT) {
 		chg_err("cnt: %d, index: %d, flag: 0x%x\n",
-				oplus_chg_debug_info.chg_cnt[index], index, oplus_chg_debug_info.notify_flag);
+				oplus_chg_debug_info.chg_cnt[index], index, (unsigned int)oplus_chg_debug_info.notify_flag);
 	}
 	mutex_unlock(&oplus_chg_debug_info.nflag_lock);
 

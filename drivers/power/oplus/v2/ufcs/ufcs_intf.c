@@ -216,7 +216,23 @@ int ufcs_handshake(struct ufcs_dev *ufcs)
 }
 EXPORT_SYMBOL(ufcs_handshake);
 
-int ufcs_source_hard_reset(struct ufcs_dev *ufcs)
+int ufcs_source_hard_reset(struct ufcs_class *class)
+{
+	if (class == NULL) {
+		ufcs_err("class is NULL\n");
+		return -EINVAL;
+	}
+
+	ufcs_err("send source hard reset\n");
+	ufcs_exit_sm_work(class);
+	ufcs_clean_process_info(class);
+	class->ufcs->ops->source_hard_reset(class->ufcs);
+	ufcs_send_state(UFCS_NOTIFY_SOURCE_HW_RESET, NULL);
+	class->handshake_success = false;
+	return class->ufcs->ops->disable(class->ufcs);
+}
+
+int ufcs_intf_source_hard_reset(struct ufcs_dev *ufcs)
 {
 	struct ufcs_class *class;
 
@@ -233,9 +249,25 @@ int ufcs_source_hard_reset(struct ufcs_dev *ufcs)
 	class->handshake_success = false;
 	return class->ufcs->ops->disable(class->ufcs);
 }
-EXPORT_SYMBOL(ufcs_source_hard_reset);
+EXPORT_SYMBOL(ufcs_intf_source_hard_reset);
 
-int ufcs_cable_hard_reset(struct ufcs_dev *ufcs)
+int ufcs_cable_hard_reset(struct ufcs_class *class)
+{
+	int rc;
+
+	if (class == NULL) {
+		ufcs_err("class is NULL\n");
+		return -EINVAL;
+	}
+
+	ufcs_err("send cable hard reset\n");
+	rc = class->ufcs->ops->cable_hard_reset(class->ufcs);
+	ufcs_send_state(UFCS_NOTIFY_CABLE_HW_RESET, NULL);
+
+	return rc;
+}
+
+int ufcs_intf_cable_hard_reset(struct ufcs_dev *ufcs)
 {
 	struct ufcs_class *class;
 
@@ -248,7 +280,7 @@ int ufcs_cable_hard_reset(struct ufcs_dev *ufcs)
 	ufcs_err("send cable hard reset\n");
 	return class->ufcs->ops->cable_hard_reset(class->ufcs);
 }
-EXPORT_SYMBOL(ufcs_cable_hard_reset);
+EXPORT_SYMBOL(ufcs_intf_cable_hard_reset);
 
 static int ufcs_send_exit_ufcs_mode(struct ufcs_class *class)
 {
@@ -344,7 +376,7 @@ int ufcs_force_exit(struct ufcs_dev *ufcs)
 		rc = ufcs_send_exit_ufcs_mode(class);
 		if (rc < 0) {
 			ufcs_err("send exit ufcs mode error, send hard reset\n");
-			ufcs_source_hard_reset(ufcs);
+			ufcs_source_hard_reset(class);
 		}
 	}
 

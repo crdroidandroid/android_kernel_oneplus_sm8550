@@ -103,6 +103,7 @@ struct ufcs_dev_ops {
 	int (*set_baud_rate)(struct ufcs_dev *ufcs, enum ufcs_baud_rate baud);
 	int (*enable)(struct ufcs_dev *ufcs);
 	int (*disable)(struct ufcs_dev *ufcs);
+	int (*watchdog_config)(struct ufcs_dev *ufcs, unsigned int time_ms);
 };
 
 #if IS_ENABLED(CONFIG_OPLUS_UFCS_CLASS)
@@ -115,8 +116,8 @@ struct ufcs_dev *ufcs_get_ufcs_device(void);
 int ufcs_msg_handler(struct ufcs_dev *ufcs);
 int ufcs_intf_pdo_set(struct ufcs_dev *ufcs, int vol_mv, int curr_ma);
 int ufcs_handshake(struct ufcs_dev *ufcs);
-int ufcs_source_hard_reset(struct ufcs_dev *ufcs);
-int ufcs_cable_hard_reset(struct ufcs_dev *ufcs);
+int ufcs_intf_source_hard_reset(struct ufcs_dev *ufcs);
+int ufcs_intf_cable_hard_reset(struct ufcs_dev *ufcs);
 int ufcs_force_exit(struct ufcs_dev *ufcs);
 int ufcs_intf_config_watchdog(struct ufcs_dev *ufcs, u16 time_ms);
 void ufcs_clr_error_flag(struct ufcs_dev *ufcs);
@@ -177,13 +178,13 @@ static inline int ufcs_handshake(struct ufcs_dev *ufcs)
 }
 
 __maybe_unused
-static inline int ufcs_source_hard_reset(struct ufcs_dev *ufcs)
+static inline int ufcs_intf_source_hard_reset(struct ufcs_dev *ufcs)
 {
 	return -EINVAL;
 }
 
 __maybe_unused
-static inline int ufcs_cable_hard_reset(struct ufcs_dev *ufcs)
+static inline int ufcs_intf_cable_hard_reset(struct ufcs_dev *ufcs)
 {
 	return -EINVAL;
 }

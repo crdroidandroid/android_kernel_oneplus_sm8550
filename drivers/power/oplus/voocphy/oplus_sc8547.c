@@ -21,6 +21,7 @@
 #include <linux/of_device.h>
 #include <linux/of_gpio.h>
 #include <linux/err.h>
+#include <linux/pinctrl/consumer.h>
 #include <linux/regulator/driver.h>
 #include <linux/regulator/of_regulator.h>
 #include <linux/regulator/machine.h>
@@ -600,9 +601,8 @@ static void sc8547_update_data(struct oplus_voocphy_manager *chip)
 	} else {
 		sc8547_i2c_error(false);
 	}
-	for (i = 0; i < 4; i++) {
-		pr_info("read vsys vbat data_block[%d] = %u\n", i, data_block[i]);
-	}
+	for (i = 0; i < 4; i++)
+		pr_debug("read vsys vbat data_block[%d] = %u\n", i, data_block[i]);
 
 	chip->cp_vsys = ((data_block[0] << 8) | data_block[1])*125 / 100;
 	chip->cp_vbat = ((data_block[2] << 8) | data_block[3])*125 / 100;
@@ -616,9 +616,9 @@ static void sc8547_update_data(struct oplus_voocphy_manager *chip)
 	} else {
 		sc8547_i2c_error(false);
 	}
-	for (i = 0; i< 4; i++) {
-		pr_info("read ichg vbus data_block[%d] = %u\n", i, data_block[i]);
-	}
+	for (i = 0; i< 4; i++)
+		pr_debug("read ichg vbus data_block[%d] = %u\n", i, data_block[i]);
+
 
 	chip->cp_ichg = ((data_block[0] << 8) | data_block[1]) * SC8547_IBUS_ADC_LSB;
 	chip->cp_vbus = (((data_block[2] & SC8547_VBUS_POL_H_MASK) << 8) |
@@ -633,9 +633,9 @@ static void sc8547_update_data(struct oplus_voocphy_manager *chip)
 	} else {
 		sc8547_i2c_error(false);
 	}
-	for (i = 0; i< 2; i++) {
-		pr_info("read vac data_block[%d] = %u\n", i, data_block[i]);
-	}
+	for (i = 0; i< 2; i++)
+		pr_debug("read vac data_block[%d] = %u\n", i, data_block[i]);
+
 
 	chip->cp_vac = (((data_block[0] & SC8547_VAC_POL_H_MASK) << 8) |
 			    data_block[1]) * SC8547_VAC_ADC_LSB;
@@ -1103,7 +1103,10 @@ static int sc8547_init_vooc(struct oplus_voocphy_manager *chip)
 	pr_err("read value %d\n", value);
 
 	//dpdm
-	sc8547_write_byte(chip->client, SC8547_REG_21, 0x21);
+	if (chip->cancel_primary_switch)
+		sc8547_write_byte(chip->client, SC8547_REG_21, 0x31);
+	else
+		sc8547_write_byte(chip->client, SC8547_REG_21, 0x21);
 	sc8547_write_byte(chip->client, SC8547_REG_22, 0x00);
 	sc8547_write_byte(chip->client, SC8547_REG_33, 0xD1);
 
@@ -1623,10 +1626,9 @@ static int sc8547_cp_config_sc_mode(struct i2c_client *client)
 	reg_data = (((chip->pps_ocp_max - SC8547_IBUS_OCP_BASE) / SC8547_IBUS_OCP_LSB) << SC8547_IBUS_OCP_SHIFT) & SC8547_IBUS_OCP_MASK;
 	reg_data |= ((SC8547_IBUS_UCP_FALL_DEGLITCH_SET_5MS << SC8547_IBUS_UCP_FALL_DEGLITCH_SET_SHIFT) & SC8547_IBUS_UCP_FALL_DEGLITCH_SET_MASK);
 
-	sc8547_write_byte(client, SC8547_REG_00, 0x2E); /* VBAT_OVP:4650mV */
 	sc8547_write_byte(client, SC8547_REG_02, 0x01); /* VAC_OVP:12v */
 	sc8547_write_byte(client, SC8547_REG_04, 0x64); /* VBUS_OVP:11v */
-	sc8547_write_byte(client, SC8547_REG_05, reg_data); /* IBUS_OCP_UCP:4.8A, config in dtsi */
+	sc8547_write_byte(client, SC8547_REG_05, reg_data); /* IBUS_OCP_UCP:4.2A, config in dtsi */
 	sc8547_write_byte(client, SC8547_REG_09, 0x13); /* WD:1s bit7[0]-->2:1 */
 	sc8547_write_byte(client, SC8547_REG_11, 0x80); /* ADC_CTRL:ADC_EN */
 	sc8547_write_byte(client, SC8547_REG_0D, 0x70); /* PMID2OUT_UVP_OVP */
@@ -1652,10 +1654,9 @@ static int sc8547_cp_config_bypass_mode(struct i2c_client *client)
 		return -ENODEV;
 	}
 
-	sc8547_write_byte(client, SC8547_REG_00, 0x2E); /* VBAT_OVP:4650mV */
 	sc8547_write_byte(client, SC8547_REG_02, 0x07); /* VAC_OVP:6.5V */
 	sc8547_write_byte(client, SC8547_REG_04, 0x0A); /* VBUS_OVP:6.5V */
-	sc8547_write_byte(client, SC8547_REG_05, 0x2c); /* IBUS_OCP_UCP:4.8A */
+	sc8547_write_byte(client, SC8547_REG_05, 0x2a); /* IBUS_OCP_UCP:4.2A */
 	sc8547_write_byte(client, SC8547_REG_09, 0x93); /* WD:1s bit7[1]-->1:1 */
 	sc8547_write_byte(client, SC8547_REG_11, 0x80); /* ADC_CTRL:ADC_EN */
 	sc8547_write_byte(client, SC8547_REG_2B, 0x00); /* VOOC_CTRL:disable voocphy */
@@ -1842,7 +1843,7 @@ static int sc8547_cp_get_tdie(struct i2c_client *client)
 		return -EINVAL;
 	}
 
-	ret = i2c_smbus_read_i2c_block_data(client, SC8547_REG_19, 2, data_block);
+	ret = i2c_smbus_read_i2c_block_data(client, SC8547_REG_1F, 2, data_block);
 	if (ret < 0) {
 		sc8547_i2c_error(true);
 		pr_err("sc8547 read vout error \n");
@@ -1857,6 +1858,25 @@ static int sc8547_cp_get_tdie(struct i2c_client *client)
 		cp_tdie = SC8547_TDIE_MAX;
 
 	return cp_tdie;
+}
+
+/**
+ *when the watchdog is set to 1s,the allowed error of the chip is 800ms.
+ *any i2c communication can kick the dog.
+ */
+static bool sc8547_cp_kick_dog(struct i2c_client *client)
+{
+	u8 val;
+	int ret;
+
+	if (!client)
+		return -EINVAL;
+
+	ret = sc8547_read_byte(client, SC8547_REG_36, &val);
+	if (ret < 0)
+		return false;
+	else
+		return true;
 }
 
 irqreturn_t sc8547_protect_interrupt_handler(struct oplus_voocphy_manager *chip)
@@ -1907,6 +1927,7 @@ static struct oplus_pps_cp_device_operations sc8547_cp_pps_ops = {
 	.oplus_get_cp_vout      = sc8547_cp_get_vout,
 	.oplus_get_cp_vbat      = sc8547_cp_get_vbat,
 	.oplus_get_cp_tdie      = sc8547_cp_get_tdie,
+	.oplus_cp_kick_dog      = sc8547_cp_kick_dog,
 };
 
 static int sc8547_charger_choose(struct oplus_voocphy_manager *chip)
@@ -1970,8 +1991,12 @@ static int sc8547_pps_check_and_register(struct oplus_voocphy_manager *chip)
 	return 0;
 }
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0))
+static int sc8547_charger_probe(struct i2c_client *client)
+#else
 static int sc8547_charger_probe(struct i2c_client *client,
                                 const struct i2c_device_id *id)
+#endif
 {
 	struct oplus_voocphy_manager *chip;
 	int ret;

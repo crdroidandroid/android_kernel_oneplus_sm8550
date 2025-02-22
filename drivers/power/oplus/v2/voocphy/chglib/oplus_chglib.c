@@ -17,6 +17,8 @@
 #include <../voocphy/oplus_voocphy.h>
 #include "oplus_chglib.h"
 #include <oplus_parallel.h>
+#include <oplus_batt_bal.h>
+
 #include "../../monitor/oplus_chg_track.h"
 
 
@@ -28,6 +30,23 @@ static struct oplus_chg_ic_virq vphy_virq_table[] = {
 struct vphy_chip *oplus_chglib_get_vphy_chip(struct device *dev)
 {
 	return ((struct oplus_voocphy_manager *)dev_get_drvdata(dev))->vchip;
+}
+
+int oplus_chglib_disable_charger_by_client(bool disable, const char *client_str)
+{
+	struct votable *disable_votable = find_votable("WIRED_CHARGING_DISABLE");
+	int rc;
+
+	if (!disable_votable) {
+		chg_err("WIRED_CHARGING_DISABLE votable not found\n");
+		return -EINVAL;
+	}
+
+	rc = vote(disable_votable, client_str, disable, disable ? 1 : 0, false);
+	if (rc < 0)
+		chg_err("%s %s charger error, rc = %d\n", client_str, disable ? "disable" : "enable", rc);
+
+	return rc;
 }
 
 int oplus_chglib_disable_charger(bool disable)
@@ -102,6 +121,14 @@ static bool is_gauge_topic_available(struct vphy_chip *chip)
 		chip->gauge_topic = oplus_mms_get_by_name("gauge");
 
 	return !!chip->gauge_topic;
+}
+
+static bool is_batt_bal_topic_available(struct vphy_chip *chip)
+{
+	if (!chip->batt_bal_topic)
+		chip->batt_bal_topic = oplus_mms_get_by_name("batt_bal");
+
+	return !!chip->batt_bal_topic;
 }
 
 static bool is_main_gauge_topic_available(struct vphy_chip *chip)
@@ -322,6 +349,19 @@ bool oplus_chglib_is_wired_present(struct device *dev)
 	return chip->is_wired_present;
 }
 
+int oplus_chglib_get_cc_detect(struct device *dev)
+{
+	struct vphy_chip *chip = oplus_chglib_get_vphy_chip(dev);
+
+	union mms_msg_data data = { 0 };
+	oplus_mms_get_item_data(chip->wired_topic,
+				WIRED_ITEM_CC_DETECT, &data,
+				false);
+	chip->cc_detect = data.intval;
+	chg_err("cc_detect:%d\n", chip->cc_detect);
+	return chip->cc_detect;
+}
+
 bool oplus_chglib_is_switch_temp_range(void)
 {
 	struct votable *vooc_disable_votable;
@@ -385,6 +425,12 @@ bool oplus_chglib_get_vooc_sid_is_config(struct device *dev)
 	return data.intval ? true : false;
 }
 
+int oplus_chglib_get_eis_status(struct device *dev)
+{
+	struct vphy_chip *chip = oplus_chglib_get_vphy_chip(dev);
+	return chip->eis_status;
+}
+
 int oplus_chglib_notify_ap(struct device *dev, int event)
 {
 	struct vphy_chip *chip = oplus_chglib_get_vphy_chip(dev);
@@ -438,6 +484,23 @@ void oplus_chglib_creat_ic_err(struct device *dev, int type)
 	schedule_work(&chip->err_report_work);
 }
 
+
+void oplus_chglib_creat_i2c_err(struct device *dev)
+{
+	struct vphy_chip *chip = NULL;
+
+	if (!dev) {
+		chg_err("dev or str is null, return\n");
+		return;
+	}
+	chip = oplus_chglib_get_vphy_chip(dev);
+	if (!chip)
+		return;
+
+	schedule_work(&chip->i2c_err_report_work);
+}
+
+
 static void oplus_chglib_check_charger_out_work(struct work_struct *work)
 {
 	struct vphy_chip *chip = container_of(work,
@@ -478,6 +541,8 @@ static void oplus_chglib_err_report_work(struct work_struct *work)
 	if (curr_time - pre_upload_time > TRACK_DEVICE_ABNORMAL_UPLOAD_PERIOD)
 		upload_count = 0;
 	if (upload_count < TRACK_UPLOAD_COUNT_MAX) {
+		if (upload_count == 0)
+			pre_upload_time = track_get_local_time_s();
 		upload_count++;
 		pre_upload_time = track_get_local_time_s();
 		oplus_chg_ic_creat_err_msg(chip->ic_dev, OPLUS_IC_ERR_CP, 0, "OcpHappen");
@@ -485,8 +550,29 @@ static void oplus_chglib_err_report_work(struct work_struct *work)
 	}
 }
 
+static void oplus_chglib_i2c_err_report_work(struct work_struct *work)
+{
+	struct vphy_chip *chip = container_of(work,
+			struct vphy_chip, i2c_err_report_work);
+	static int i2c_upload_count = 0;
+	static int pre_i2c_upload_time = 0;
+	int curr_time = track_get_local_time_s();
+
+	if (curr_time - pre_i2c_upload_time > TRACK_DEVICE_ABNORMAL_UPLOAD_PERIOD)
+		i2c_upload_count = 0;
+
+	/* Record up to 10 times per day */
+	if (i2c_upload_count < TRACK_UPLOAD_COUNT_MAX) {
+		if (i2c_upload_count == 0)
+			pre_i2c_upload_time = track_get_local_time_s();
+		i2c_upload_count++;
+		oplus_chg_ic_creat_err_msg(chip->ic_dev, OPLUS_IC_ERR_I2C, 0, "I2C_err");
+		oplus_chg_ic_virq_trigger(chip->ic_dev, OPLUS_IC_VIRQ_ERR);
+	}
+}
+
 static void oplus_chglib_wired_subs_callback(struct mms_subscribe *subs,
-					     enum mms_msg_type type, u32 id)
+					     enum mms_msg_type type, u32 id, bool sync)
 {
 	struct vphy_chip *chip = subs->priv_data;
 	union mms_msg_data data = { 0 };
@@ -596,7 +682,7 @@ static void oplus_chglib_send_adapter_id_work(struct work_struct *work)
 }
 
 static void oplus_chglib_vooc_subs_callback(struct mms_subscribe *subs,
-					   enum mms_msg_type type, u32 id)
+					   enum mms_msg_type type, u32 id, bool sync)
 {
 	struct vphy_chip *chip = subs->priv_data;
 	union mms_msg_data data = { 0 };
@@ -644,16 +730,23 @@ static void oplus_chglib_set_spec_current_work(struct work_struct *work)
 	struct vphy_chip *chip = container_of(work,
 			struct vphy_chip, set_spec_current_work);
 
-	if (!chip || !chip->dev || !oplus_chglib_get_vooc_is_started(chip->dev))
+	if (!chip || !chip->dev || !chip->vinf  ||
+	    !oplus_chglib_get_vooc_is_started(chip->dev))
 		return;
 
-	if (chip && chip->vinf && chip->vinf->vphy_set_switch_curr_limit)
-		chip->vinf->vphy_set_switch_curr_limit(chip->dev,
-			chip->switching_curr_limit);
+	if (is_batt_bal_topic_available(chip)) {
+		if (chip->vinf->vphy_set_bal_curr_limit)
+			chip->vinf->vphy_set_bal_curr_limit(
+				chip->dev, chip->batt_bal_curr_limit);
+	} else {
+		if (chip->vinf->vphy_set_switch_curr_limit)
+			chip->vinf->vphy_set_switch_curr_limit(
+				chip->dev, chip->switching_curr_limit);
+	}
 }
 
 static void oplus_chglib_common_subs_callback(struct mms_subscribe *subs,
-					      enum mms_msg_type type, u32 id)
+					      enum mms_msg_type type, u32 id, bool sync)
 {
 	struct vphy_chip *chip = subs->priv_data;
 	union mms_msg_data data = { 0 };
@@ -670,6 +763,12 @@ static void oplus_chglib_common_subs_callback(struct mms_subscribe *subs,
 			oplus_mms_get_item_data(chip->common_topic, id, &data,
 						false);
 			chip->led_on = !!data.intval;
+			break;
+		case COMM_ITEM_EIS_STATUS:
+			if (oplus_mms_get_item_data(chip->common_topic, id, &data, false) == 0)
+				chip->eis_status = data.intval;
+			else
+				chip->eis_status = EIS_STATUS_DISABLE;
 			break;
 		default:
 			break;
@@ -700,7 +799,7 @@ static void oplus_chglib_subscribe_common_topic(struct oplus_mms *topic,
 }
 
 static void oplus_chglib_parallel_subs_callback(struct mms_subscribe *subs,
-					      enum mms_msg_type type, u32 id)
+					      enum mms_msg_type type, u32 id, bool sync)
 {
 	struct vphy_chip *chip = subs->priv_data;
 	union mms_msg_data data = { 0 };
@@ -752,6 +851,51 @@ static void oplus_chglib_subscribe_parallel_topic(struct oplus_mms *topic,
 	if (chip->switching_curr_limit != 0)
 		schedule_work(&chip->set_spec_current_work);
 	return;
+}
+
+static void oplus_chglib_batt_bal_subs_callback(
+	struct mms_subscribe *subs, enum mms_msg_type type, u32 id, bool sync)
+{
+	struct vphy_chip *chip = subs->priv_data;
+	union mms_msg_data data = { 0 };
+
+	switch (type) {
+	case MSG_TYPE_ITEM:
+		switch (id) {
+		case BATT_BAL_ITEM_CURR_LIMIT:
+			oplus_mms_get_item_data(chip->batt_bal_topic, id, &data, false);
+			chip->batt_bal_curr_limit = data.intval;
+			schedule_work(&chip->set_spec_current_work);
+			break;
+		default:
+			break;
+		}
+		break;
+	default:
+		break;
+	}
+}
+
+static void oplus_chglib_subscribe_batt_bal_topic(
+	struct oplus_mms *topic, void *prv_data)
+{
+	struct vphy_chip *chip = prv_data;
+	union mms_msg_data data = { 0 };
+
+	chip->batt_bal_topic = topic;
+	chip->batt_bal_subs =
+		oplus_mms_subscribe(chip->batt_bal_topic, chip,
+				    oplus_chglib_batt_bal_subs_callback,
+				    "voocphy_chglib");
+	if (IS_ERR_OR_NULL(chip->batt_bal_subs)) {
+		chg_err("subscribe batt_bal topic error, rc=%ld\n",
+			PTR_ERR(chip->batt_bal_subs));
+	}
+	oplus_mms_get_item_data(
+		chip->batt_bal_topic, BATT_BAL_ITEM_CURR_LIMIT, &data, true);
+	chip->batt_bal_curr_limit = data.intval;
+	if (chip->batt_bal_curr_limit)
+		schedule_work(&chip->set_spec_current_work);
 }
 
 static int vphy_init(struct oplus_chg_ic_dev *ic_dev)
@@ -1018,6 +1162,21 @@ static int vphy_get_retry_flag(struct oplus_chg_ic_dev *ic_dev, bool *retry_flag
 	return 0;
 }
 
+static int vphy_get_frame_head(struct oplus_chg_ic_dev *ic_dev, int *head)
+{
+	struct vphy_chip *chip;
+	int rc = -ENOTSUPP;
+
+	if (!ic_dev->online)
+		return -ENODEV;
+	chip = oplus_chglib_get_vphy_chip(ic_dev->dev);
+
+	if (chip && chip->vinf && chip->vinf->vphy_get_frame_head)
+		rc = chip->vinf->vphy_get_frame_head(chip->dev, head);
+
+	return rc;
+}
+
 static void *vphy_get_func(struct oplus_chg_ic_dev *ic_dev,
 			    enum oplus_chg_ic_func func_id)
 {
@@ -1107,6 +1266,10 @@ static void *vphy_get_func(struct oplus_chg_ic_dev *ic_dev,
 	case OPLUS_IC_FUNC_VOOCPHY_GET_RETRY_FLAG:
 		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_VOOCPHY_GET_RETRY_FLAG,
 					       vphy_get_retry_flag);
+		break;
+	case OPLUS_IC_FUNC_VOOCPHY_GET_FRAME_HEAD:
+		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_VOOCPHY_GET_FRAME_HEAD,
+					       vphy_get_frame_head);
 		break;
 	default:
 		chg_err("this func(=%d) is not supported\n", func_id);
@@ -1198,10 +1361,12 @@ struct vphy_chip *oplus_chglib_register_vphy(struct device *dev, struct hw_vphy_
 	INIT_WORK(&chip->send_absent_notify_work, oplus_chglib_send_absent_notify_work);
 	INIT_WORK(&chip->check_charger_out_work, oplus_chglib_check_charger_out_work);
 	INIT_WORK(&chip->err_report_work, oplus_chglib_err_report_work);
+	INIT_WORK(&chip->i2c_err_report_work, oplus_chglib_i2c_err_report_work);
 	oplus_mms_wait_topic("wired", oplus_chglib_subscribe_wired_topic, chip);
 	oplus_mms_wait_topic("vooc", oplus_chglib_subscribe_vooc_topic, chip);
 	oplus_mms_wait_topic("common", oplus_chglib_subscribe_common_topic, chip);
 	oplus_mms_wait_topic("parallel", oplus_chglib_subscribe_parallel_topic, chip);
+	oplus_mms_wait_topic("batt_bal", oplus_chglib_subscribe_batt_bal_topic, chip);
 	chg_info("register %s\n", node->name);
 	cp_track_debugfs_init(chip);
 

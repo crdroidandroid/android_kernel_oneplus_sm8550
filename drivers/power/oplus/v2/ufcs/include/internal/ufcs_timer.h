@@ -20,6 +20,7 @@ enum ufcs_timer {
 	MSG_TRANS_DELAY_TIMER,
 	HANDSHAKE_TIMER,
 	WAIT_MSG_TIMER,
+	EMARK_MSG_TIMER,
 	TIMER_MAX,
 };
 
@@ -40,6 +41,7 @@ enum ufcs_timer {
 /* customize */
 #define T_HANDSHAKE_TIMEOUT_MS		300
 #define T_WAIT_MSG_TIMEOUT_MS		300
+#define T_EMARK_MSG_TIMEOUT_MS		550
 
 struct ufcs_class;
 
@@ -62,5 +64,7 @@ void start_handshake_timer(struct ufcs_class *class);
 void stop_handshake_timer(struct ufcs_class *class);
 void start_wait_msg_timer(struct ufcs_class *class);
 void stop_wait_msg_timer(struct ufcs_class *class);
+void start_emark_response_timer(struct ufcs_class *class);
+void stop_emark_response_timer(struct ufcs_class *class);
 
 #endif /* __OPLUS_UFCS_TIMER_H__ */

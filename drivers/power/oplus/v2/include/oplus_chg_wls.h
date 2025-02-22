@@ -18,6 +18,27 @@
 
 #define OPLUS_CHG_WLS_AUTH_ENABLE
 
+#define TX_IBRIDGE_STEP			50
+#define TX_IBRIDGE_STEP_FREQ_OFFSET	110
+
+#define TX_NON_MAG_NON_TEC		0x0
+#define TX_NON_MAG_TEC			0x1
+#define TX_MAG_NON_TEC			0x2
+#define TX_MAG_TEC			0x3
+
+#define AP_HALL_MAY_NO_SUPPORT		0x0
+#define AP_HALL_NON_MAG			0x0
+#define AP_HALL_MAG			(0x1 << 0x07)
+
+#define Q_VALUE				0x0
+#define F_VALUE				0x1
+#define F_VALUE_MASK			0x7f
+
+#define WLS_RX_PROTOCOL_VERSION_30	0x1e
+#define WLS_RX_VOUT_10V			0x0
+#define WLS_RX_VOUT_20V			0x1
+#define WLS_EXTRA_MSG			0xFF
+
 #define WLS_TRX_STATUS_READY		BIT(0)
 #define WLS_TRX_STATUS_DIGITALPING	BIT(1)
 #define WLS_TRX_STATUS_ANALOGPING	BIT(2)
@@ -31,7 +52,17 @@
 #define WLS_TRX_ERR_OTP			BIT(5)
 #define WLS_TRX_ERR_CEPTIMEOUT		BIT(6)
 #define WLS_TRX_ERR_RXEPT		BIT(7)
+#define WLS_TRX_ERR_VRECTOVP		BIT(8)
 #define WLS_TRX_ERR_DEBUG_INFO_MASK	0x7f
+
+#define WLS_CMD_HEAD_0X28		0x28
+#define WLS_CMD_SET_TEC_POWER		0xA1
+
+#define WLS_CMD_HEAD_0X19		0x19
+
+#define WLS_CMD_GET_PLOSS_MARGIN	0xA1
+#define WLS_CMD_GET_VBRIDGE		0xA2
+#define WLS_CMD_GET_IBRIDGE		0xA3
 
 #define WLS_CMD_INDENTIFY_ADAPTER	0xA1
 #define WLS_CMD_INTO_FASTCHAGE		0xA2
@@ -70,6 +101,43 @@
 
 #define WLS_MSG_TYPE_EXTENDED_MSG	0x5F
 #define WLS_MSG_TYPE_STANDARD_MSG	0x4F
+#define WLS_MSG_TYPE_TX_MSG_0X3F	0x3F
+#define WLS_MSG_TYPE_TX_MSG_0X2F	0x2F
+#define WLS_MSG_TYPE_TX_MSG_0X1F	0x1F
+
+#define WLS_CMD_TX_RESPONE_TEC_POWER	0xF1
+
+#define WLS_CMD_TX_GET_PLOSS_MARGIN	0xF1
+#define WLS_CMD_TX_GET_VBRIDGE		0xF2
+#define WLS_CMD_TX_GET_IBRIDGE		0xF3
+#define WLS_CMD_TX_COIL_QVALUE		0xF8
+
+#define WLS_TX_ERROR_PLOSS_FOD		0x01
+#define WLS_TX_ERROR_PLOSS_FOD_WARN	0x02
+#define WLS_TX_ERROR_ASK_WARN		0x03
+#define WLS_TX_ERROR_ASK_TIMEOUT	0x04
+#define WLS_TX_ERROR_TA_UV		0x05
+#define WLS_TX_ERROR_CEP_TIMEOUT	0x06
+#define WLS_TX_ERROR_RPP_TIMEOUT	0x07
+#define WLS_TX_ERROR_OTP		0x08
+#define WLS_TX_ERROR_TA_CAPCHANGE	0x09
+
+#define WLS_TX_COIL_OFFSET		0x7
+#define WLS_TX_COIL_MASK		0x80
+#define WLS_TX_QVALUE_OFFSET		0x0
+#define WLS_TX_QVALUE_MASK		0x7F
+
+
+#define WLS_RX_VOUT_OFFSET		0x7
+#define WLS_RX_COIL_OFFSET		0x0
+#define WLS_RX_COIL_MASK		0x7F
+
+#define WLS_TX_POWER_OFFSET		0x4
+#define WLS_TX_POWER_MASK		0xf0
+#define WLS_TX_MAG_OFFSET		0x2
+#define WLS_TX_MAG_MASK			0xc
+#define WLS_TA_TYPE_OFFSET		0x0
+#define WLS_TA_TYPE_MASK		0x3
 
 #define WLS_RESPONE_PRODUCT_ID		0x84
 #define WLS_RESPONE_BATT_TEMP_SOC	0x85
@@ -155,8 +223,8 @@
 #define WLS_VOOC_PWR_MAX_MW		15000
 
 #define WLS_MAX_STEP_CHG_ENTRIES	9
-#define WLS_FOD_PARM_LEN_MAX		32
-#define BCC_MAX_STEP_ENTRIES		5
+#define WLS_FOD_PARM_LEN_MAX		64
+#define BCC_MAX_STEP_ENTRIES		7
 
 #define WLS_SKIN_TEMP_MAX		500
 
@@ -172,8 +240,11 @@
 #define WLS_ADAPTER_MODEL_0		0x00
 #define WLS_ADAPTER_MODEL_1		0x01
 #define WLS_ADAPTER_MODEL_2		0x02
+#define WLS_ADAPTER_MODEL_3		0x03
+#define WLS_ADAPTER_MODEL_4		0x04
 #define WLS_ADAPTER_MODEL_7		0x07
 #define WLS_ADAPTER_MODEL_15		0x0F
+#define WLS_ADAPTER_MODEL_25		0x19
 #define WLS_ADAPTER_THIRD_PARTY		0x1F
 
 #define WLS_AUTH_AES_RANDOM_LEN		16
@@ -193,6 +264,10 @@
 #define WLS_FASTCHG_MODE		0
 #define WLS_SILENT_MODE			1
 #define WLS_BATTERY_FULL_MODE		2
+#define WLS_EXIT_AUDIO_MODE		3
+#define WLS_AUDIO_MODE			4
+#define WLS_EXIT_CAMERA_MODE		5
+#define WLS_CAMERA_MODE			6
 #define WLS_CALL_MODE			598
 #define WLS_EXIT_CALL_MODE		599
 
@@ -211,9 +286,33 @@
 #define FAN_PWM_PULSE_IN_FASTCHG_MODE_V08_15		70
 
 #define FAN_PWM_PULSE_IN_SILENT_MODE_THR		(FAN_PWM_PULSE_IN_FASTCHG_MODE_V08_15 - 1)
+#define FAN_PWM_PULSE_IN_FASTCHG_EXIT_MODE_01			93
+#define FAN_PWM_PULSE_IN_FASTCHG_EXIT_MODE_02			80
+#define FAN_PWM_PULSE_IN_FASTCHG_EXIT_MODE_03			80
+#define FAN_PWM_PULSE_IN_FASTCHG_EXIT_MODE_V04_07		91
+#define FAN_PWM_PULSE_IN_FASTCHG_EXIT_MODE_V08_15		70
+#define FAN_PWM_PULSE_IN_FASTCHG_EXIT_MODE_DEFAULT		80
 
-#define CHG_CMD_DATA_LEN		256
-#define CHG_CMD_TIME_MS			3000
+#define ADAPTER_CURVE_GEAR_MAX		5
+#define WLS_NON_FFC_FLOAT_VOL		100
+#define MAGCVR_STATUS_FAR		0
+#define MAGCVR_STATUS_NEAR		1
+
+#define WLS_TX_PLOSS_LOWER_MV_THD			500
+#define WLS_TX_PLOSS_HIGHER_MV_THD			800
+#define WLS_TX_PLOSS_CURRENT_STEP_MA			500
+#define WLS_TX_PLOSS_CURRENT_LIMIT_LOW_MA		1000
+#define WLS_TX_TAUV_CURRENT_STEP_MA			250
+#define WLS_TX_TAUV_CURRENT_LIMIT_LOW_MA		1000
+
+#define RX_MODE_BPP_COUNT				120
+
+#define EVENT_ACTION_FOR_CAMERA				0x01
+
+enum CAMERA_CALL_PARA {
+	CAMERA_CALL_OFF = 0,
+	CAMERA_CALL_ON = 1,
+};
 
 enum wls_err_scene {
 	WLS_ERR_SCENE_RX,
@@ -238,6 +337,23 @@ enum oplus_chg_temp_region {
 	BATT_TEMP_WARM,		/*44-53*/
 	BATT_TEMP_HOT,		/*>53*/
 	BATT_TEMP_MAX,
+};
+
+enum oplus_chg_wls_type {
+	OPLUS_CHG_WLS_UNKNOWN,
+	OPLUS_CHG_WLS_BPP,
+	OPLUS_CHG_WLS_EPP,
+	OPLUS_CHG_WLS_EPP_PLUS,
+	OPLUS_CHG_WLS_VOOC,
+	OPLUS_CHG_WLS_SVOOC,
+	OPLUS_CHG_WLS_PD_65W,
+	OPLUS_CHG_WLS_TRX,
+};
+
+enum oplus_chg_wls_trx_status {
+	OPLUS_CHG_WLS_TRX_STATUS_ENABLE,
+	OPLUS_CHG_WLS_TRX_STATUS_CHARGING,
+	OPLUS_CHG_WLS_TRX_STATUS_DISENABLE,
 };
 
 enum oplus_chg_wls_rx_state {
@@ -309,6 +425,7 @@ enum wls_status_keep_type {
 	WLS_SK_BY_KERNEL,
 	WLS_SK_BY_HAL,
 	WLS_SK_WAIT_TIMEOUT,
+	WLS_SK_BY_FORCE_BPP,
 };
 
 enum {
@@ -370,19 +487,16 @@ enum {
 	WLS_BCC_SOC_MAX,
 };
 
-enum oplus_chg_cmd_type {
-	CMD_WLS_THIRD_PART_AUTH,
-	CMD_UPDATE_UI_SOH,
-	CMD_INIT_UI_SOH,
+enum {
+	WLS_HALF_BRIDGE_MODE,
+	WLS_FULL_BRIDGE_MODE,
 };
 
-enum oplus_chg_cmd_error {
-	CMD_ACK_OK,
-	CMD_ERROR_CHIP_NULL,
-	CMD_ERROR_DATA_NULL,
-	CMD_ERROR_DATA_INVALID,
-	CMD_ERROR_HIDL_NOT_READY,
-	CMD_ERROR_TIME_OUT,
+enum {
+	FOD_DISABLE_MODE,
+	FOD_BPP_MODE,
+	FOD_EPP_MODE,
+	FOD_FAST_MODE,
 };
 
 enum wls_topic_item {
@@ -401,6 +515,20 @@ enum wls_topic_item {
 	WLS_ITEM_BCC_EXIT_CURR,
 	WLS_ITEM_BCC_TEMP_RANGE,
 	WLS_ITEM_FCC_TO_ICL,
+	WLS_ITEM_CHARGING_DISABLE,
+	WLS_ITEM_MAGCVR,
+	WLS_ITEM_NOTIFY,
+	WLS_ITEM_INIT_COMPLETED,
+	WLS_ITEM_MAX_PROJECT_POWER,
+	WLS_ITEM_UI_POWER,
+	WLS_ITEM_FW_UPGRADING,
+};
+
+enum {
+	WLS_RX_COMU_CAP_AUTO,
+	WLS_RX_COMU_CAP_A,
+	WLS_RX_COMU_CAP_B,
+	WLS_RX_COMU_CAP_AB,
 };
 
 #ifdef OPLUS_CHG_DEBUG
@@ -410,6 +538,4 @@ ssize_t oplus_chg_wls_upgrade_fw_store(struct oplus_mms *mms, const char *buf, s
 
 int oplus_chg_wls_set_status_keep(struct oplus_mms *mms, enum wls_status_keep_type status_keep);
 int oplus_chg_wls_get_break_sub_crux_info(struct oplus_mms *mms, char *crux_info);
-ssize_t oplus_chg_wls_send_mutual_cmd(struct oplus_mms *mms, char *buf);
-void oplus_chg_wls_response_mutual_cmd(struct oplus_mms *mms, const char *buf, size_t count);
 #endif /* __OPLUS_CHG_WLS_H__ */

@@ -60,6 +60,8 @@ struct hw_vphy_info {
 	void (*vphy_set_fastchg_ap_allow)(struct device *dev, int value, bool dummy);
 	int (*vphy_get_real_batt_curve_current)(struct device *dev);
 	bool (*vphy_get_retry_flag)(struct device *dev);
+	void (*vphy_set_bal_curr_limit)(struct device *dev, int curr);
+	int (*vphy_get_frame_head)(struct device *dev, int *head);
 };
 
 struct vphy_chip {
@@ -67,9 +69,11 @@ struct vphy_chip {
 	struct oplus_mms *wired_topic;
 	struct mms_subscribe *wired_subs;
 	struct oplus_mms *gauge_topic;
+	struct oplus_mms *batt_bal_topic;
 	struct oplus_mms *main_gauge_topic;
 	struct oplus_mms *sub_gauge_topic;
 	struct mms_subscribe *gauge_subs;
+	struct mms_subscribe *batt_bal_subs;
 	struct oplus_mms *common_topic;
 	struct mms_subscribe *common_subs;
 	struct oplus_mms *vooc_topic;
@@ -84,6 +88,7 @@ struct vphy_chip {
 	struct work_struct send_adapter_id_work;
 	struct work_struct send_absent_notify_work;
 	struct work_struct err_report_work;
+	struct work_struct i2c_err_report_work;
 	bool led_on;
 	bool is_pd_svooc_adapter;
 	bool is_abnormal_pd_svooc_adapter;
@@ -92,14 +97,18 @@ struct vphy_chip {
 	int cool_down;
 	int fastchg_notify_event;
 	int switching_curr_limit;
+	int batt_bal_curr_limit;
 	bool switching_hw_status;
 	int debug_cp_err;
 	int track_err_type;
+	int cc_detect;
+	int eis_status;
 };
 
 extern void oplus_chg_adc_switch_ctrl(void);
 
 struct vphy_chip *oplus_chglib_get_vphy_chip(struct device *dev);
+int oplus_chglib_disable_charger_by_client(bool disable, const char *client_str);
 int oplus_chglib_disable_charger(bool disable);
 int oplus_chglib_suspend_charger(bool suspend);
 int oplus_chglib_vooc_fastchg_disable(const char *client_str, bool disable);
@@ -126,10 +135,14 @@ bool oplus_chglib_get_flash_led_status(void);
 int oplus_chglib_get_charger_voltage(void);
 bool oplus_chglib_get_vooc_is_started(struct device *dev);
 bool oplus_chglib_get_vooc_sid_is_config(struct device *dev);
+int oplus_chglib_get_eis_status(struct device *dev);
 int oplus_chglib_notify_ap(struct device *dev, int event);
 int oplus_chglib_push_break_code(struct device *dev, int code);
 struct vphy_chip *oplus_chglib_register_vphy(struct device *dev,
 					     struct hw_vphy_info *vinf);
 void oplus_chglib_creat_ic_err(struct device *dev, int type);
+void oplus_chglib_creat_i2c_err(struct device *dev);
+int oplus_chglib_get_cc_detect(struct device *dev);
+
 
 #endif /*__OPLUS_CHGLIB_H__*/

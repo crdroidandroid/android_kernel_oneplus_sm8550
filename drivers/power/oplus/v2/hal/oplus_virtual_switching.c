@@ -154,26 +154,12 @@ static int oplus_chg_switching_set_enable(struct oplus_chg_ic_dev *ic_dev, bool 
 {
 	struct oplus_virtual_switching_ic *chip;
 	int i;
-#ifdef CONFIG_OPLUS_CHG_IC_DEBUG
-	struct oplus_chg_ic_overwrite_data *data;
-	const void *buf;
-#endif
 
 	if (ic_dev == NULL) {
 		chg_err("oplus_chg_ic_dev is NULL");
 		return -ENODEV;
 	}
 
-#ifdef CONFIG_OPLUS_CHG_IC_DEBUG
-	data = oplus_chg_ic_get_overwrite_data(ic_dev, OPLUS_IC_FUNC_SET_HW_ENABLE);
-	if (unlikely(data != NULL)) {
-		buf = (const void *)data->buf;
-		if (!oplus_chg_ic_debug_data_check(buf, data->size))
-			goto skip_overwrite;
-		enable = oplus_chg_ic_get_item_data(buf, 0);
-	}
-skip_overwrite:
-#endif
 	chip = oplus_chg_ic_get_drvdata(ic_dev);
 	for (i = 0; i < chip->child_num; i++) {
 		oplus_chg_ic_func(chip->child_list[i].ic_dev,
@@ -187,27 +173,12 @@ static int oplus_chg_switching_get_enable(struct oplus_chg_ic_dev *ic_dev, bool 
 {
 	struct oplus_virtual_switching_ic *chip;
 	int i;
-#ifdef CONFIG_OPLUS_CHG_IC_DEBUG
-	struct oplus_chg_ic_overwrite_data *data;
-	const void *buf;
-#endif
 
 	if (ic_dev == NULL) {
 		chg_err("oplus_chg_ic_dev is NULL");
 		return -ENODEV;
 	}
 
-#ifdef CONFIG_OPLUS_CHG_IC_DEBUG
-	data = oplus_chg_ic_get_overwrite_data(ic_dev, OPLUS_IC_FUNC_GET_HW_ENABLE);
-	if (unlikely(data != NULL)) {
-		buf = (const void *)data->buf;
-		if (!oplus_chg_ic_debug_data_check(buf, data->size))
-			goto skip_overwrite;
-		*enable = oplus_chg_ic_get_item_data(buf, 0);
-		return 0;
-	}
-skip_overwrite:
-#endif
 	chip = oplus_chg_ic_get_drvdata(ic_dev);
 	for (i = 0; i < chip->child_num; i++) {
 		oplus_chg_ic_func(chip->child_list[i].ic_dev,
@@ -221,27 +192,12 @@ static int oplus_chg_switching_get_type(struct oplus_chg_ic_dev *ic_dev, int *ty
 {
 	struct oplus_virtual_switching_ic *chip;
 	int i;
-#ifdef CONFIG_OPLUS_CHG_IC_DEBUG
-	struct oplus_chg_ic_overwrite_data *data;
-	const void *buf;
-#endif
 
 	if (ic_dev == NULL) {
 		chg_err("oplus_chg_ic_dev is NULL");
 		return -ENODEV;
 	}
 
-#ifdef CONFIG_OPLUS_CHG_IC_DEBUG
-	data = oplus_chg_ic_get_overwrite_data(ic_dev, OPLUS_IC_FUNC_GET_DEVICE_TYPE);
-	if (unlikely(data != NULL)) {
-		buf = (const void *)data->buf;
-		if (!oplus_chg_ic_debug_data_check(buf, data->size))
-			goto skip_overwrite;
-		*type = oplus_chg_ic_get_item_data(buf, 0);
-		return 0;
-	}
-skip_overwrite:
-#endif
 	chip = oplus_chg_ic_get_drvdata(ic_dev);
 	for (i = 0; i < chip->child_num; i++) {
 		*type = chip->child_list[i].ic_type;
@@ -290,89 +246,6 @@ static void *oplus_chg_switching_get_func(struct oplus_chg_ic_dev *ic_dev,
 
 	return func;
 }
-
-#ifdef CONFIG_OPLUS_CHG_IC_DEBUG
-static ssize_t oplus_chg_switching_get_func_data(struct oplus_chg_ic_dev *ic_dev,
-				     enum oplus_chg_ic_func func_id,
-				     void *buf)
-{
-	bool temp;
-	int *item_data;
-	ssize_t rc = 0;
-
-	if (!ic_dev->online && (func_id != OPLUS_IC_FUNC_INIT) &&
-	   (func_id != OPLUS_IC_FUNC_EXIT))
-		return -EINVAL;
-
-	switch (func_id) {
-	case OPLUS_IC_FUNC_GET_HW_ENABLE:
-		oplus_chg_ic_debug_data_init(buf, 1);
-		rc = oplus_chg_switching_get_enable(ic_dev, &temp);
-		if (rc < 0)
-			break;
-		item_data = oplus_chg_ic_get_item_data_addr(buf, 0);
-		*item_data = temp;
-		*item_data = cpu_to_le32(*item_data);
-		rc = oplus_chg_ic_debug_data_size(1);
-		break;
-	case OPLUS_IC_FUNC_GET_DEVICE_TYPE:
-		oplus_chg_ic_debug_data_init(buf, 1);
-		item_data = oplus_chg_ic_get_item_data_addr(buf, 0);
-		rc = oplus_chg_switching_get_type(ic_dev, item_data);
-		if (rc < 0)
-			break;
-		*item_data = cpu_to_le32(*item_data);
-		rc = oplus_chg_ic_debug_data_size(1);
-		break;
-	default:
-		chg_err("this func(=%d) is not supported to get\n", func_id);
-		return -ENOTSUPP;
-		break;
-	}
-
-	return rc;
-}
-
-static int oplus_chg_switching_set_func_data(struct oplus_chg_ic_dev *ic_dev,
-				 enum oplus_chg_ic_func func_id,
-				 const void *buf, size_t buf_len)
-{
-	int rc = 0;
-
-	if (!ic_dev->online && (func_id != OPLUS_IC_FUNC_INIT) &&
-	   (func_id != OPLUS_IC_FUNC_EXIT))
-		return -EINVAL;
-	switch (func_id) {
-	case OPLUS_IC_FUNC_INIT:
-		if (!oplus_chg_ic_debug_data_check(buf, buf_len))
-			return -EINVAL;
-		rc = oplus_chg_switching_init(ic_dev);
-		break;
-	case OPLUS_IC_FUNC_EXIT:
-		if (!oplus_chg_ic_debug_data_check(buf, buf_len))
-			return -EINVAL;
-		rc = oplus_chg_switching_exit(ic_dev);
-		break;
-	case OPLUS_IC_FUNC_SET_HW_ENABLE:
-		if (!oplus_chg_ic_debug_data_check(buf, buf_len))
-			return -EINVAL;
-		rc = oplus_chg_switching_set_enable(ic_dev, oplus_chg_ic_get_item_data(buf, 0));
-		break;
-	default:
-		chg_err("this func(=%d) is not supported to set\n", func_id);
-		return -ENOTSUPP;
-		break;
-	}
-
-	return rc;
-}
-
-enum oplus_chg_ic_func oplus_chg_switching_overwrite_funcs[] = {
-	OPLUS_IC_FUNC_SET_HW_ENABLE,
-	OPLUS_IC_FUNC_GET_HW_ENABLE,
-	OPLUS_IC_FUNC_GET_DEVICE_TYPE,
-};
-#endif /* CONFIG_OPLUS_CHG_IC_DEBUG */
 
 static int oplus_switching_child_init(struct oplus_virtual_switching_ic *chip)
 {
@@ -453,14 +326,6 @@ static int oplus_virtual_switching_probe(struct platform_device *pdev)
 		chg_err("register %s error\n", node->name);
 		goto reg_ic_err;
 	}
-#ifdef CONFIG_OPLUS_CHG_IC_DEBUG
-	chip->ic_dev->debug.get_func_data = oplus_chg_switching_get_func_data;
-	chip->ic_dev->debug.set_func_data = oplus_chg_switching_set_func_data;
-	oplus_chg_ic_func_table_sort(oplus_chg_switching_overwrite_funcs,
-		ARRAY_SIZE(oplus_chg_switching_overwrite_funcs));
-	chip->ic_dev->debug.overwrite_funcs = oplus_chg_switching_overwrite_funcs;
-	chip->ic_dev->debug.func_num = ARRAY_SIZE(oplus_chg_switching_overwrite_funcs);
-#endif
 
 	chg_err("probe success\n");
 	return 0;

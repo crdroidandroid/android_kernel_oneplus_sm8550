@@ -25,6 +25,11 @@
 #define qti_battery_charger_get_prop qti_battery_charger_get_prop_v2
 #endif /* USE_ADSP */
 
+#if IS_ENABLED(CONFIG_OPLUS_AUDIO_SWITCH_GLINK)
+#define register_chg_glink_notifier register_chg_glink_notifier_v2
+#define unregister_chg_glink_notifier unregister_chg_glink_notifier_v2
+#endif
+
 #if IS_ENABLED(CONFIG_OPLUS_CHARGER_MTK) && IS_ENABLED(CONFIG_OPLUS_CHG_V2)
 
 #define oplus_chg_wake_update_work oplus_chg_wake_update_work_v2

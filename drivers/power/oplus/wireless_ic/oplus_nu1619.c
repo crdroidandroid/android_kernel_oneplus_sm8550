@@ -17,6 +17,7 @@
 #include <linux/of_gpio.h>
 #include <linux/bitops.h>
 #include <linux/mutex.h>
+#include <linux/pinctrl/consumer.h>
 #include <linux/regulator/driver.h>
 #include <linux/regulator/of_regulator.h>
 #include <linux/regulator/machine.h>
@@ -1889,7 +1890,7 @@ void nu1619_set_rtx_function(bool is_on)
 
 		chg_err(" !!!!! <~WPC~> Disable rtx function!\n");
 		chip->nu1619_chg_status.trx_transfer_end_time = oplus_wpc_get_local_time_s();
-		chg_err("trx_online=%d, start_time=%d, end_time=%d, trx_usb_present_once\n",
+		chg_err("trx_online=%d, start_time=%d, end_time=%d, trx_usb_present_once=%d\n",
 			chip->nu1619_chg_status.tx_online,
 			chip->nu1619_chg_status.trx_transfer_start_time,
 			chip->nu1619_chg_status.trx_transfer_end_time,
@@ -11746,7 +11747,11 @@ static int oplus_chg_set_mutual_cmd(u32 cmd, u32 data_size, const void *data_buf
 	return rc;
 }
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0))
+static int nu1619_driver_probe(struct i2c_client *client)
+#else
 static int nu1619_driver_probe(struct i2c_client *client, const struct i2c_device_id *id)
+#endif
 {
 	struct oplus_nu1619_ic	*chip;
 	struct oplus_wpc_chip *wpc_chip;
@@ -11862,9 +11867,15 @@ static int nu1619_driver_probe(struct i2c_client *client, const struct i2c_devic
 
 static struct i2c_driver nu1619_i2c_driver;
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0))
+static void nu1619_driver_remove(struct i2c_client *client)
+#else
 static int nu1619_driver_remove(struct i2c_client *client)
+#endif
 {
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0))
 	return 0;
+#endif
 }
 
 

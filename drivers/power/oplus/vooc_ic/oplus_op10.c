@@ -1102,7 +1102,11 @@ static int init_proc_vooc_fw_check(void)
 	return 0;
 }
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0))
+static int op10_driver_probe(struct i2c_client *client)
+#else
 static int op10_driver_probe(struct i2c_client *client, const struct i2c_device_id *id)
+#endif
 {
 	struct oplus_vooc_chip *chip;
 

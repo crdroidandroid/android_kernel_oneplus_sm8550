@@ -797,7 +797,6 @@ static int sy6970_enable_hvdcp(struct sy6970 *bq)
 				SY6970_HVDCPEN_MASK, val);
 	return ret;
 }
-EXPORT_SYMBOL_GPL(sy6970_enable_hvdcp);
 
 static int sy6970_disable_hvdcp(struct sy6970 *bq)
 {
@@ -808,7 +807,6 @@ static int sy6970_disable_hvdcp(struct sy6970 *bq)
 				SY6970_HVDCPEN_MASK, val);
 	return ret;
 }
-EXPORT_SYMBOL_GPL(sy6970_disable_hvdcp);
 
 static int sy6970_disable_maxc(struct sy6970 *bq)
 {
@@ -1053,7 +1051,6 @@ static int sy6970_adc_read_vbus_volt(struct sy6970 *sy)
 
 	return ret;
 }
-EXPORT_SYMBOL_GPL(sy6970_adc_read_vbus_volt);
 
 int sy6970_adc_read_temperature(struct sy6970 *sy)
 {
@@ -1345,7 +1342,6 @@ static int sy6970_enable_term(struct sy6970 *bq, bool enable)
 
 	return ret;
 }
-EXPORT_SYMBOL_GPL(sy6970_enable_term);
 
 int sy6970_set_boost_current(struct sy6970 *bq, int curr)
 {
@@ -1398,7 +1394,6 @@ static int sy6970_enable_auto_dpdm(struct sy6970* bq, bool enable)
 
 	return ret;
 }
-EXPORT_SYMBOL_GPL(sy6970_enable_auto_dpdm);
 
 int sy6970_set_boost_voltage(struct sy6970 *bq, int volt)
 {
@@ -1435,7 +1430,6 @@ static int sy6970_enable_ico(struct sy6970* bq, bool enable)
 
 	return ret;
 }
-EXPORT_SYMBOL_GPL(sy6970_enable_ico);
 
 static int sy6970_read_idpm_limit(struct sy6970 *bq, int *icl)
 {
@@ -1451,8 +1445,8 @@ static int sy6970_read_idpm_limit(struct sy6970 *bq, int *icl)
 		return 0;
 	}
 }
-EXPORT_SYMBOL_GPL(sy6970_read_idpm_limit);
 
+#ifdef CONFIG_OPLUS_CHARGER_MTK
 static int sy6970_enable_safety_timer(struct sy6970 *bq)
 {
 	const u8 val = SY6970_CHG_TIMER_ENABLE << SY6970_EN_TIMER_SHIFT;
@@ -1460,7 +1454,6 @@ static int sy6970_enable_safety_timer(struct sy6970 *bq)
 	return sy6970_update_bits(bq, SY6970_REG_07, SY6970_EN_TIMER_MASK,
 				   val);
 }
-EXPORT_SYMBOL_GPL(sy6970_enable_safety_timer);
 
 static int sy6970_disable_safety_timer(struct sy6970 *bq)
 {
@@ -1468,8 +1461,7 @@ static int sy6970_disable_safety_timer(struct sy6970 *bq)
 
 	return sy6970_update_bits(bq, SY6970_REG_07, SY6970_EN_TIMER_MASK, val);
 }
-EXPORT_SYMBOL_GPL(sy6970_disable_safety_timer);
-
+#endif
 
 static int sy6970_switch_to_hvdcp(struct sy6970 *bq, enum hvdcp_type type)
 {
@@ -3991,6 +3983,7 @@ RECHECK:
 			} else if (bq->power_good) {
 				goto RECHECK;
 			}
+			break;
 		case SY6970_VBUS_TYPE_SDP:
 			bq->chg_type = STANDARD_HOST;
 			if (!bq->sdp_retry) {
@@ -4783,8 +4776,11 @@ static int sy6970_suspend(struct i2c_client *client, pm_message_t mesg)
 }
 #endif
 
-
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0))
+static void sy6970_charger_remove(struct i2c_client *client)
+#else
 static int sy6970_charger_remove(struct i2c_client *client)
+#endif
 {
 	struct sy6970 *bq = i2c_get_clientdata(client);
 
@@ -4793,7 +4789,9 @@ static int sy6970_charger_remove(struct i2c_client *client)
 
 	sysfs_remove_group(&bq->dev->kobj, &sy6970_attr_group);
 
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0))
 	return 0;
+#endif
 }
 
 static void sy6970_charger_shutdown(struct i2c_client *client)

@@ -3,6 +3,8 @@
  * Copyright (c) 2015-2017, 2019 The Linux Foundation. All rights reserved.
  */
 
+#define pr_fmt(fmt) "[VOTE]([%s][%d]): " fmt, __func__, __LINE__
+
 #include <linux/proc_fs.h>
 #include <linux/spinlock.h>
 #include <linux/errno.h>
@@ -12,11 +14,14 @@
 #include <linux/string.h>
 #include <linux/uaccess.h>
 #include <linux/version.h>
+#include <linux/list.h>
+#include <linux/hashtable.h>
 #include <oplus_chg_voter.h>
 #include <oplus_chg.h>
 
 #define NUM_MAX_CLIENTS		32
 #define DEBUG_FORCE_CLIENT	"DEBUG_FORCE_CLIENT"
+#define HASHTABLE_BITS		4
 
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 17, 0))
 #define pde_data(inode) PDE_DATA(inode)
@@ -57,7 +62,49 @@ struct votable {
 	struct proc_dir_entry	*force_val_ent;
 	bool			force_active;
 	struct proc_dir_entry	*force_active_ent;
+
+	DECLARE_HASHTABLE(hash_table, HASHTABLE_BITS);
+	struct list_head check_list;
+	struct mutex check_list_lock;
 };
+
+struct vote_val_map {
+	int original;
+	int mapped;
+	struct hlist_node node;
+};
+
+struct vote_check_func {
+	struct list_head list;
+	int (*check)(struct votable *votable,
+		void *data, const char *client_str,
+		bool enabled, int val, bool step);
+};
+
+static int vote_get_mapped_val(struct votable *votable, int original, int *mapped)
+{
+	struct vote_val_map *tmp;
+
+	hash_for_each_possible(votable->hash_table, tmp, node, original) {
+		if (tmp->original == original) {
+			*mapped = tmp->mapped;
+			return 0;
+		}
+	}
+
+	return -EINVAL;
+}
+
+static bool is_client_excluded(char *client_str, const char *exclude_str)
+{
+	if (!client_str)
+		return false;
+
+	if (exclude_str != NULL && strcmp(client_str, exclude_str) == 0)
+		return true;
+
+	return false;
+}
 
 /**
  * vote_set_any()
@@ -74,14 +121,17 @@ struct votable {
  *	Must be called with the votable->lock held
  */
 static void vote_set_any(struct votable *votable, int client_id,
-				int *eff_res, int *eff_id)
+				int *eff_res, int *eff_id, const char *exclude_str)
 {
 	int i;
 
 	*eff_res = 0;
 
-	for (i = 0; i < votable->num_clients && votable->client_strs[i]; i++)
+	for (i = 0; i < votable->num_clients && votable->client_strs[i]; i++) {
+		if (exclude_str != NULL && is_client_excluded(votable->client_strs[i], exclude_str))
+			continue;
 		*eff_res |= votable->votes[i].enabled;
+	}
 
 	*eff_id = client_id;
 }
@@ -100,21 +150,31 @@ static void vote_set_any(struct votable *votable, int client_id,
  *	Must be called with the votable->lock held
  */
 static void vote_min(struct votable *votable, int client_id,
-				int *eff_res, int *eff_id)
+				int *eff_res, int *eff_id, const char *exclude_str)
 {
 	int i;
+	int val;
+	int mapped;
 
 	*eff_res = INT_MAX;
 	*eff_id = -EINVAL;
 	for (i = 0; i < votable->num_clients && votable->client_strs[i]; i++) {
-		if (votable->votes[i].enabled
-			&& *eff_res > votable->votes[i].value) {
-			*eff_res = votable->votes[i].value;
-			*eff_id = i;
+		if (exclude_str != NULL && is_client_excluded(votable->client_strs[i], exclude_str))
+			continue;
+		if (votable->votes[i].enabled) {
+			val = votable->votes[i].value;
+			if (!vote_get_mapped_val(votable, val, &mapped))
+				val = mapped;
+			if (*eff_res > val) {
+				*eff_res = val;
+				*eff_id = i;
+			}
 		}
 	}
 	if (*eff_id == -EINVAL)
 		*eff_res = -EINVAL;
+	else
+		*eff_res = votable->votes[*eff_id].value;
 }
 
 /**
@@ -131,21 +191,76 @@ static void vote_min(struct votable *votable, int client_id,
  *	Must be called with the votable->lock held
  */
 static void vote_max(struct votable *votable, int client_id,
-				int *eff_res, int *eff_id)
+				int *eff_res, int *eff_id, const char *exclude_str)
 {
 	int i;
+	int val;
+	int mapped;
 
 	*eff_res = INT_MIN;
 	*eff_id = -EINVAL;
 	for (i = 0; i < votable->num_clients && votable->client_strs[i]; i++) {
-		if (votable->votes[i].enabled &&
-				*eff_res < votable->votes[i].value) {
-			*eff_res = votable->votes[i].value;
-			*eff_id = i;
+		if (exclude_str != NULL && is_client_excluded(votable->client_strs[i], exclude_str))
+			continue;
+		if (votable->votes[i].enabled) {
+			val = votable->votes[i].value;
+			if (!vote_get_mapped_val(votable, val, &mapped))
+				val = mapped;
+			if (*eff_res < val) {
+				*eff_res = val;
+				*eff_id = i;
+			}
 		}
 	}
 	if (*eff_id == -EINVAL)
 		*eff_res = -EINVAL;
+	else
+		*eff_res = votable->votes[*eff_id].value;
+}
+
+int get_effective_result_exclude_client_locked(struct votable *votable, const char *exclude_str)
+{
+	int effective_result = 0;
+	int effective_id = -EINVAL;
+
+	if (!votable || !exclude_str)
+		return -EINVAL;
+
+	if (votable->force_active)
+		return votable->force_val;
+
+	if (votable->override_result != -EINVAL)
+		return votable->override_result;
+
+	switch (votable->type) {
+	case VOTE_MIN:
+		vote_min(votable, 0, &effective_result, &effective_id, exclude_str);
+		break;
+	case VOTE_MAX:
+		vote_max(votable, 0, &effective_result, &effective_id, exclude_str);
+		break;
+	case VOTE_SET_ANY:
+		vote_set_any(votable, 0, &effective_result, &effective_id, exclude_str);
+		break;
+	default:
+		chg_err("unknown votable type, type=%d\n", votable->type);
+		return -EINVAL;
+	}
+
+	return effective_result;
+}
+
+int get_effective_result_exclude_client(struct votable *votable, const char *exclude_str)
+{
+	int value;
+
+	if (!votable || !exclude_str)
+		return -EINVAL;
+
+	lock_votable(votable);
+	value = get_effective_result_exclude_client_locked(votable, exclude_str);
+	unlock_votable(votable);
+	return value;
 }
 
 static int get_client_id(struct votable *votable, const char *client_str)
@@ -423,6 +538,7 @@ int vote(struct votable *votable, const char *client_str, bool enabled, int val,
 	int client_id;
 	int rc = 0;
 	bool similar_vote = false;
+	struct vote_check_func *check_info;
 
 	if (!votable || !client_str)
 		return -EINVAL;
@@ -453,9 +569,6 @@ int vote(struct votable *votable, const char *client_str, bool enabled, int val,
 		similar_vote = true;
 	}
 
-	votable->votes[client_id].enabled = enabled;
-	votable->votes[client_id].value = val;
-
 	if (similar_vote && votable->voted_on) {
 		pr_debug("%s: %s,%d Ignoring similar vote %s of val=%d\n",
 			votable->name,
@@ -463,22 +576,41 @@ int vote(struct votable *votable, const char *client_str, bool enabled, int val,
 		goto out;
 	}
 
+	/* vote check */
+	mutex_lock(&votable->check_list_lock);
+	list_for_each_entry(check_info, &votable->check_list, list) {
+		if (check_info->check == NULL)
+			continue;
+		rc = check_info->check(votable, votable->data, client_str, enabled, val, step);
+		if (rc < 0) {
+			chg_err("%s: vote[%s] data(enabled=%s, val=%d) check error, rc=%d\n",
+				votable->name, client_str, enabled ? "true" : "false", val, rc);
+			mutex_unlock(&votable->check_list_lock);
+			goto out;
+		}
+	}
+	mutex_unlock(&votable->check_list_lock);
+
+	votable->votes[client_id].enabled = enabled;
+	votable->votes[client_id].value = val;
+
 	pr_debug("%s: %s,%d voting %s of val=%d\n",
 		votable->name,
 		client_str, client_id, enabled ? "on" : "off", val);
 	switch (votable->type) {
 	case VOTE_MIN:
-		vote_min(votable, client_id, &effective_result, &effective_id);
+		vote_min(votable, client_id, &effective_result, &effective_id, NULL);
 		break;
 	case VOTE_MAX:
-		vote_max(votable, client_id, &effective_result, &effective_id);
+		vote_max(votable, client_id, &effective_result, &effective_id, NULL);
 		break;
 	case VOTE_SET_ANY:
 		vote_set_any(votable, client_id,
-				&effective_result, &effective_id);
+				&effective_result, &effective_id, NULL);
 		break;
 	default:
-		return -EINVAL;
+		rc = -EINVAL;
+		goto out;
 	}
 
 	/*
@@ -898,6 +1030,9 @@ struct votable *create_votable(const char *name,
 	votable->data = data;
 	votable->override_result = -EINVAL;
 	mutex_init(&votable->vote_lock);
+	hash_init(votable->hash_table);
+	mutex_init(&votable->check_list_lock);
+	INIT_LIST_HEAD(&votable->check_list);
 
 	/*
 	 * Because effective_result and client states are invalid
@@ -956,10 +1091,74 @@ struct votable *create_votable(const char *name,
 	return votable;
 }
 
+int votable_add_map(struct votable *votable, int original, int mapped)
+{
+	struct vote_val_map *map;
+	struct vote_val_map *tmp;
+
+	if (votable == NULL) {
+		chg_err("votable is NULL\n");
+		return -EINVAL;
+	}
+
+	hash_for_each_possible(votable->hash_table, tmp, node, original) {
+		if (tmp->original == original) {
+			chg_err("duplicate mapping: %d -> %d\n", original, mapped);
+			return 0;
+		}
+	}
+
+	map = kzalloc(sizeof(struct vote_val_map), GFP_KERNEL);
+	if (map == NULL) {
+		chg_err("alloc map buf error\n");
+		return -EINVAL;
+	}
+
+	map->original = original;
+	map->mapped = mapped;
+	INIT_HLIST_NODE(&map->node);
+	hash_add(votable->hash_table, &map->node, map->original);
+
+	return 0;
+}
+
+int votable_add_check_func(struct votable *votable,
+	int (*func)(struct votable *votable,
+		void *data, const char *client_str,
+		bool enabled, int val, bool step))
+{
+	struct vote_check_func *info;
+
+	if (votable == NULL) {
+		chg_err("votable is NULL\n");
+		return -EINVAL;
+	}
+	if (func == NULL) {
+		chg_err("func is NULL\n");
+		return -EINVAL;
+	}
+
+	info = kzalloc(sizeof(struct vote_check_func), GFP_KERNEL);
+	if (info == NULL) {
+		chg_err("alloc vote_check_func struct buffer error\n");
+		return -ENOMEM;
+	}
+
+	info->check = func;
+	mutex_lock(&votable->check_list_lock);
+	list_add(&info->list, &votable->check_list);
+	mutex_unlock(&votable->check_list_lock);
+
+	return 0;
+}
+
 void destroy_votable(struct votable *votable)
 {
 	unsigned long flags;
 	int i;
+	struct hlist_node *tmp;
+	struct vote_val_map *map;
+	struct vote_check_func *func, *tmp_func;
 
 	if (!votable)
 		return;
@@ -972,6 +1171,18 @@ void destroy_votable(struct votable *votable)
 
 	for (i = 0; i < votable->num_clients && votable->client_strs[i]; i++)
 		kfree(votable->client_strs[i]);
+
+	hash_for_each_safe(votable->hash_table, i, tmp, map, node) {
+		hash_del(&map->node);
+		kfree(map);
+	}
+
+	mutex_lock(&votable->check_list_lock);
+	list_for_each_entry_safe(func, tmp_func, &votable->check_list, list) {
+		list_del(&func->list);
+		kfree(func);
+	}
+	mutex_unlock(&votable->check_list_lock);
 
 	kfree(votable->name);
 	kfree(votable);

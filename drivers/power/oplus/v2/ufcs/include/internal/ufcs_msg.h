@@ -389,24 +389,43 @@ struct ufcs_msg {
 
 #define MSG_RETRY_COUNT_MAX	3
 #define MSG_NUMBER_COUNT_MAX	15
+static const char *const oplus_emark_info_str[] = {
+	[UFCS_OPLUS_EMARK_INFO_ERR]		= "error",
+	[UFCS_OPLUS_EMARK_INFO_OTHER_CABLE]	= "other",
+	[UFCS_OPLUS_EMARK_INFO_OPLUS_CABLE]	= "oplus",
+	[UFCS_OPLUS_EMARK_INFO_OTHER]		= "unknown",
+};
 
-#if IS_ENABLED(CONFIG_OPLUS_UFCS_CLASS)
-const char *ufcs_get_oplus_emark_info_str(enum ufcs_oplus_vnd_emark_info info);
-const char *ufcs_get_oplus_power_info_type_str(enum ufcs_oplus_vnd_power_info_type type);
-#else
+static const char *const oplus_power_info_type_str[] = {
+	[UFCS_OPLUS_POWER_INFO_UFCS]		= "UFCS",
+	[UFCS_OPLUS_POWER_INFO_PPS]		= "PPS",
+	[UFCS_OPLUS_POWER_INFO_SVOOC]		= "SVOOC",
+};
 
-__maybe_unused
-static inline const char *ufcs_get_oplus_emark_info_str(enum ufcs_oplus_vnd_emark_info info)
+__maybe_unused static const char *ufcs_get_oplus_emark_info_str(enum ufcs_oplus_vnd_emark_info info)
 {
-	return "Invalid";
+	switch (info) {
+	case UFCS_OPLUS_EMARK_INFO_ERR:
+	case UFCS_OPLUS_EMARK_INFO_OTHER_CABLE:
+	case UFCS_OPLUS_EMARK_INFO_OPLUS_CABLE:
+	case UFCS_OPLUS_EMARK_INFO_OTHER:
+		break;
+	default:
+		return "invalid";
+	}
+	return oplus_emark_info_str[info];
 }
 
-__maybe_unused
-static inline const char *ufcs_get_oplus_power_info_type_str(enum ufcs_oplus_vnd_power_info_type type)
+__maybe_unused static const char *ufcs_get_oplus_power_info_type_str(enum ufcs_oplus_vnd_power_info_type type)
 {
-	return "Invalid";
+	switch (type) {
+	case UFCS_OPLUS_POWER_INFO_UFCS:
+	case UFCS_OPLUS_POWER_INFO_PPS:
+	case UFCS_OPLUS_POWER_INFO_SVOOC:
+		break;
+	default:
+		return "invalid";
+	}
+	return oplus_power_info_type_str[type];
 }
-
-#endif /* CONFIG_OPLUS_UFCS_CLASS */
-
 #endif /* __OPLUS_UFCS_MSG_H__ */

@@ -25,6 +25,7 @@ enum vooc_topic_item {
 	VOOC_ITEM_BREAK_CODE,
 	VOOC_ITEM_TEMP_RANGE,
 	VOOC_ITEM_SLOW_CHG_BATT_LIMIT,
+	VOOC_ITEM_NORMAL_CONNECT_COUNT_LEVEL,
 };
 
 enum {
@@ -82,8 +83,8 @@ enum vooc_curr_table_type {
 
 #define ABNORMAL_ADAPTER_BREAK_CHECK_TIME	1500
 #define VOOC_TEMP_OVER_COUNTS			2
-#define VOOC_TEMP_RANGE_THD			20
-#define COOL_REANG_SWITCH_LIMMIT_SOC		90
+#define VOOC_TEMP_RANGE_THD			10
+#define VOOC_TEMP_RANGE_THD_HIGH		20
 
 enum {
         NO_VOOCPHY = 0,
@@ -194,6 +195,7 @@ enum oplus_bat_temp {
 	BAT_TEMP_LITTLE_COLD,
 	BAT_TEMP_COOL,
 	BAT_TEMP_LITTLE_COOL,
+	BAT_TEMP_LITTLE_COOL_HIGH,
 	BAT_TEMP_NORMAL_LOW,
 	BAT_TEMP_NORMAL_HIGH,
 	BAT_TEMP_WARM,
@@ -205,6 +207,7 @@ enum oplus_fastchg_temp_rang {
 	FASTCHG_TEMP_RANGE_LITTLE_COLD,/*0 ~ 5*/
 	FASTCHG_TEMP_RANGE_COOL, /*5 ~ 12*/
 	FASTCHG_TEMP_RANGE_LITTLE_COOL, /*12~16*/
+	FASTCHG_TEMP_RANGE_LITTLE_COOL_HIGH,
 	FASTCHG_TEMP_RANGE_NORMAL_LOW, /*16~25*/
 	FASTCHG_TEMP_RANGE_NORMAL_HIGH, /*25~43*/
 	FASTCHG_TEMP_RANGE_WARM, /*43-52*/
@@ -297,5 +300,5 @@ int oplus_vooc_current_to_level(struct oplus_mms *topic, int curr);
 int oplus_vooc_level_to_current(struct oplus_mms *topic, int level);
 int oplus_vooc_get_batt_curve_current(struct oplus_mms *topic);
 bool oplus_vooc_get_bcc_support_for_smartchg(struct oplus_mms *topic);
-
+unsigned int oplus_adapter_id_to_sid(struct oplus_mms *topic, unsigned char id);
 #endif /* __OPLUS_CHG_VOOC_H__ */

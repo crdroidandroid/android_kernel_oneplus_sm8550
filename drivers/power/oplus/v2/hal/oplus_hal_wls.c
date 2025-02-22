@@ -332,7 +332,7 @@ int oplus_chg_wls_rx_set_trx_enable(struct oplus_chg_ic_dev *rx_ic, bool en)
 	return rc;
 }
 
-int oplus_chg_wls_rx_set_trx_start(struct oplus_chg_ic_dev *rx_ic)
+int oplus_chg_wls_rx_set_trx_start(struct oplus_chg_ic_dev *rx_ic, bool start)
 {
 	int rc;
 
@@ -341,7 +341,7 @@ int oplus_chg_wls_rx_set_trx_start(struct oplus_chg_ic_dev *rx_ic)
 		return -ENODEV;
 	}
 
-	rc = oplus_chg_ic_func(rx_ic, OPLUS_IC_FUNC_RX_SET_TRX_START);
+	rc = oplus_chg_ic_func(rx_ic, OPLUS_IC_FUNC_RX_SET_TRX_START, start);
 	if (rc < 0)
 		chg_err("can't set tx start, rc=%d\n", rc);
 
@@ -363,7 +363,7 @@ int oplus_chg_wls_rx_get_trx_status(struct oplus_chg_ic_dev *rx_ic, u8 *status)
 	return rc;
 }
 
-int oplus_chg_wls_rx_get_trx_err(struct oplus_chg_ic_dev *rx_ic, u8 *err)
+int oplus_chg_wls_rx_get_trx_err(struct oplus_chg_ic_dev *rx_ic, u32 *err)
 {
 	int rc;
 
@@ -411,7 +411,7 @@ int oplus_chg_wls_set_headroom(struct oplus_chg_ic_dev *rx_ic, int val)
 	return rc;
 }
 
-int oplus_chg_wls_rx_send_match_q(struct oplus_chg_ic_dev *rx_ic, u8 data)
+int oplus_chg_wls_rx_send_match_q(struct oplus_chg_ic_dev *rx_ic, u8 data[])
 {
 	int rc;
 
@@ -426,7 +426,7 @@ int oplus_chg_wls_rx_send_match_q(struct oplus_chg_ic_dev *rx_ic, u8 data)
 	return rc;
 }
 
-int oplus_chg_wls_rx_set_fod_parm(struct oplus_chg_ic_dev *rx_ic, u8 buf[], int len)
+int oplus_chg_wls_rx_set_fod_parm(struct oplus_chg_ic_dev *rx_ic, u8 buf[], int len, int mode, int magcvr)
 {
 	int rc;
 
@@ -435,14 +435,14 @@ int oplus_chg_wls_rx_set_fod_parm(struct oplus_chg_ic_dev *rx_ic, u8 buf[], int 
 		return -ENODEV;
 	}
 
-	rc = oplus_chg_ic_func(rx_ic, OPLUS_IC_FUNC_RX_SET_FOD_PARM, buf, len);
+	rc = oplus_chg_ic_func(rx_ic, OPLUS_IC_FUNC_RX_SET_FOD_PARM, buf, len, mode, magcvr);
 	if (rc < 0)
 		chg_err("can't set fod parm, rc=%d\n", rc);
 
 	return rc;
 }
 
-int oplus_chg_wls_rx_send_msg_raw(struct oplus_chg_ic_dev *rx_ic, u8 buf[], int len)
+int oplus_chg_wls_rx_send_msg_raw(struct oplus_chg_ic_dev *rx_ic, u8 buf[], int len, int raw_data)
 {
 	int rc;
 
@@ -451,7 +451,7 @@ int oplus_chg_wls_rx_send_msg_raw(struct oplus_chg_ic_dev *rx_ic, u8 buf[], int 
 		return -ENODEV;
 	}
 
-	rc = oplus_chg_ic_func(rx_ic, OPLUS_IC_FUNC_RX_SEND_MSG, buf, len);
+	rc = oplus_chg_ic_func(rx_ic, OPLUS_IC_FUNC_RX_SEND_MSG, buf, len, raw_data);
 	if (rc < 0)
 		chg_err("can't send msg, rc=%d\n", rc);
 
@@ -566,6 +566,73 @@ int oplus_chg_wls_rx_get_event_code(struct oplus_chg_ic_dev *rx_ic, enum oplus_c
 	rc = oplus_chg_ic_func(rx_ic, OPLUS_IC_FUNC_RX_GET_EVENT_CODE, code);
 	if (rc < 0)
 		chg_err("can't get event code, rc=%d\n", rc);
+
+	return rc;
+}
+
+int oplus_chg_wls_rx_get_bridge_mode(struct oplus_chg_ic_dev *rx_ic, int *mode)
+{
+	int rc;
+
+	if (rx_ic == NULL) {
+		chg_err("rx_ic is NULL\n");
+		return -ENODEV;
+	}
+
+	rc = oplus_chg_ic_func(rx_ic, OPLUS_IC_FUNC_RX_GET_BRIDGE_MODE, mode);
+
+	if (rc < 0 && rc != -ENOTSUPP)
+		chg_err("can't get bridge mode, rc=%d\n", rc);
+
+	return rc;
+}
+
+int oplus_chg_wls_rx_set_insert_disable(struct oplus_chg_ic_dev *rx_ic, bool en)
+{
+	int rc;
+
+	if (rx_ic == NULL) {
+		chg_err("rx_ic is NULL\n");
+		return -ENODEV;
+	}
+
+	rc = oplus_chg_ic_func(rx_ic, OPLUS_IC_FUNC_RX_DIS_INSERT, en);
+
+	if (rc < 0 && rc != -ENOTSUPP)
+		chg_err("can't set insert disable, rc=%d\n", rc);
+
+	return rc;
+}
+
+int oplus_chg_wls_rx_standby_config(struct oplus_chg_ic_dev *rx_ic, bool en)
+{
+	int rc;
+
+	if (rx_ic == NULL) {
+		chg_err("rx_ic is NULL\n");
+		return -ENODEV;
+	}
+
+	rc = oplus_chg_ic_func(rx_ic, OPLUS_IC_FUNC_RX_STANDBY_CONFIG, en);
+
+	if (rc < 0 && rc != -ENOTSUPP)
+		chg_err("can't standby config, rc=%d\n", rc);
+
+	return rc;
+}
+
+int oplus_chg_wls_rx_set_comu(struct oplus_chg_ic_dev *rx_ic, int comu)
+{
+	int rc;
+
+	if (rx_ic == NULL) {
+		chg_err("rx_ic is NULL\n");
+		return -ENODEV;
+	}
+
+	rc = oplus_chg_ic_func(rx_ic, OPLUS_IC_FUNC_RX_SET_COMU, comu);
+	if (rc < 0 && rc != -ENOTSUPP)
+		chg_err("can't set comu, rc=%d\n", rc);
 
 	return rc;
 }

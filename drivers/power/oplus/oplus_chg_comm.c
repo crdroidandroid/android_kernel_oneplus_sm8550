@@ -526,7 +526,7 @@ static int oplus_chg_comm_event_notifier_call(struct notifier_block *nb, unsigne
 	switch (val) {
 	case OPLUS_CHG_EVENT_ONLINE:
 		if (owner_ocm == NULL) {
-			pr_err("This event(=%d) does not support anonymous sending\n", val);
+			pr_err("This event(=%lu) does not support anonymous sending\n", val);
 			return NOTIFY_BAD;
 		}
 		if (!strcmp(owner_ocm->desc->name, "wireless")) {
@@ -539,7 +539,7 @@ static int oplus_chg_comm_event_notifier_call(struct notifier_block *nb, unsigne
 		break;
 	case OPLUS_CHG_EVENT_OFFLINE:
 		if (owner_ocm == NULL) {
-			pr_err("This event(=%d) does not support anonymous sending\n", val);
+			pr_err("This event(=%lu) does not support anonymous sending\n", val);
 			return NOTIFY_BAD;
 		}
 		if (!strcmp(owner_ocm->desc->name, "wireless")) {

@@ -57,7 +57,15 @@ enum oplus_chg_track_info_flag {
 	TRACK_NOTIFY_FLAG_UISOH_INFO,
 	TRACK_NOTIFY_FLAG_GAUGE_INFO,
 	TRACK_NOTIFY_FLAG_BYPASS_BOOST_INFO,
-	TRACK_NOTIFY_FLAG_GENERAL_RECORD_LAST = TRACK_NOTIFY_FLAG_BYPASS_BOOST_INFO,
+	TRACK_NOTIFY_FLAG_DEEP_DISCHG_PROFILE,
+	TRACK_NOTIFY_FLAG_RECHG_INFO,
+	TRACK_NOTIFY_FLAG_BCC_SI_INFO,
+	TRACK_NOTIFY_FLAG_ENDURANCE_INFO,
+	TRACK_NOTIFY_FLAG_EIS_INFO,
+	TRACK_NOTIFY_FLAG_ANTI_EXPANSION_INFO,
+	TRACK_NOTIFY_FLAG_CHG_UP_INFO,
+	TRACK_NOTIFY_FLAG_PLC_INFO,
+	TRACK_NOTIFY_FLAG_GENERAL_RECORD_LAST = TRACK_NOTIFY_FLAG_PLC_INFO,
 
 	TRACK_NOTIFY_FLAG_NO_CHARGING_FIRST,
 	TRACK_NOTIFY_FLAG_NO_CHARGING = TRACK_NOTIFY_FLAG_NO_CHARGING_FIRST,
@@ -80,8 +88,8 @@ enum oplus_chg_track_info_flag {
 	TRACK_NOTIFY_FLAG_FAST_CHARGING_BREAK = TRACK_NOTIFY_FLAG_CHARGING_BREAK_FIRST,
 	TRACK_NOTIFY_FLAG_GENERAL_CHARGING_BREAK,
 	TRACK_NOTIFY_FLAG_WLS_CHARGING_BREAK,
-	TRACK_NOTIFY_FLAG_CHG_FEED_LIQUOR,
-	TRACK_NOTIFY_FLAG_CHARGING_BREAK_LAST = TRACK_NOTIFY_FLAG_CHG_FEED_LIQUOR,
+	TRACK_NOTIFY_FLAG_WIRED_RETENTION_ONLINE,
+	TRACK_NOTIFY_FLAG_CHARGING_BREAK_LAST = TRACK_NOTIFY_FLAG_WIRED_RETENTION_ONLINE,
 
 	TRACK_NOTIFY_FLAG_DEVICE_ABNORMAL_FIRST,
 	TRACK_NOTIFY_FLAG_WLS_ABNORMAL = TRACK_NOTIFY_FLAG_DEVICE_ABNORMAL_FIRST,
@@ -96,11 +104,12 @@ enum oplus_chg_track_info_flag {
 	TRACK_NOTIFY_FLAG_HK_ABNORMAL,
 	TRACK_NOTIFY_FLAG_UFCS_IC_ABNORMAL,
 	TRACK_NOTIFY_FLAG_ADAPTER_ABNORMAL,
-	TRACK_NOTIFY_FLAG_NTC_ABNORMAL,
 	TRACK_NOTIFY_FLAG_BATT_ID_INFO,
 	TRACK_NOTIFY_FLAG_I2C_ABNORMAL,
 	TRACK_NOTIFY_FLAG_BOOST_BUCK_ERR,
-	TRACK_NOTIFY_FLAG_DEVICE_ABNORMAL_LAST = TRACK_NOTIFY_FLAG_BOOST_BUCK_ERR,
+	TRACK_NOTIFY_FLAG_NTC_ABNORMAL,
+	TRACK_NOTIFY_FLAG_CHG_FEED_LIQUOR,
+	TRACK_NOTIFY_FLAG_DEVICE_ABNORMAL_LAST = TRACK_NOTIFY_FLAG_CHG_FEED_LIQUOR,
 
 	TRACK_NOTIFY_FLAG_SOFTWARE_ABNORMAL_FIRST,
 	TRACK_NOTIFY_FLAG_UFCS_ABNORMAL = TRACK_NOTIFY_FLAG_SOFTWARE_ABNORMAL_FIRST,
@@ -113,11 +122,13 @@ enum oplus_chg_track_info_flag {
 	TRACK_NOTIFY_FLAG_DUAL_CHAN_ABNORMAL,
 	TRACK_NOTIFY_FLAG_DUMMY_START_ABNORMAL,
 	TRACK_NOTIFY_FLAG_WIRED_ONLINE_ERROR,
-	TRACK_NOTIFY_FLAG_SOFTWARE_ABNORMAL_LAST = TRACK_NOTIFY_FLAG_WIRED_ONLINE_ERROR,
+	TRACK_NOTIFY_FLAG_UISOC_KEEP_2_ERROR,
+	TRACK_NOTIFY_FLAG_UISOC_DROP_ERROR,
+	TRACK_NOTIFY_FLAG_BCC_SI_ABNORMAL,
+	TRACK_NOTIFY_FLAG_EIS_ABNORMAL,
+	TRACK_NOTIFY_FLAG_SOFTWARE_ABNORMAL_LAST = TRACK_NOTIFY_FLAG_EIS_ABNORMAL,
 
 	TRACK_NOTIFY_FLAG_MAX_CNT,
-
-
 };
 
 enum oplus_chg_liquid_intake_track_cmd {
@@ -125,10 +136,27 @@ enum oplus_chg_liquid_intake_track_cmd {
 	TRACK_CMD_CLEAR_TIMER,
 };
 
-enum oplus_chg_liquid_intake_track_data {
+/*enum oplus_chg_liquid_intake_track_data {
 	TRACK_DATA_PLUGOUT_INTERVAL,
 	TRACK_DATA_PLUGOUT_WIRE_CONNECT_STATE,
 	TRACK_DATA_PLUGOUT_MAX
+};*/
+
+#define OPLUS_CHG_TRACK_SCENE_BIDIRECT_CP_ERR "bidirect_cp_work_err"
+enum oplus_chg_track_bidirect_cp_device_error {
+	TRACK_BIDIRECT_CP_ERR_DEFAULT,
+	TRACK_BIDIRECT_CP_ERR_SC_EN_STAT,
+	TRACK_BIDIRECT_CP_ERR_V2X_OVP,
+	TRACK_BIDIRECT_CP_ERR_V1X_OVP,
+	TRACK_BIDIRECT_CP_ERR_VAC_OVP,
+	TRACK_BIDIRECT_CP_ERR_FWD_OCP,
+	TRACK_BIDIRECT_CP_ERR_RVS_OCP,
+	TRACK_BIDIRECT_CP_ERR_TSHUT,
+	TRACK_BIDIRECT_CP_ERR_VAC2V2X_OVP,
+	TRACK_BIDIRECT_CP_ERR_VAC2V2X_UVP,
+	TRACK_BIDIRECT_CP_ERR_V1X_ISS_OPP,
+	TRACK_BIDIRECT_CP_ERR_WD_TIMEOUT,
+	TRACK_BIDIRECT_CP_ERR_LNC_SS_TIMEOUT,
 };
 
 typedef struct {
@@ -152,7 +180,6 @@ int oplus_chg_track_record_ffc_soc(struct oplus_monitor *monitor,
 	int main_soc, int sub_soc, bool start);
 int oplus_chg_track_record_dual_chan_start(struct oplus_monitor *monitor);
 int oplus_chg_track_record_dual_chan_end(struct oplus_monitor *monitor);
-int oplus_chg_water_inlet_detect(int reason, int plugin_count);
 int oplus_chg_track_set_app_info(const char *buf);
 int oplus_chg_track_olc_config_set(const char *buf);
 int oplus_chg_track_olc_config_get(char *buf);
@@ -161,6 +188,14 @@ int oplus_chg_track_time_zone_get(char *buf);
 struct dentry *oplus_chg_track_get_debugfs_root(void);
 int oplus_chg_track_set_hidl_info(const char *buf, size_t count);
 int oplus_chg_track_check_wls_charging_break(int wls_connect);
+void oplus_chg_track_super_endurance_mode_change(struct oplus_monitor *monitor);
 void oplus_chg_track_upload_wired_online_err_info(struct oplus_monitor *monitor);
+void oplus_chg_track_init_dischg_profile(struct oplus_monitor *monitor);
+void oplus_chg_track_update_dischg_profile(struct oplus_monitor *monitor);
+void oplus_chg_track_upload_dischg_profile(struct oplus_monitor *monitor);
+void oplus_chg_track_upload_uisoc_keep_2_err_info(struct oplus_monitor *monitor);
+int oplus_chg_track_upload_rechg_info(struct oplus_monitor *monitor);
+int oplus_chg_track_get_bidirect_cp_err_reason(int err_type, char * err_reason, int len);
+void oplus_chg_track_upload_wired_retention_online_info(struct oplus_monitor *monitor);
 
 #endif /* __OPLUS_CHG_TRACK_H__ */

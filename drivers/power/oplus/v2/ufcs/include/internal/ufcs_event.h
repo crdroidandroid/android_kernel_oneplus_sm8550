@@ -143,6 +143,9 @@ int ufcs_send_msg(struct ufcs_class *class, struct ufcs_msg *msg, bool retry);
 void ufcs_free_event(struct ufcs_class *class, struct ufcs_event **event);
 void ufcs_free_all_event(struct ufcs_class *class);
 struct ufcs_event *ufcs_get_next_event(struct ufcs_class *class);
+struct ufcs_msg *ufcs_unpack_msg(struct ufcs_class *class, const u8 *buf, int len);
+int ufcs_process_event(struct ufcs_class *class, struct ufcs_event *event);
+int ufcs_dump_msg_info(struct ufcs_msg *msg, const char *prefix);
 
 /* ctrl msg api */
 const char *ufcs_get_ctrl_msg_name(enum ufcs_ctrl_msg_type type);

@@ -1793,7 +1793,7 @@ static void oplus_mt_power_off(void)
 
 static void sgm41512_oplus_chg_choose_gauge_curve(int index_curve)
 {
-	static last_curve_index = -1;
+	static int last_curve_index = -1;
 	int target_index_curve = -1;
 
 	if (index_curve == CHARGER_SUBTYPE_QC ||
@@ -2193,7 +2193,7 @@ static irqreturn_t sgm41512_irq_handler(int irq, void *data)
 	oplus_chg_check_break(bus_gd);
 	if (oplus_vooc_get_fastchg_started() == true
 			&& oplus_vooc_get_adapter_update_status() != 1) {
-		chg_err("oplus_vooc_get_fastchg_started = true!\n", __func__);
+		chg_err("oplus_vooc_get_fastchg_started = true!\n");
 		oplus_keep_resume_wakelock(chip, false);
 		return IRQ_HANDLED;
 	} else {
@@ -2634,14 +2634,20 @@ err_parse_dt:
 	return ret;
 }
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0))
+static void sgm41512_charger_remove(struct i2c_client *client)
+#else
 static int sgm41512_charger_remove(struct i2c_client *client)
+#endif
 {
 	struct chip_sgm41512 *chip = i2c_get_clientdata(client);
 
 	mutex_destroy(&chip->dpdm_lock);
 	mutex_destroy(&chip->i2c_lock);
 
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0))
 	return 0;
+#endif
 }
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 4, 0))

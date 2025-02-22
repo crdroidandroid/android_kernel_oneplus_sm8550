@@ -6,6 +6,10 @@ ifeq ($(TARGET_BUILD_VARIANT),userdebug)
 UFF_FP_DRIVER_INJECT_ENABLE := yes
 endif
 
+ifeq ($(OPLUS_FEATURE_BSP_DRV_VND_INJECT_TEST),1)
+UFF_FP_DRIVER_INJECT_ENABLE := yes
+endif
+
 # inject
 ifeq ($(UFF_FP_DRIVER_INJECT_ENABLE),yes)
 ccflags-y += -DCONFIG_FP_INJECT_ENABLE
@@ -56,6 +60,10 @@ ccflags-$(CONFIG_DRM_MEDIATEK_V2) += -DCONFIG_DRM_MEDIATEK_V2
 # wl2868c supply for gki
 ccflags-$(CONFIG_FP_SUPPLY_MODE_LDO) += -I$(srctree)/drivers/misc/mediatek/wl2868c
 ccflags-$(CONFIG_FP_SUPPLY_MODE_LDO) += -DCONFIG_FP_SUPPLY_MODE_LDO
+
+# DIO8018 power supply
+ccflags-$(CONFIG_FP_SUPPLY_MODE_LDO_DIO8018) += -I$(srctree)/drivers/misc/mediatek/pmic/pmic_ldo_set
+ccflags-$(CONFIG_FP_SUPPLY_MODE_LDO_DIO8018) += -DCONFIG_FP_SUPPLY_MODE_LDO_DIO8018
 
 ifeq ($(CONFIG_OPLUS_FINGERPRINT_GKI_ENABLE),y)
 #tp for gki

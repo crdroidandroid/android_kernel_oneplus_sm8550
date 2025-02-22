@@ -53,6 +53,14 @@ DEF_SYMBOLE(int, qti_battery_charger_get_prop, const char *name, enum battery_ch
 ADD_FUNC_BODY(qti_battery_charger_get_prop, name, prop_id, val)
 #endif /* USE_ADSP */
 
+#if IS_ENABLED(CONFIG_OPLUS_AUDIO_SWITCH_GLINK)
+DEF_SYMBOLE(int, register_chg_glink_notifier, struct notifier_block *nb)
+ADD_FUNC_BODY(register_chg_glink_notifier, nb)
+
+DEF_SYMBOLE(int, unregister_chg_glink_notifier, struct notifier_block *nb)
+ADD_FUNC_BODY(unregister_chg_glink_notifier, nb)
+#endif
+
 #if IS_ENABLED(CONFIG_OPLUS_CHARGER_MTK) && IS_ENABLED(CONFIG_OPLUS_CHG_V2)
 
 #include "oplus_gauge.h"

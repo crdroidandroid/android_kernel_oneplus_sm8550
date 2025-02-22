@@ -1393,7 +1393,11 @@ static void rt5125_shutdown(struct i2c_client *client)
 	msleep(80);
 }
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0))
+static int rt5125_driver_probe(struct i2c_client *client)
+#else
 static int rt5125_driver_probe(struct i2c_client *client, const struct i2c_device_id *id)
+#endif
 {
 	struct oplus_vooc_chip *chip;
 	chip = devm_kzalloc(&client->dev, sizeof(*chip), GFP_KERNEL);

@@ -21,6 +21,7 @@
 #include <linux/of_device.h>
 #include <linux/of_gpio.h>
 #include <linux/err.h>
+#include <linux/pinctrl/consumer.h>
 #include <linux/regulator/driver.h>
 #include <linux/regulator/of_regulator.h>
 #include <linux/regulator/machine.h>
@@ -323,24 +324,16 @@ static void sc8517_track_i2c_err_load_trigger_work(struct work_struct *work)
 static int sc8517_dump_reg_info(struct oplus_voocphy_manager *chip,
 				char *dump_info, int len)
 {
-	int ret;
-	u8 data[6] = {0};
 	int index = 0;
 
-	if(!chip || !dump_info)
+	if (!chip || !dump_info)
 		return 0;
 
-	ret = sc8517_read_i2c_block(chip->client, SC8517_REG_09, 6, data);
-	if (ret < 0) {
-		pr_err("read SC8517_REG_09 6 bytes failed\n");
-		return -EINVAL;
-	}
-
 	index += snprintf(&(dump_info[index]), len - index,
-			"REG_09~REG_0E:[0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x]",
-			data[0], data[1], data[2], data[3], data[4], data[5]);
-
-	return 0;
+			  "REG_09~REG_0E:[0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x]",
+			  chip->int_column_pre[0], chip->int_column_pre[1], chip->int_column_pre[2],
+			  chip->int_column_pre[3], chip->int_column_pre[4], chip->int_column_pre[5]);
+	return index;
 }
 
 static int sc8517_track_upload_cp_err_info(struct oplus_voocphy_manager *chip,
@@ -845,6 +838,18 @@ void sc8517_send_handshake(struct oplus_voocphy_manager *chip)
 	sc8517_write_byte(chip->client, SC8517_REG_24, 0x81);//enable voocphy and handshake
 }
 
+static void sc8517_set_fix_mode(bool val)
+{
+	if (!oplus_voocphy_mg) {
+		chg_err("Failed\n");
+		return;
+	} else {
+		if (val)
+			sc8517_write_byte(oplus_voocphy_mg->client, SC8517_REG_07, 0x46); //Enable Fixed-Frequency Mode
+		else
+			sc8517_write_byte(oplus_voocphy_mg->client, SC8517_REG_07, 0x06); //disable Fixed-Frequency Mode
+	}
+}
 
 static int sc8517_reset_voocphy(struct oplus_voocphy_manager *chip)
 {
@@ -1392,10 +1397,15 @@ static struct oplus_voocphy_operations oplus_sc8517_ops = {
 	.dump_voocphy_reg	= sc8517_dump_reg_in_err_issue,
 	.upload_cp_error	= sc8517_track_upload_cp_err_info,
 	.set_ufcs_enable     = sc8517_set_ufcs_enable,
+	.set_fix_mode		= sc8517_set_fix_mode,
 };
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0))
+static int sc8517_charger_probe(struct i2c_client *client)
+#else
 static int sc8517_charger_probe(struct i2c_client *client,
                                 const struct i2c_device_id *id)
+#endif
 {
 	struct oplus_voocphy_manager *chip;
 	int ret;

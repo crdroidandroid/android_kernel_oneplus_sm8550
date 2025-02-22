@@ -16,11 +16,15 @@
 #define PPS_STATUS_VOLT(pps_status) (((pps_status) >> 0) & 0xFFFF)
 #define PPS_STATUS_CUR(pps_status) (((pps_status) >> 16) & 0xFF)
 
+#define PD_PDO_VOL(pdo)			((pdo) * 50)
+#define PD_PDO_CURR_MAX(pdo)		((pdo) * 10)
+
 enum pps_topic_item {
 	PPS_ITEM_ONLINE,
 	PPS_ITEM_CHARGING,
 	PPS_ITEM_ADAPTER_ID,
 	PPS_ITEM_OPLUS_ADAPTER,
+	PPS_ITEM_ONLINE_KEEP,
 };
 
 typedef enum
@@ -30,6 +34,24 @@ typedef enum
 	USBPD_PDMSG_PDOTYPE_VARIABLE_SUPPLY,
 	USBPD_PDMSG_PDOTYPE_AUGMENTED
 }USBPD_PDMSG_PDOTYPE_TYPE;
+
+typedef union {
+	u32 pdo_data;
+	struct {
+	        u32 max_current_10ma			: 10;    /*bit [ 9: 0]*/
+	        u32 voltage_50mv			: 10;    /*bit [19:10]*/
+	        u32 peak_current			: 2;    /*bit [21:20]*/
+	        u32 					: 1;    /*bit [22:22]*/
+	        u32 epr_mode_capable			: 1;    /*bit [23:23]*/
+	        u32 unchunked_ext_msg_supported		: 1;    /*bit [24:24]*/
+	        u32 dual_role_data			: 1;    /*bit [25:25]*/
+	        u32 usb_comm_capable			: 1;    /*bit [26:26]*/
+	        u32 unconstrained_pwer			: 1;    /*bit [27:27]*/
+	        u32 usb_suspend_supported		: 1;    /*bit [28:28]*/
+	        u32 dual_role_power			: 1;    /*bit [29:29]*/
+	        u32 pdo_type				: 2;    /*bit [31:30]*/
+	};
+} pd_msg_data;
 
 typedef union
 {
@@ -76,7 +98,9 @@ enum pps_power_type {
 	OPLUS_PPS_POWER_MAX = 0xFFFF,
 };
 
-int oplus_pps_current_to_level(int curr);
+int oplus_pps_current_to_level(struct oplus_mms *mms, int ibus_curr);
 enum fastchg_protocol_type oplus_pps_adapter_id_to_protocol_type(u32 id);
 int oplus_pps_adapter_id_to_power(u32 id);
+int oplus_pps_get_curve_ibus(struct oplus_mms *mms);
+int oplus_pps_level_to_current(struct oplus_mms *mms, int level);
 #endif /* __OPLUS_CHG_PPS_H__ */

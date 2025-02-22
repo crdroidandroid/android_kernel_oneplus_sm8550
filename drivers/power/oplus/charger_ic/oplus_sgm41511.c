@@ -1805,7 +1805,7 @@ static irqreturn_t sgm41511_irq_handler(int irq, void *data)
 	oplus_chg_check_break(bus_gd);
 	if (oplus_vooc_get_fastchg_started() == true
 			&& oplus_vooc_get_adapter_update_status() != 1) {
-		chg_err("oplus_vooc_get_fastchg_started = true!\n", __func__);
+		chg_err("oplus_vooc_get_fastchg_started = true!\n");
 		return IRQ_HANDLED;
 	} else {
 		chip->power_good = curr_pg;
@@ -2004,14 +2004,20 @@ err_parse_dt:
 	return ret;
 }
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0))
+static void sgm41511_charger_remove(struct i2c_client *client)
+#else
 static int sgm41511_charger_remove(struct i2c_client *client)
+#endif
 {
 	struct chip_sgm41511 *chip = i2c_get_clientdata(client);
 
 	mutex_destroy(&chip->dpdm_lock);
 	mutex_destroy(&chip->i2c_lock);
 
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0))
 	return 0;
+#endif
 }
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 4, 0))

@@ -10,6 +10,7 @@ typedef enum {
 typedef enum {
 	TI_GAUGE = 0,
 	SW_GAUGE,
+	NFG_GAUGE,
 	UNKNOWN_GAUGE_TYPE,
 } SCC_GAUGE_TYPE;
 
@@ -18,6 +19,7 @@ typedef enum {
 #define DEVICE_BQ28Z610 2
 #define DEVICE_ZY0602 3
 #define DEVICE_ZY0603 4
+#define DEVICE_NFG8011B 5
 
 #define BCC_TYPE_IS_SVOOC 1
 #define BCC_TYPE_IS_VOOC 0
@@ -25,11 +27,22 @@ typedef enum {
 #define BCC_PARMS_COUNT 19
 #define BCC_PARMS_COUNT_LEN   (BCC_PARMS_COUNT * sizeof(int))
 
+struct oplus_smart_hyper_param {
+	long start_time;
+	long stop_time;
+	long gain_time_ms;
+	int start_cap;
+	int stop_cap;
+	int stop_temp;
+	int stop_soc;
+};
+
 int oplus_smart_chg_set_normal_current(int curr);
 int oplus_smart_chg_set_normal_cool_down(int cool_down);
 int oplus_smart_chg_get_normal_cool_down(void);
 long oplus_smart_chg_get_quick_mode_time_gain(void);
 int oplus_smart_chg_get_quick_mode_percent_gain(void);
+int oplus_smart_chg_get_hyper_param(struct oplus_smart_hyper_param *param);
 int oplus_smart_chg_get_battery_bcc_parameters(char *buf);
 int oplus_smart_chg_get_fastchg_battery_bcc_parameters(char *buf);
 int oplus_smart_chg_get_prev_battery_bcc_parameters(char *buf);

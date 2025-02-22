@@ -18,13 +18,19 @@ enum votable_type {
 	NUM_VOTABLE_TYPES,
 };
 
+#define PLC_VOTER		"PLC_VOTER"
+#define PLC_RETRY_VOTER		"PLC_RETRY_VOTER"
+#define PLC_SOC_VOTER		"PLC_SOC_VOTER"
+
 #define OVERRIDE_VOTER		"OVERRIDE_VOTER"
 #define JEITA_VOTER		"JEITA_VOTER"
 #define STEP_VOTER		"STEP_VOTER"
 #define USER_VOTER		"USER_VOTER"
 #define DEF_VOTER		"DEF_VOTER"
+#define LIQ_ERR_VOTER		"LIQ_ERR_VOTER"
 #define MAX_VOTER		"MAX_VOTER"
 #define BASE_MAX_VOTER		"BASE_MAX_VOTER"
+#define ADAPTER_MAX_POWER	"ADAPTER_MAX_POWER"
 #define CABLE_MAX_VOTER		"CABLE_MAX_VOTER"
 #define RX_MAX_VOTER		"RX_MAX_VOTER"
 #define EXIT_VOTER		"EXIT_VOTER"
@@ -44,6 +50,7 @@ enum votable_type {
 #define DEBUG_VOTER		"DEBUG_VOTER"
 #define FFC_VOTER		"FFC_VOTER"
 #define USB_VOTER		"USB_VOTER"
+#define ADAPTER_RESET_VOTER	"ADAPTER_RESET_VOTER"
 #define UPGRADE_VOTER		"UPGRADE_VOTER"
 #define CONNECT_VOTER		"CONNECT_VOTER"
 #define UOVP_VOTER		"UOVP_VOTER"
@@ -67,6 +74,7 @@ enum votable_type {
 #define FV_MAX_VOTER		"FV_MAX_VOTER"
 #define OVER_FV_VOTER		"OVER_FV_VOTER"
 #define CHG_FULL_VOTER		"CHG_FULL_VOTER"
+#define CHG_FULL_WARM_VOTER	"CHG_FULL_WARM_VOTER"
 #define WARM_FULL_VOTER		"WARM_FULL_VOTER"
 #define SWITCH_RANGE_VOTER	"SWITCH_TEMP_RANGE"
 #define ADSP_CRASH_VOTER	"ADSP_CRASH_VOTER"
@@ -79,6 +87,7 @@ enum votable_type {
 #define FASTCHG_VOTER		"FASTCHG_VOTER"
 #define FASTCHG_DUMMY_VOTER	"FASTCHG_DUMMY_VOTER"
 #define MMI_CHG_VOTER		"MMI_CHG_VOTER"
+#define CHG_LIMIT_CHG_VOTER	"CHG_LIMIT_CHG_VOTER"
 #define HIDL_VOTER		"HIDL_VOTER"
 #define SVID_VOTER		"SVID_VOTER"
 #define FACTORY_TEST_VOTER	"FACTORY_TEST_VOTER"
@@ -89,6 +98,7 @@ enum votable_type {
 #define LED_ON_VOTER		"LED_ON_VOTER"
 #define BAD_CONNECTED_VOTER	"BAD_CONNECTED"
 #define BCC_VOTER		"BCC_VOTER"
+#define EIS_VOTER		"EIS_VOTER"
 #define PDQC_VOTER		"PDQC_VOTER"
 #define TYPEC_VOTER		"TYPEC_VOTER"
 #define VOL_DIFF_VOTER		"VOL_DIFF_VOTER"
@@ -109,7 +119,28 @@ enum votable_type {
 #define BAD_SUBBOARD_VOTER	"BAD_SUBBOARD_VOTER"
 #define PPS_VOTER		"PPS_VOTER"
 #define PPS_IBAT_ABNOR_VOTER	"PPS_IBAT_ABNOR_VOTER"
+#define PD_PDO_ICL_VOTER 	"PD_PDO_ICL_VOTER"
 #define SHUTDOWN_VOTER		"SHUTDOWN_VOTER"
+#define CYCLE_COUNT_VOTER	"CYCLE_COUNT_VOTER"
+#define READY_VOTER			"READY_VOTER"
+#define SUPER_ENDURANCE_MODE_VOTER	"SUPER_ENDURANCE_MODE_VOTER"
+#define DEEP_COUNT_VOTER	"DEEP_COUNT_VOTER"
+#define SUB_DEEP_COUNT_VOTER	"SUB_DEEP_COUNT_VOTER"
+#define BOOST_VOTER		"BOOST_VOTER"
+#define CP_ERR_VOTER		"CP_ERR_VOTER"
+#define BAL_STATE_VOTER		"BAL_STATE_VOTER"
+#define BATT_BAL_VOTER		"BATT_BAL_VOTER"
+#define IBUS_OVER_VOTER		"IBUS_OVER_VOTER"
+#define ADAPTER_IMAX_VOTER	"ADAPTER_IMAX_VOTER"
+#define SALE_MODE_VOTER 	"SALE_MODE_VOTER"
+#define RX_ADAPTER_CURVE_VOTER	"RX_ADAPTER_CURVE_VOTER"
+#define WLS_PLOSS_WARN_VOTER	"WLS_PLOSS_WARN_VOTER"
+#define WLS_TA_UV_VOTER		"WLS_TA_UV_VOTER"
+#define WLS_QUIET_MODE_VOTER	"WLS_QUIET_MODE_VOTER"
+#define WLS_AUDIO_MODE_VOTER	"WLS_AUDIO_MODE_VOTER"
+#define WLS_CAMERA_MODE_VOTER	"WLS_CAMERA_MODE_VOTER"
+#define WLS_Q_VALUE_ERROR_VOTER	"WLS_Q_VALUE_ERROR_VOTER"
+#define BATT_FG_I2CREST_VOTER	"BATT_FG_I2CREST_VOTER"
 
 /* TOPIC voter */
 #define COMM_TOPIC_VOTER	"COMM_TOPIC_VOTER"
@@ -130,6 +161,8 @@ int get_client_vote(struct votable *votable, const char *client_str);
 int get_client_vote_locked(struct votable *votable, const char *client_str);
 int get_effective_result(struct votable *votable);
 int get_effective_result_locked(struct votable *votable);
+int get_effective_result_exclude_client(struct votable *votable, const char *exclude_str);
+int get_effective_result_exclude_client_locked(struct votable *votable, const char *exclude_str);
 const char *get_effective_client(struct votable *votable);
 const char *get_effective_client_locked(struct votable *votable);
 int vote(struct votable *votable, const char *client_str, bool state, int val, bool step);
@@ -146,6 +179,11 @@ struct votable *create_votable(const char *name,
 						const char *effective_client,
 						bool step),
 				void *data);
+int votable_add_map(struct votable *votable, int original, int mapped);
+int votable_add_check_func(struct votable *votable,
+	int (*func)(struct votable *votable,
+		void *data, const char *client_str,
+		bool enabled, int val, bool step));
 void destroy_votable(struct votable *votable);
 void lock_votable(struct votable *votable);
 void unlock_votable(struct votable *votable);

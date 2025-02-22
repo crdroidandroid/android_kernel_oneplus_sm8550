@@ -20,6 +20,7 @@
 #include <linux/regmap.h>
 #include <linux/list.h>
 #include <linux/of_irq.h>
+#include <linux/pinctrl/consumer.h>
 #ifndef CONFIG_DISABLE_OPLUS_FUNCTION
 #include <soc/oplus/system/boot_mode.h>
 #include <soc/oplus/device_info.h>
@@ -832,6 +833,11 @@ static int oplus_chg_va_switch_to_normal(struct oplus_virtual_asic_ic *va)
 				 oplus_get_audio_switch_status());
 			retry = SWITCH_RETRY_MAX;
 			do {
+				status = oplus_get_audio_switch_status();
+				if (TYPEC_AUDIO_SWITCH_STATE_STANDBY & status) {
+					chg_info("switch to standby , not switch to ap\n");
+					break;
+				}
 				oplus_set_audio_switch_status(0);
 				status = oplus_get_audio_switch_status();
 				if (status & TYPEC_AUDIO_SWITCH_STATE_DPDM) {

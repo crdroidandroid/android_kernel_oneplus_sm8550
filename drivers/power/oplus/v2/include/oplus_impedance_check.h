@@ -29,7 +29,7 @@ struct oplus_impedance_node {
 	int imp_save[IMPEDANCE_AVG_NUM];
 
 	int curr_drop_table_num;
-	struct oplus_impedance_curr_drop_table curr_drop_table[0];
+	struct oplus_impedance_curr_drop_table curr_drop_table[];
 };
 
 struct oplus_impedance_unit {
@@ -40,7 +40,7 @@ struct oplus_impedance_unit {
 	struct list_head list;
 
 	int node_num;
-	struct oplus_impedance_node *node_list[0];
+	struct oplus_impedance_node *node_list[];
 };
 
 static inline void *oplus_imp_unit_get_priv_data(struct oplus_impedance_unit *unit)

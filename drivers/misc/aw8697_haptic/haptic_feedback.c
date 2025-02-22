@@ -19,10 +19,8 @@
 #include <linux/workqueue.h>
 #include <linux/kthread.h>
 #include <linux/sched/clock.h>
-#if defined(CONFIG_OPLUS_FEATURE_FEEDBACK) || defined(CONFIG_OPLUS_FEATURE_FEEDBACK_MODULE)
-#include <soc/oplus/system/kernel_fb.h>
-#endif
 #include "haptic_feedback.h"
+#include <soc/oplus/dft/kernel_fb.h>
 
 static struct oplus_haptic_track *g_haptic_track_chip;
 
@@ -555,18 +553,30 @@ static int oplus_haptic_feedback_probe(struct platform_device *pdev)
 	struct device *mydev;
 
 	major = register_chrdev(0, "haptic_fb", &mytest_ops);
+	if (major < 0) {
+		return major;
+	}
 	cls = class_create(THIS_MODULE, "haptic_fb_class");
+	if (cls == NULL) {
+		ret = -1;
+		goto class_creat_err;
+	}
 	mydev = device_create(cls, 0, MKDEV(major, 0), NULL, "haptic_fb_device");
+	if (mydev == NULL) {
+		ret = -1;
+		goto device_creat_err;
+	}
 	ret = sysfs_create_group(&(mydev->kobj), &haptic_fb_attributes_group);
 	if (ret < 0) {
 		haptic_fb_err("%s: error creating sysfs attr files\n", __func__);
-		return ret;
+		goto sysfs_create_group_fail;
 	}
 
 	hapric_track = devm_kzalloc(&pdev->dev, sizeof(struct oplus_haptic_track), GFP_KERNEL);
 	if (!hapric_track) {
 		pr_err("alloc memory error\n");
-		return -ENOMEM;
+		ret = -ENOMEM;
+		goto devm_kmalloc_fail;
 	}
 
 	hapric_track->dcs_info = (struct kernel_packet_info *)devm_kzalloc(&pdev->dev,
@@ -599,9 +609,21 @@ static int oplus_haptic_feedback_probe(struct platform_device *pdev)
 
 	return 0;
 track_kthread_init_err:
+	mutex_destroy(&hapric_track->upload_lock);
+	mutex_destroy(&hapric_track->trigger_data_lock);
+	mutex_destroy(&hapric_track->trigger_ack_lock);
+	mutex_destroy(&hapric_track->payload_lock);
 	devm_kfree(&pdev->dev, hapric_track->dcs_info);
 dcs_info_kmalloc_fail:
 	devm_kfree(&pdev->dev, hapric_track);
+devm_kmalloc_fail:
+	sysfs_remove_group(&(mydev->kobj), &haptic_fb_attributes_group);
+sysfs_create_group_fail:
+	device_destroy(cls, MKDEV(major, 0));
+device_creat_err:
+	class_destroy(cls);
+class_creat_err:
+	unregister_chrdev(major, "haptic_fb");
 	return ret;
 }
 
@@ -609,19 +631,19 @@ static int oplus_haptic_feedback_remove(struct platform_device *pdev)
 {
 	struct oplus_haptic_track *hapric_track = platform_get_drvdata(pdev);
 
-	device_destroy(cls, MKDEV(major, 0));
-	class_destroy(cls);
-	unregister_chrdev(major, "haptic_fb");
-
+	cancel_delayed_work_sync(&hapric_track->dev_track_event.track_dev_err_load_trigger_work);
+	cancel_delayed_work_sync(&hapric_track->fre_cail_track_event.track_fre_cail_load_trigger_work);
+	cancel_delayed_work_sync(&hapric_track->mem_alloc_track_event.track_mem_alloc_err_load_trigger_work);
 	mutex_destroy(&hapric_track->upload_lock);
 	mutex_destroy(&hapric_track->trigger_data_lock);
 	mutex_destroy(&hapric_track->trigger_ack_lock);
 	mutex_destroy(&hapric_track->payload_lock);
-	cancel_delayed_work_sync(&hapric_track->dev_track_event.track_dev_err_load_trigger_work);
-	cancel_delayed_work_sync(&hapric_track->fre_cail_track_event.track_fre_cail_load_trigger_work);
-	cancel_delayed_work_sync(&hapric_track->mem_alloc_track_event.track_mem_alloc_err_load_trigger_work);
 	devm_kfree(&pdev->dev, hapric_track->dcs_info);
 	devm_kfree(&pdev->dev, hapric_track);
+
+	device_destroy(cls, MKDEV(major, 0));
+	class_destroy(cls);
+	unregister_chrdev(major, "haptic_fb");
 	return 0;
 }
 

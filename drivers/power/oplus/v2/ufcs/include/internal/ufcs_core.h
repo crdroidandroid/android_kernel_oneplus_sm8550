@@ -22,6 +22,10 @@
 #include "ufcs_timer.h"
 #include "ufcs_policy_engine.h"
 
+#if IS_ENABLED(CONFIG_OPLUS_UFCS_CLASS_DEBUG)
+#include "ufcs_debug.h"
+#endif
+
 extern int ufcs_log_level;
 
 enum {
@@ -122,6 +126,10 @@ struct ufcs_class {
 	struct mutex handshake_lock;
 	struct mutex ext_req_lock;
 	struct completion request_ack;
+
+#if IS_ENABLED(CONFIG_OPLUS_UFCS_CLASS_DEBUG)
+	struct ufcs_debug_data debug;
+#endif
 };
 
 void ufcs_clean_process_info(struct ufcs_class *class);

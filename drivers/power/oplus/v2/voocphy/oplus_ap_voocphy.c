@@ -34,16 +34,29 @@
 #include <linux/sched/topology.h>
 #endif
 #include <oplus_chg_dual_chan.h>
+#include <oplus_chg_comm.h>
 
 enum {
 	FASTCHG_TEMP_RANGE_INIT = 0,
 	FASTCHG_TEMP_RANGE_LITTLE_COLD,/*0 ~ 5*/
 	FASTCHG_TEMP_RANGE_COOL, /*5 ~ 12*/
 	FASTCHG_TEMP_RANGE_LITTLE_COOL, /*12~16*/
+	FASTCHG_TEMP_RANGE_LITTLE_COOL_HIGH,
 	FASTCHG_TEMP_RANGE_NORMAL_LOW, /*16~25*/
 	FASTCHG_TEMP_RANGE_NORMAL_HIGH, /*25~43*/
 	FASTCHG_TEMP_RANGE_WARM, /*43-52*/
 	FASTCHG_TEMP_RANGE_NORMAL,
+};
+
+static const char * const temp_region_text[] = {
+	[VOOCPHY_BATT_TEMP_LITTLE_COLD]		= "little_cold",
+	[VOOCPHY_BATT_TEMP_COOL]		= "cool",
+	[VOOCPHY_BATT_TEMP_LITTLE_COOL]		= "little_cool",
+	[VOOCPHY_BATT_TEMP_LITTLE_COOL_HIGH]	= "little_cool_high",
+	[VOOCPHY_BATT_TEMP_NORMAL]		= "normal",
+	[VOOCPHY_BATT_TEMP_NORMAL_HIGH]		= "normal_high",
+	[VOOCPHY_BATT_TEMP_WARM]		= "warm",
+	[VOOCPHY_BATT_TEMP_MAX]			= "invalid",
 };
 
 enum {
@@ -58,7 +71,7 @@ enum {
 	BAT_TEMP_LOW1,
 	BAT_TEMP_LOW2,
 	BAT_TEMP_LITTLE_COOL,
-	BAT_TEMP_LITTLE_COOL_LOW,
+	BAT_TEMP_LITTLE_COOL_HIGH,
 	BAT_TEMP_COOL,
 	BAT_TEMP_NORMAL_LOW,
 	BAT_TEMP_NORMAL_HIGH,
@@ -76,8 +89,6 @@ enum {
 #define SEND_FASTCHG_ONGOING_NOTIFY_INTERVAL 2000 /* ms */
 
 /* dts default configuration */
-#define VOOCPHY_SVOOC_CP_MAX_IBUS_DEFAULT	3200
-#define VOOCPHY_VOOC_CP_MAX_IBUS_DEFAULT	3500
 #define BATT_PWD_CURR_THD1_DEFAULT		3300
 #define BATT_PWD_VOL_THD1_DEFAULT		4454
 #define VOOC_WARM_TEMP_RANGE_THD    20
@@ -104,10 +115,10 @@ enum {
 #define COPYCAT_ADAPTER_EFFECTIVE_IBATTHRESHOLD	1500
 #define VOOCPHY_NEED_CHANGE_CUR_MAXCNT		5
 #define COPYCAT_ADAPTER_CUR_JUDGMENT_CNT	10
-#define VOOC_INIT_WAIT_TIME_MS 100
+#define VOOC_INIT_WAIT_TIME_MS 300
 
 int voocphy_log_level = 3;
-struct completion vooc_init_check_ack;
+static struct completion vooc_init_check_ack;
 #define voocphy_info(fmt, ...)	\
 do {						\
 	if (voocphy_log_level >= 3)	\
@@ -166,6 +177,9 @@ static svooc_parallel_curve_t svooc_parallel_curve[7] = {
 /* svooc curv */
 /* 0~50 */
 struct batt_sys_curves svooc_curves_soc0_2_50[BATT_SYS_MAX] = {0};
+struct batt_sys_curves svooc_curves_soc0_2_50_mid[BATT_SYS_MAX] = {0};
+struct batt_sys_curves svooc_curves_soc0_2_50_high[BATT_SYS_MAX] = {0};
+
 /* 50~75 */
 struct batt_sys_curves svooc_curves_soc50_2_75[BATT_SYS_MAX] = {0};
 /* 75~85 */
@@ -176,6 +190,9 @@ struct batt_sys_curves svooc_curves_soc85_2_90[BATT_SYS_MAX] = {0};
 /* vooc curv */
 /* 0~50 */
 struct batt_sys_curves vooc_curves_soc0_2_50[BATT_SYS_MAX] = {0};
+struct batt_sys_curves vooc_curves_soc0_2_50_mid[BATT_SYS_MAX] = {0};
+struct batt_sys_curves vooc_curves_soc0_2_50_high[BATT_SYS_MAX] = {0};
+
 /* 50~75 */
 struct batt_sys_curves vooc_curves_soc50_2_75[BATT_SYS_MAX] = {0};
 /* 75~85 */
@@ -189,6 +206,7 @@ static void oplus_voocphy_set_status_and_notify_ap(struct oplus_voocphy_manager 
 static int oplus_voocphy_commu_process_handle(struct device *dev, unsigned long enable);
 static void oplus_voocphy_reset_fastchg_after_usbout(struct oplus_voocphy_manager *chip);
 unsigned char oplus_voocphy_set_fastchg_current(struct oplus_voocphy_manager *chip);
+int oplus_voocphy_get_bcc_exit_curr(struct device *dev);
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0))
 #define MAX_SUPPORT_CLUSTER 8
@@ -200,6 +218,7 @@ unsigned char oplus_voocphy_set_fastchg_current(struct oplus_voocphy_manager *ch
 static bool is_clear_timer_clear = true;
 unsigned long last_jiffies = 0;
 struct freq_qos_request charger_boost_req[MAX_SUPPORT_CLUSTER];
+int charger_boost_req_freq[MAX_SUPPORT_CLUSTER];
 int max_cluster_num;
 bool initialized = false;
 static DEFINE_MUTEX(charger_boost);
@@ -341,13 +360,8 @@ static void oplus_voocphy_modify_cpufeq_work(struct work_struct *work)
 		ppm_sys_boost_min_cpu_freq_clear();
 	}
 #else
-	int freq[3] = {0};
-
-	freq[LITTER_CLUSTER] = chip->voocphy_freq_mincore;
-	freq[MIN_CLUSTER] = chip->voocphy_freq_midcore;
-	freq[BIG_CLUSTER] = chip->voocphy_freq_maxcore;
 	if (atomic_read(&chip->voocphy_freq_state) == 1) {
-		charger_boost_min_cpu_freq_set(chip, freq,
+		charger_boost_min_cpu_freq_set(chip, charger_boost_req_freq,
 					chip->voocphy_current_change_timeout);
 	} else {
 		charger_boost_min_cpu_freq_clear(chip);
@@ -491,14 +505,9 @@ static void voocphy_cpufreq_update(struct oplus_voocphy_manager *chip, int flag)
 #else
 static void voocphy_cpufreq_init(struct oplus_voocphy_manager *chip)
 {
-	int freq[3] = {0};
-
 	voocphy_info("%s \n", __func__);
 	atomic_set(&chip->voocphy_freq_state, 1);
-	freq[LITTER_CLUSTER] = chip->voocphy_freq_mincore;
-	freq[MIN_CLUSTER] = chip->voocphy_freq_midcore;
-	freq[BIG_CLUSTER] = chip->voocphy_freq_maxcore;
-	charger_boost_min_cpu_freq_set(chip, freq, MAX_BOOST_TIME);
+	charger_boost_min_cpu_freq_set(chip, charger_boost_req_freq, MAX_BOOST_TIME);
 }
 
 static void voocphy_cpufreq_release(struct oplus_voocphy_manager *chip)
@@ -707,6 +716,7 @@ static void oplus_voocphy_reset_temp_range(struct oplus_voocphy_manager *chip)
 		chip->vooc_little_cold_temp = chip->vooc_little_cold_temp_default;
 		chip->vooc_cool_temp = chip->vooc_cool_temp_default;
 		chip->vooc_little_cool_temp = chip->vooc_little_cool_temp_default;
+		chip->vooc_little_cool_high_temp = chip->vooc_little_cool_high_temp_default;
 		chip->vooc_normal_low_temp = chip->vooc_normal_low_temp_default;
 	}
 }
@@ -744,8 +754,6 @@ static int oplus_voocphy_monitor_timer_start(struct oplus_voocphy_manager *chip,
 	chip->mornitor_evt[timer_id].timeout = false;
 	chip->mornitor_evt[timer_id].status = VOOC_MONITOR_START;
 
-	voocphy_dbg("timerid %d\n", timer_id);
-
 	return VOOCPHY_SUCCESS;
 }
 
@@ -763,7 +771,6 @@ static int oplus_voocphy_monitor_timer_stop(struct oplus_voocphy_manager *chip,
 	chip->mornitor_evt[timer_id].cnt = 0;
 	chip->mornitor_evt[timer_id].timeout = false;
 	chip->mornitor_evt[timer_id].status = VOOC_MONITOR_STOP;
-	voocphy_dbg("timerid %d\n", timer_id);
 
 	return VOOCPHY_SUCCESS;
 }
@@ -826,6 +833,9 @@ static bool oplus_voocphy_check_fastchg_real_allow(struct oplus_voocphy_manager 
 	int usb_temp;
 	int btb_check_cnt = BTB_CHECK_MAX_CNT;
 	bool ret = false;
+
+	if (chip->ap_control_allow)
+		return true;
 
 	/* get soc */
 	batt_soc = oplus_chglib_get_soc(chip->dev);
@@ -982,7 +992,6 @@ static int oplus_voocphy_reset_variables(struct oplus_voocphy_manager *chip)
 	chip->vbus = 0;
 	chip->fastchg_batt_temp_status = BAT_TEMP_NATURAL;
 	chip->vooc_temp_cur_range = FASTCHG_TEMP_RANGE_INIT;
-	chip->receive_temp_range = FASTCHG_TEMP_RANGE_INIT;
 	chip->fastchg_commu_stop = false;
 	chip->fastchg_monitor_stop = false;
 	chip->current_pwd = chip->current_expect;
@@ -1172,6 +1181,7 @@ void oplus_voocphy_get_soc_and_temp_with_enter_fastchg(struct oplus_voocphy_mana
 	int sys_curve_temp_idx = BATT_SYS_CURVE_TEMP_NORMAL_LOW;
 	int batt_temp = 0;
 	unsigned int batt_temp_range = FASTCHG_TEMP_RANGE_INIT;
+	int i = 0;
 
 	if (!chip) {
 		voocphy_info("%s, chip null\n", __func__);
@@ -1182,16 +1192,27 @@ void oplus_voocphy_get_soc_and_temp_with_enter_fastchg(struct oplus_voocphy_mana
 	chip->batt_sys_curv_found = false;
 
 	/* step1: find sys curv by soc */
-	if (chip->batt_soc <= 50) {
-		chip->batt_soc_plugin = BATT_SOC_0_TO_50;
-	} else if (chip->batt_soc <= 75) {
-		chip->batt_soc_plugin = BATT_SOC_50_TO_75;
-	} else if (chip->batt_soc <= 85) {
-		chip->batt_soc_plugin = BATT_SOC_75_TO_85;
-	} else if (chip->batt_soc <= 90) {
-		chip->batt_soc_plugin = BATT_SOC_85_TO_90;
+	if (chip->soc_range_data[0] != -EINVAL) {
+		for (i = 1; i < BATT_SOC_90_TO_100 + 1; i++) {
+			if (chip->batt_soc <= chip->soc_range_data[i]) {
+				chip->batt_soc_plugin = i - 1;
+				break;
+			}
+		}
+		if (i == BATT_SOC_90_TO_100 + 1)
+			chip->batt_soc_plugin = BATT_SOC_90_TO_100;
 	} else {
-		chip->batt_soc_plugin = BATT_SOC_90_TO_100;
+		if (chip->batt_soc <= 50) {
+			chip->batt_soc_plugin = BATT_SOC_0_TO_50;
+		} else if (chip->batt_soc <= 75) {
+			chip->batt_soc_plugin = BATT_SOC_50_TO_75;
+		} else if (chip->batt_soc <= 85) {
+			chip->batt_soc_plugin = BATT_SOC_75_TO_85;
+		} else if (chip->batt_soc <= 90) {
+			chip->batt_soc_plugin = BATT_SOC_85_TO_90;
+		} else {
+			chip->batt_soc_plugin = BATT_SOC_90_TO_100;
+		}
 	}
 
 	/* step2: find sys curv by temp range */
@@ -1217,6 +1238,12 @@ void oplus_voocphy_get_soc_and_temp_with_enter_fastchg(struct oplus_voocphy_mana
 		sys_curve_temp_idx = BATT_SYS_CURVE_TEMP_LITTLE_COOL;
 		chip->batt_temp_plugin = VOOCPHY_BATT_TEMP_LITTLE_COOL;
 		break;
+	case FASTCHG_TEMP_RANGE_LITTLE_COOL_HIGH:
+		chip->vooc_temp_cur_range = FASTCHG_TEMP_RANGE_LITTLE_COOL_HIGH;
+		chip->fastchg_batt_temp_status = BAT_TEMP_LITTLE_COOL_HIGH;
+		sys_curve_temp_idx = BATT_SYS_CURVE_TEMP_LITTLE_COOL_HIGH;
+		chip->batt_temp_plugin = VOOCPHY_BATT_TEMP_LITTLE_COOL_HIGH;
+		break;
 	case FASTCHG_TEMP_RANGE_NORMAL_LOW:
 		chip->vooc_temp_cur_range = FASTCHG_TEMP_RANGE_NORMAL_LOW;
 		chip->fastchg_batt_temp_status = BAT_TEMP_NORMAL_LOW;
@@ -1227,7 +1254,7 @@ void oplus_voocphy_get_soc_and_temp_with_enter_fastchg(struct oplus_voocphy_mana
 		chip->vooc_temp_cur_range = FASTCHG_TEMP_RANGE_NORMAL_HIGH;
 		chip->fastchg_batt_temp_status = BAT_TEMP_NORMAL_HIGH;
 		sys_curve_temp_idx = BATT_SYS_CURVE_TEMP_NORMAL_HIGH;
-		chip->batt_temp_plugin = VOOCPHY_BATT_TEMP_NORMAL;
+		chip->batt_temp_plugin = VOOCPHY_BATT_TEMP_NORMAL_HIGH;
 		break;
 	case FASTCHG_TEMP_RANGE_WARM:
 		chip->vooc_temp_cur_range = FASTCHG_TEMP_RANGE_WARM;
@@ -1252,6 +1279,11 @@ void oplus_voocphy_get_soc_and_temp_with_enter_fastchg(struct oplus_voocphy_mana
 			chip->fastchg_batt_temp_status = BAT_TEMP_LITTLE_COOL;
 			sys_curve_temp_idx = BATT_SYS_CURVE_TEMP_LITTLE_COOL;
 			chip->batt_temp_plugin = VOOCPHY_BATT_TEMP_LITTLE_COOL;
+		} else if (chip->vooc_little_cool_high_temp != -EINVAL && batt_temp < chip->vooc_little_cool_high_temp) {
+			chip->vooc_temp_cur_range = FASTCHG_TEMP_RANGE_LITTLE_COOL_HIGH;
+			chip->fastchg_batt_temp_status = BAT_TEMP_LITTLE_COOL_HIGH;
+			sys_curve_temp_idx = BATT_SYS_CURVE_TEMP_LITTLE_COOL_HIGH;
+			chip->batt_temp_plugin = VOOCPHY_BATT_TEMP_LITTLE_COOL_HIGH;
 		} else if (batt_temp < chip->vooc_normal_low_temp) { /* 16-35C */
 			chip->vooc_temp_cur_range = FASTCHG_TEMP_RANGE_NORMAL_LOW;
 			chip->fastchg_batt_temp_status = BAT_TEMP_NORMAL_LOW;
@@ -1262,7 +1294,7 @@ void oplus_voocphy_get_soc_and_temp_with_enter_fastchg(struct oplus_voocphy_mana
 				chip->vooc_temp_cur_range = FASTCHG_TEMP_RANGE_NORMAL_HIGH;
 				chip->fastchg_batt_temp_status = BAT_TEMP_NORMAL_HIGH;
 				sys_curve_temp_idx = BATT_SYS_CURVE_TEMP_NORMAL_HIGH;
-				chip->batt_temp_plugin = VOOCPHY_BATT_TEMP_NORMAL;
+				chip->batt_temp_plugin = VOOCPHY_BATT_TEMP_NORMAL_HIGH;
 			} else {
 				chip->vooc_temp_cur_range = FASTCHG_TEMP_RANGE_WARM;
 				chip->fastchg_batt_temp_status = BAT_TEMP_WARM;
@@ -1354,6 +1386,7 @@ static int oplus_voocphy_init_vooc(struct oplus_voocphy_manager *chip)
 	}
 
 	chip->fastchg_real_allow = oplus_voocphy_check_fastchg_real_allow(chip);
+	chip->allow_report_present = true;
 
 	chip->ask_current_first = true;
 	chip->ask_batvol_first = true;
@@ -1365,6 +1398,26 @@ static int oplus_voocphy_init_vooc(struct oplus_voocphy_manager *chip)
 	return rc;
 }
 
+static int oplus_voocphy_upload_cp_error(struct oplus_voocphy_manager *chip, int err_type)
+{
+	int rc = 0;
+
+	if (!chip) {
+		voocphy_err("oplus_voocphy_manager chip null\n");
+		return rc;
+	}
+
+	if (chip->ops && chip->ops->upload_cp_error) {
+		rc = chip->ops->upload_cp_error(chip, err_type);
+		if (rc < 0) {
+			voocphy_info("upload cp error failed, rc=%d.\n", rc);
+			return rc;
+		}
+	}
+
+	return rc;
+}
+
 static int oplus_voocphy_print_dbg_info(struct oplus_voocphy_manager *chip)
 {
 	int i = 0;
@@ -1372,6 +1425,8 @@ static int oplus_voocphy_print_dbg_info(struct oplus_voocphy_manager *chip)
 	bool fg_dump_reg = false;
 	bool fg_send_info = false;
 	int report_flag = 0;
+	int error_type = 0;
+	int rc = 0;
 
 	if (chip->ops && chip->ops->check_cp_int_happened &&
 	    chip->ops->check_cp_int_happened(chip, &fg_dump_reg, &fg_send_info))
@@ -1421,6 +1476,15 @@ chg_exception:
 		}
 		if (fg_send_info) {
 			report_flag |= (1 << 4);
+			if (chip->ops && chip->ops->get_cp_error_type) {
+				rc = chip->ops->get_cp_error_type(chip, &error_type);
+				if (0 == rc) {
+					voocphy_err("upload cp err, error_type = %d\n", error_type);
+					oplus_voocphy_upload_cp_error(chip, error_type);
+				} else {
+					voocphy_err("get cp err type failed, rc = %d\n", rc);
+				}
+			}
 		}
 	}
 
@@ -1465,12 +1529,11 @@ static void voocphy_service(struct work_struct *work)
 			chip->pre_gauge_vbatt = chip->main_vbatt > chip->sub_vbatt ? chip->main_vbatt : chip->sub_vbatt;
 		chip->main_batt_icharging = -oplus_chglib_gauge_main_current(chip->dev);
 		chip->sub_batt_icharging = -oplus_chglib_gauge_sub_current(chip->dev);
-		chip->icharging = chip->main_batt_icharging + chip->sub_batt_icharging;
+		chip->icharging = -oplus_chglib_gauge_current(chip->dev);
 		voocphy_info("batt[%d, %d], main_batt[%d, %d], sub_batt[%d, %d]\n",
 				chip->pre_gauge_vbatt, chip->icharging, chip->main_vbatt, chip->main_batt_icharging,
 				chip->sub_vbatt, chip->sub_batt_icharging);
 		}
-		chip->icharging = chip->main_batt_icharging + chip->sub_batt_icharging;
 	} else {
 		if ((chip->external_gauge_support) && (chip->adapter_mesg == VOOC_CMD_IS_VUBS_OK)) {
 			chip->pre_gauge_vbatt = oplus_chglib_gauge_vbatt(chip->dev);
@@ -1649,7 +1712,6 @@ static void oplus_voocphy_update_data(struct oplus_voocphy_manager *chip)
 		chip->gauge_vbatt = chip->cp_vbat;
 	}
 
-	voocphy_info("parallel_change_current_count:%d\n", chip->parallel_change_current_count);
 	if (chip->parallel_charge_support &&
 	    (chip->parallel_charge_project == PARALLEL_SWITCH_IC) &&
 	    (chip->parallel_change_current_count > 0)) {
@@ -1781,6 +1843,7 @@ ID	BIT7	BIT6	BIT5	BIT4	vooc_head	vooc_move_head
 		}
 		chip->vooc_head = SVOOC_INVERT_HEAD;
 		chip->adapter_type = ADAPTER_SVOOC; /* detect svooc adapter */
+		chip->frame_head = VOOC_FRAME_HEAD_SVOOC;
 		chip->adapter_check_vooc_head_count = 0;
 	} else if (vooc_head == VOOC3_HEAD || vooc_move_head == VOOC3_HEAD) {
 		if (vooc_head == VOOC3_HEAD) {
@@ -1791,6 +1854,7 @@ ID	BIT7	BIT6	BIT5	BIT4	vooc_head	vooc_move_head
 		}
 		chip->vooc_head = VOOC3_INVERT_HEAD;
 		chip->adapter_type = ADAPTER_VOOC30; /* detect vooc30 adapter */
+		chip->frame_head = VOOC_FRAME_HEAD_VOOC30;
 		chip->adapter_check_vooc_head_count = 0;
 	} else if (vooc_head == VOOC2_HEAD ||vooc_move_head == VOOC2_HEAD) {
 		chip->adapter_check_vooc_head_count = 0;
@@ -1803,6 +1867,7 @@ ID	BIT7	BIT6	BIT5	BIT4	vooc_head	vooc_move_head
 			chip->adapter_model_detect_count--; /* detect three times */
 		} else {	/* adapter_model_detect_count */
 			chip->adapter_type = ADAPTER_VOOC30; /* detect svooc adapter */
+			chip->frame_head = VOOC_FRAME_HEAD_VOOC30;
 			if (oplus_voocphy_get_bidirect_cp_support(chip) == false) {
 				if (!chip->ask_vooc3_detect) {
 					chip->ask_vooc3_detect = true;
@@ -1813,11 +1878,15 @@ ID	BIT7	BIT6	BIT5	BIT4	vooc_head	vooc_move_head
 					voocphy_info("VOOC20_HEAD chip->fastchg_start = %d, chip->fastchg_allow = %d\n",
 						     chip->fastchg_start, chip->fastchg_allow);
 					chip->adapter_type = ADAPTER_VOOC20; /* old vooc2.0 adapter */
+					chip->frame_head = VOOC_FRAME_HEAD_VOOC20;
 					chip->vooc_head = VOOC2_INVERT_HEAD;
 					chip->adapter_model_ver = FASTCHG_CHARGER_TYPE_VOOC;
 					if (!chip->fastchg_start) {
 						if (chip->fastchg_real_allow) {
-							oplus_voocphy_set_status_and_notify_ap(chip, FAST_NOTIFY_PRESENT);
+							if (!chip->ap_control_allow || chip->allow_report_present) {
+								chip->allow_report_present = false;
+								oplus_voocphy_set_status_and_notify_ap(chip, FAST_NOTIFY_PRESENT);
+							}
 							chip->fastchg_allow = true;
 							chip->fastchg_start = true;
 							chip->fastchg_to_warm = false;
@@ -1838,6 +1907,7 @@ ID	BIT7	BIT6	BIT5	BIT4	vooc_head	vooc_move_head
 				chip->vooc_head = VOOC2_INVERT_HEAD;
 				/* power_bank mode */
 				chip->adapter_type = ADAPTER_VOOC20;
+				chip->frame_head = VOOC_FRAME_HEAD_VOOC20;
 				/* power_bank mode need set fastchg_allow false */
 				chip->fastchg_allow = false;
 				chip->reply_bat_model_end = true;
@@ -1910,7 +1980,7 @@ static int oplus_voocphy_handle_ask_fastchg_ornot_cmd(struct oplus_voocphy_manag
 		}
 
 		/* reset vooc2_next_cmd */
-		if (chip->fastchg_allow) {
+		if (chip->fastchg_allow && chip->oplus_ap_fastchg_allow) {
 			chip->vooc2_next_cmd = VOOC_CMD_IS_VUBS_OK;
 		} else {
 			chip->vooc2_next_cmd = VOOC_CMD_ASK_FASTCHG_ORNOT;
@@ -1921,14 +1991,16 @@ static int oplus_voocphy_handle_ask_fastchg_ornot_cmd(struct oplus_voocphy_manag
 		if (chip->parallel_charge_support) {
 			status = oplus_voocphy_write_mesg_mask(TX0_DET_BIT3_TO_BIT7_MASK,
 							       &chip->voocphy_tx_buff[0],
-							       VOOC2_CIRCUIT_PARALLEL_R_L_DEF | chip->fastchg_allow);
+							       VOOC2_CIRCUIT_PARALLEL_R_L_DEF |
+							       (chip->fastchg_allow && chip->oplus_ap_fastchg_allow));
 			status = oplus_voocphy_write_mesg_mask(TX1_DET_BIT0_TO_BIT1_MASK,
 							       &chip->voocphy_tx_buff[1],
 							       VOOC2_CIRCUIT_PARALLEL_R_H_DEF);
 		} else {
 			status = oplus_voocphy_write_mesg_mask(TX0_DET_BIT3_TO_BIT7_MASK,
 							       &chip->voocphy_tx_buff[0],
-							       VOOC2_CIRCUIT_R_L_DEF | chip->fastchg_allow);
+							       VOOC2_CIRCUIT_R_L_DEF |
+							       (chip->fastchg_allow && chip->oplus_ap_fastchg_allow));
 			status = oplus_voocphy_write_mesg_mask(TX1_DET_BIT0_TO_BIT1_MASK,
 							       &chip->voocphy_tx_buff[1],
 							       VOOC2_CIRCUIT_R_H_DEF);
@@ -1940,14 +2012,16 @@ static int oplus_voocphy_handle_ask_fastchg_ornot_cmd(struct oplus_voocphy_manag
 		if (chip->parallel_charge_support) {
 			status = oplus_voocphy_write_mesg_mask(TX0_DET_BIT3_TO_BIT7_MASK,
 							       &chip->voocphy_tx_buff[0],
-							       NO_VOOC3_CIRCUIT_PARALLEL_R_L_DEF | chip->fastchg_allow);
+							       NO_VOOC3_CIRCUIT_PARALLEL_R_L_DEF |
+							       (chip->fastchg_allow && chip->oplus_ap_fastchg_allow));
 			status = oplus_voocphy_write_mesg_mask(TX1_DET_BIT0_TO_BIT1_MASK,
 							       &chip->voocphy_tx_buff[1],
 							       NO_VOOC3_CIRCUIT_PARALLEL_R_H_DEF);
 		} else {
 			status = oplus_voocphy_write_mesg_mask(TX0_DET_BIT3_TO_BIT7_MASK,
 							       &chip->voocphy_tx_buff[0],
-							       NO_VOOC3_CIRCUIT_R_L_DEF | chip->fastchg_allow);
+							       NO_VOOC3_CIRCUIT_R_L_DEF |
+							       (chip->fastchg_allow && chip->oplus_ap_fastchg_allow));
 			status = oplus_voocphy_write_mesg_mask(TX1_DET_BIT0_TO_BIT1_MASK,
 							       &chip->voocphy_tx_buff[1],
 							       NO_VOOC3_CIRCUIT_R_H_DEF);
@@ -1960,13 +2034,14 @@ static int oplus_voocphy_handle_ask_fastchg_ornot_cmd(struct oplus_voocphy_manag
 			if (chip->impedance_calculation_newmethod) {
 					status = oplus_voocphy_write_mesg_mask(TX0_DET_BIT3_TO_BIT7_MASK,
 							&chip->voocphy_tx_buff[0], chip->svooc_circuit_r_l
-							| chip->fastchg_allow);
+							| (chip->fastchg_allow && chip->oplus_ap_fastchg_allow));
 					status = oplus_voocphy_write_mesg_mask(TX1_DET_BIT0_TO_BIT1_MASK,
 							&chip->voocphy_tx_buff[1], chip->svooc_circuit_r_h);
 			} else {
 				status = oplus_voocphy_write_mesg_mask(TX0_DET_BIT3_TO_BIT7_MASK,
 									&chip->voocphy_tx_buff[0],
-									BIDRECT_CIRCUIT_R_L_DEF | chip->fastchg_allow);
+									BIDRECT_CIRCUIT_R_L_DEF |
+									(chip->fastchg_allow && chip->oplus_ap_fastchg_allow));
 				status = oplus_voocphy_write_mesg_mask(TX1_DET_BIT0_TO_BIT1_MASK,
 									&chip->voocphy_tx_buff[1],
 									NO_VOOC2_CIRCUIT_R_H_DEF);
@@ -1975,20 +2050,21 @@ static int oplus_voocphy_handle_ask_fastchg_ornot_cmd(struct oplus_voocphy_manag
 			if (chip->impedance_calculation_newmethod) {
 				status = oplus_voocphy_write_mesg_mask(TX0_DET_BIT3_TO_BIT7_MASK,
 						&chip->voocphy_tx_buff[0], chip->svooc_circuit_r_l
-						| chip->fastchg_allow);
+						| (chip->fastchg_allow && chip->oplus_ap_fastchg_allow));
 				status = oplus_voocphy_write_mesg_mask(TX1_DET_BIT0_TO_BIT1_MASK,
 						&chip->voocphy_tx_buff[1], chip->svooc_circuit_r_h);
 			} else {
 				status = oplus_voocphy_write_mesg_mask(TX0_DET_BIT3_TO_BIT7_MASK,
 						&chip->voocphy_tx_buff[0], NO_VOOC2_CIRCUIT_PARALLEL_R_L_DEF
-						| chip->fastchg_allow);
+						| (chip->fastchg_allow && chip->oplus_ap_fastchg_allow));
 				status = oplus_voocphy_write_mesg_mask(TX1_DET_BIT0_TO_BIT1_MASK,
 						&chip->voocphy_tx_buff[1], NO_VOOC2_CIRCUIT_PARALLEL_R_H_DEF);
 			}
 		} else {
 			status = oplus_voocphy_write_mesg_mask(TX0_DET_BIT3_TO_BIT7_MASK,
 							       &chip->voocphy_tx_buff[0],
-							       NO_VOOC2_CIRCUIT_R_L_DEF | chip->fastchg_allow);
+							       NO_VOOC2_CIRCUIT_R_L_DEF |
+							       (chip->fastchg_allow && chip->oplus_ap_fastchg_allow));
 			status = oplus_voocphy_write_mesg_mask(TX1_DET_BIT0_TO_BIT1_MASK,
 							       &chip->voocphy_tx_buff[1],
 							       NO_VOOC2_CIRCUIT_R_H_DEF);
@@ -2297,7 +2373,10 @@ static int oplus_voocphy_handle_ask_bat_model_process_cmd(struct oplus_voocphy_m
 						chip->fastchg_start = true;
 					chip->fastchg_to_warm = false;
 					chip->fastchg_dummy_start = false;
-					oplus_voocphy_set_status_and_notify_ap(chip, FAST_NOTIFY_PRESENT);
+					if (!chip->ap_control_allow || chip->allow_report_present) {
+						chip->allow_report_present = false;
+						oplus_voocphy_set_status_and_notify_ap(chip, FAST_NOTIFY_PRESENT);
+					}
 					voocphy_info( "fastchg_real_allow = true");
 				} else {
 					chip->fastchg_allow = false;
@@ -2561,6 +2640,76 @@ void oplus_voocphy_get_chip(struct oplus_voocphy_manager **chip)
 	*chip = g_voocphy_chip;
 }
 
+#define EIS_ADAPTER_VBUS_VOLT_MAX	9000
+#define EIS_ADAPTER_VBUS_VOLT_MIN	8000
+static int oplus_voocphy_handle_eis_process(struct oplus_voocphy_manager *chip)
+{
+	int status = VOOCPHY_SUCCESS;
+	int eis_status = EIS_STATUS_DISABLE;
+
+	eis_status = oplus_chglib_get_eis_status(chip->dev);
+	if (eis_status == EIS_STATUS_HIGH_CURRENT) {
+		if (chip->cp_vbus > EIS_ADAPTER_VBUS_VOLT_MAX)
+			oplus_voocphy_write_mesg_mask(TX0_DET_BIT4_MASK,
+						&chip->voocphy_tx_buff[0], BIT_ACTIVE);
+		else
+			oplus_voocphy_write_mesg_mask(TX0_DET_BIT5_MASK,
+						&chip->voocphy_tx_buff[0], BIT_ACTIVE);
+
+		if (chip->copycat_vooc_support == true) {
+			if (chip->cp_vbus <= EIS_ADAPTER_VBUS_VOLT_MIN) {
+				chip->eis_copycat_detect_cnt++;
+				if (chip->eis_copycat_detect_cnt > SVOOC_MAX_IS_VBUS_OK_CMD_CNT) {
+					chip->adapter_is_vbus_ok_count = SVOOC_MAX_IS_VBUS_OK_CMD_CNT;
+					voocphy_info("<EIS>adapter is copycat\n");
+					return VOOCPHY_EUNSUPPORTED;
+				}
+			} else {
+				chip->eis_copycat_detect_cnt = 0;
+			}
+
+			if (chip->adapter_is_vbus_ok_count < 3)
+				chip->adapter_is_vbus_ok_count++;
+		}
+
+		chip->eis_status = EIS_STATUS_HIGH_CURRENT;
+		voocphy_info("<EIS>eis_high_status, vbus[%d]\n", chip->cp_vbus);
+	} else {
+		status = oplus_voocphy_vbus_vbatt_detect(chip);
+		if (chip->vooc_vbus_status == VOOC_VBUS_HIGH) {
+			oplus_voocphy_write_mesg_mask(TX0_DET_BIT4_MASK,
+						&chip->voocphy_tx_buff[0], BIT_ACTIVE);
+		} else if (chip->vooc_vbus_status == VOOC_VBUS_LOW) {
+			oplus_voocphy_write_mesg_mask(TX0_DET_BIT5_MASK,
+						&chip->voocphy_tx_buff[0], BIT_ACTIVE);
+		} else {
+			if (eis_status == EIS_STATUS_DISABLE) {
+				oplus_voocphy_write_mesg_mask(TX0_DET_BIT4_MASK,
+							&chip->voocphy_tx_buff[0], BIT_ACTIVE);
+
+				voocphy_info("<EIS> exit for eis_status[%d]\n", eis_status);
+				chip->eis_status = EIS_STATUS_DISABLE;
+				oplus_chglib_suspend_charger(true);
+				if (chip->copycat_vooc_support == true)
+					chip->adapter_is_vbus_ok_count++;
+				return VOOCPHY_SUCCESS;
+			} else {
+				oplus_voocphy_write_mesg_mask(TX0_DET_BIT5_MASK,
+							&chip->voocphy_tx_buff[0], BIT_ACTIVE);
+			}
+		}
+
+		if ((chip->eis_status == EIS_STATUS_HIGH_CURRENT) &&
+			(eis_status == EIS_STATUS_LOW_CURRENT)) {
+			voocphy_info("<EIS>disable charger output\n");
+			oplus_chglib_disable_charger(true);
+			chip->eis_status = EIS_STATUS_LOW_CURRENT;
+		}
+	}
+
+	return status;
+}
+
 static int oplus_voocphy_handle_is_vbus_ok_cmd(struct oplus_voocphy_manager *chip)
 {
 	int status = VOOCPHY_SUCCESS;
@@ -2571,6 +2720,14 @@ static int oplus_voocphy_handle_is_vbus_ok_cmd(struct oplus_voocphy_manager *chi
 	}
 
 	chip->vbus_adjust_cnt++;
+
+	if ((chip->adapter_type == ADAPTER_SVOOC) &&
+		((chip->eis_status == EIS_STATUS_HIGH_CURRENT) ||
+		(chip->eis_status == EIS_STATUS_LOW_CURRENT)) &&
+		(oplus_voocphy_handle_eis_process(chip) == VOOCPHY_SUCCESS)) {
+		return VOOCPHY_SUCCESS;
+	}
+
 	if (chip->copycat_vooc_support == true)
 		chip->adapter_is_vbus_ok_count++;
 
@@ -2693,6 +2850,10 @@ static void oplus_voocphy_choose_batt_sys_curve(struct oplus_voocphy_manager *ch
 			if (chip->adapter_type == ADAPTER_SVOOC) {
 				if (chip->batt_soc_plugin == BATT_SOC_0_TO_50) {
 					chip->batt_sys_curv_by_soc = svooc_curves_soc0_2_50;
+				} else if (chip->batt_soc_plugin == BATT_SOC_0_TO_50_MID) {
+					chip->batt_sys_curv_by_soc = svooc_curves_soc0_2_50_mid;
+				} else if (chip->batt_soc_plugin == BATT_SOC_0_TO_50_HIGH) {
+					chip->batt_sys_curv_by_soc = svooc_curves_soc0_2_50_high;
 				} else if (chip->batt_soc_plugin == BATT_SOC_50_TO_75) {
 					chip->batt_sys_curv_by_soc = svooc_curves_soc50_2_75;
 				} else if (chip->batt_soc_plugin == BATT_SOC_75_TO_85) {
@@ -2705,6 +2866,10 @@ static void oplus_voocphy_choose_batt_sys_curve(struct oplus_voocphy_manager *ch
 			} else {
 				if (chip->batt_soc_plugin == BATT_SOC_0_TO_50) {
 					chip->batt_sys_curv_by_soc = vooc_curves_soc0_2_50;
+				} else if (chip->batt_soc_plugin == BATT_SOC_0_TO_50_MID) {
+					chip->batt_sys_curv_by_soc = vooc_curves_soc0_2_50_mid;
+				} else if (chip->batt_soc_plugin == BATT_SOC_0_TO_50_HIGH) {
+					chip->batt_sys_curv_by_soc = vooc_curves_soc0_2_50_high;
 				} else if (chip->batt_soc_plugin == BATT_SOC_50_TO_75) {
 					chip->batt_sys_curv_by_soc = vooc_curves_soc50_2_75;
 				} else if (chip->batt_soc_plugin == BATT_SOC_75_TO_85) {
@@ -2769,7 +2934,7 @@ static void oplus_voocphy_choose_batt_sys_curve(struct oplus_voocphy_manager *ch
 			} else {
 				chip->current_expect = chip->batt_sys_curv_by_tmprange->batt_sys_curve[0].target_ibus;
 				chip->current_max = chip->current_expect;
-				chip->current_bcc_ext = BCC_CURRENT_MIN;
+				chip->current_bcc_ext = chip->batt_sys_curv_by_tmprange->batt_sys_curve[0].target_ibus;
 				chip->batt_sys_curv_by_tmprange->batt_sys_curve[0].chg_time = 0;
 			}
 		}
@@ -2852,7 +3017,8 @@ static int oplus_voocphy_handle_ask_current_level_cmd(struct oplus_voocphy_manag
 
 		chip->ap_need_change_current = 0; //clear need change flag
 		if (chip->copycat_vooc_support)
-			chip->current_pwd = chip->current_expect * 100 + COPYCAT_ADAPTER_CUR_EXCEEDS_THRESHOLD;
+			chip->current_pwd = chip->current_expect * 100 * chip->copycat_vooc_accuracy_value / 100 +
+					    COPYCAT_ADAPTER_CUR_EXCEEDS_THRESHOLD;
 		else
 			chip->current_pwd = chip->current_expect * 100 + 300;
 		chip->curr_pwd_count = 10;
@@ -2901,7 +3067,7 @@ static int oplus_voocphy_non_vooc20_handle_get_batt_vol_cmd(struct oplus_voocphy
 		/* calculate R */
 		if (oplus_voocphy_get_bidirect_cp_support(chip) == false) {
 			if (chip->adapter_type == ADAPTER_SVOOC) {
-				if (oplus_switching_support_parallel_chg(chip)) {
+				if (chip->parallel_charge_support) {
 					if (chip->impedance_calculation_newmethod) {
 						vbatt1 = chip->cp_vac/2 - (signed)((chip->cp_vac - chip->cp_vbus) *
 							 (chip->cp_ichg / chip->master_cp_ichg)) / 2 - (chip->cp_ichg * 75)/1000;
@@ -2923,11 +3089,12 @@ static int oplus_voocphy_non_vooc20_handle_get_batt_vol_cmd(struct oplus_voocphy
 		} else {
 			vbatt1 = chip->gauge_vbatt;
 		}
-		if (vbatt1 < VBATT_BASE_FOR_ADAPTER) {
+		if (vbatt1 < VBATT_BASE_FOR_ADAPTER)
 			vbatt = 0;
-		} else {
+		else if (vbatt1 > VBATT_MAX_FOR_ADAPTER)
+			vbatt = (VBATT_MAX_FOR_ADAPTER - VBATT_BASE_FOR_ADAPTER) / VBATT_DIV_FOR_ADAPTER;
+		else
 			vbatt = (vbatt1 - VBATT_BASE_FOR_ADAPTER) / VBATT_DIV_FOR_ADAPTER;
-		}
 
 		data_temp_l =  ((vbatt >> 6) & 0x1) | (((vbatt >> 5) & 0x1) << 1)
 		               | (((vbatt >> 4) & 0x1) << 2) | (((vbatt >> 3) & 0x1) << 3)
@@ -2962,11 +3129,11 @@ static int oplus_voocphy_vooc20_handle_get_batt_vol_cmd(struct oplus_voocphy_man
 	if (chip->vooc2_next_cmd != VOOC_CMD_GET_BATT_VOL)
 		status = oplus_voocphy_reset_voocphy(chip);
 
-	oplus_voocphy_write_mesg_mask(TX0_DET_BIT3_MASK,
-	                              &chip->voocphy_tx_buff[0], chip->fastchg_allow); //need refresh bit3
+	oplus_voocphy_write_mesg_mask(TX0_DET_BIT3_MASK, &chip->voocphy_tx_buff[0],
+					chip->fastchg_allow && chip->oplus_ap_fastchg_allow); //need refresh bit3
 
 	if (chip->batt_soc > VOOC_SOC_HIGH &&  !chip->ask_vol_again) {
-		data_temp_l = chip->fastchg_allow | 0x0e;
+		data_temp_l = (chip->fastchg_allow && chip->oplus_ap_fastchg_allow) | 0x0e;
 		data_temp_h = 0x01;
 		chip->ask_vol_again = true;
 	} else if (chip->gauge_vbatt > 3391) {
@@ -2986,17 +3153,17 @@ static int oplus_voocphy_vooc20_handle_get_batt_vol_cmd(struct oplus_voocphy_man
 		}
 		data_temp_l = (((vbatt >> 5) & 0x1) << 1) | (((vbatt >> 4) & 0x1) << 2)
 		              | (((vbatt >> 3) & 0x1) << 3) | (((vbatt >> 2) & 0x1) << 4)
-		              | chip->fastchg_allow;
+		              | (chip->fastchg_allow && chip->oplus_ap_fastchg_allow);
 		data_temp_h = ((vbatt & 0x1) << 1) | ((vbatt >> 1) & 0x1);
 
 		//reply adapter when btb_temp_over
 		if (chip->btb_temp_over) {
 			if (!chip->btb_err_first) {
-				data_temp_l = chip->fastchg_allow | 0x1e;
+				data_temp_l = (chip->fastchg_allow && chip->oplus_ap_fastchg_allow) | 0x1e;
 				data_temp_h = 0x01;
 				chip->btb_err_first = true;
 			} else {
-				data_temp_l = chip->fastchg_allow | 0x10;
+				data_temp_l = (chip->fastchg_allow && chip->oplus_ap_fastchg_allow) | 0x10;
 				data_temp_h = 0x02;
 				chip->btb_err_first = false;
 			}
@@ -3005,7 +3172,7 @@ static int oplus_voocphy_vooc20_handle_get_batt_vol_cmd(struct oplus_voocphy_man
 		data_temp_l = 0;
 		voocphy_info( "vbatt too low at vooc2 mode");
 	} else {
-		data_temp_l |= chip->fastchg_allow;
+		data_temp_l |= (chip->fastchg_allow && chip->oplus_ap_fastchg_allow);
 	}
 	chip->vbat_calc = vbatt;
 
@@ -3512,8 +3679,13 @@ static int oplus_voocphy_svooc_commu_with_voocphy(struct oplus_voocphy_manager *
 			voocphy_info("OPLUS_FASTCHG_STAGE_2 and open torch exit fastchg\n");
 			return 1;
 		} else {
-			oplus_chglib_suspend_charger(true);
-			voocphy_info("allow fastchg adapter type %d\n", chip->adapter_type);
+			if (oplus_chglib_get_eis_status(chip->dev) == EIS_STATUS_HIGH_CURRENT) {
+				chip->eis_status = EIS_STATUS_HIGH_CURRENT;
+				voocphy_info("<EIS>in EIS status\n");
+			} else {
+				oplus_chglib_suspend_charger(true);
+				voocphy_info("allow fastchg adapter type %d\n", chip->adapter_type);
+			}
 		}
 
 		/* handle timeout of adapter ask cmd 0x4 */
@@ -3578,7 +3750,7 @@ static int oplus_vooc_adapter_work_as_power_bank(struct oplus_voocphy_manager *c
 		return -ENODEV;
 	}
 
-	voocphy_info("!!!!![power_bank]rx_data:%d", chip->voocphy_rx_buff);
+	voocphy_info("!!!!![power_bank]rx_data:0x%0x", chip->voocphy_rx_buff);
 	vooc_head = (chip->voocphy_rx_buff & VOOC_HEAD_MASK) >> VOOC_HEAD_SHIFT;
 	vooc_move_head = (chip->voocphy_rx_buff & VOOC_MOVE_HEAD_MASK)
 					>> VOOC_MOVE_HEAD_SHIFT;
@@ -3610,7 +3782,7 @@ static int oplus_vooc_adapter_work_as_power_bank(struct oplus_voocphy_manager *c
 		switch(chip->adapter_mesg) {
 		case VOOC_CMD_ASK_FASTCHG_ORNOT :
 			if (chip->vooc_move_head == false) {
-				if (chip->fastchg_real_allow) {
+				if (chip->fastchg_real_allow && chip->oplus_ap_fastchg_allow) {
 					status |= oplus_voocphy_write_mesg_mask(TX0_DET_BIT3_MASK,
                                                                                 &chip->voocphy_tx_buff[0], 1);
 				} else {
@@ -3636,7 +3808,10 @@ static int oplus_vooc_adapter_work_as_power_bank(struct oplus_voocphy_manager *c
 					chip->fastchg_start = true;
 					chip->fastchg_to_warm = false;
 					chip->fastchg_dummy_start = false;
-					oplus_voocphy_set_status_and_notify_ap(chip, FAST_NOTIFY_PRESENT);
+					if (!chip->ap_control_allow || chip->allow_report_present) {
+						chip->allow_report_present = false;
+						oplus_voocphy_set_status_and_notify_ap(chip, FAST_NOTIFY_PRESENT);
+					}
 					voocphy_info("!!!!!fastchg_real_allow = true");
 					schedule_delayed_work(&chip->voocphy_send_ongoing_notify,
 							      msecs_to_jiffies(SEND_FASTCHG_ONGOING_NOTIFY_INTERVAL));
@@ -3715,6 +3890,7 @@ irqreturn_t oplus_voocphy_interrupt_handler(struct oplus_voocphy_manager *chip)
 	int torch_exit_fastchg = 0;
 
 	chip->irq_total_num++;
+	calltime = ktime_get();
 
 	/* for flash led */
 	if (chip->fastchg_need_reset) {
@@ -3766,6 +3942,7 @@ irqreturn_t oplus_voocphy_interrupt_handler(struct oplus_voocphy_manager *chip)
 			chip->fastchg_start = false;
 			chip->fastchg_to_warm = false;
 			chip->fastchg_dummy_start = false;
+			chip->retry_flag = true;
 			chip->adapter_abnormal_type = ADAPTER_ABNORMAL_START_INVAILD_FRAME;
 			voocphy_info("invalid data of the first frame , irq_num = %d\n",
 				     chip->irq_rxdone_num);
@@ -3824,7 +4001,7 @@ irqreturn_t oplus_voocphy_interrupt_handler(struct oplus_voocphy_manager *chip)
 		if (oplus_voocphy_get_bidirect_cp_support(chip) == false) {
 			torch_exit_fastchg = oplus_voocphy_svooc_commu_with_voocphy(chip);
 			if (chip->fastchg_adapter_ask_cmd == VOOC_CMD_IS_VUBS_OK &&
-			    chip->copycat_vooc_support && chip->adapter_is_vbus_ok_count == 2 &&
+			    chip->copycat_vooc_support && chip->adapter_is_vbus_ok_count == chip->copycat_vooc_count &&
 			    chip->adapter_type == ADAPTER_SVOOC && (chip->cp_vbus < SVOOC_INIT_VBUS_VOL_LOW ||
 			    chip->cp_vbus > SVOOC_INIT_VBUS_VOL_HIGH || chip->adapter_ask_fastchg_ornot_count == 1)) {
 				voocphy_info("ADAPTER_COPYCAT,init cp_vbus = %d, ask_fastchg_ornot_count=%d\n",
@@ -3874,8 +4051,12 @@ irqreturn_t oplus_voocphy_interrupt_handler(struct oplus_voocphy_manager *chip)
 		}
 	} else {
 		if(oplus_voocphy_int_disable_chg(chip)) {
-			voocphy_err(", oplus_voocphy_int_disable_chg\n");
-			oplus_chglib_disable_charger(true);
+			voocphy_err("oplus_voocphy_int_disable_chg\n");
+			chip->fastchg_disable_charger = true;
+			oplus_chglib_disable_charger_by_client(true, CP_ERR_VOTER);
+		} else if (chip->fastchg_disable_charger) {
+			chip->fastchg_disable_charger = false;
+			oplus_chglib_disable_charger_by_client(false, CP_ERR_VOTER);
 		}
 	}
 
@@ -3913,6 +4094,8 @@ static bool oplus_voocphy_set_user_exit_fastchg(struct oplus_voocphy_manager *ch
 
 static const char * const strategy_soc[] = {
 	[BATT_SOC_0_TO_50]	= "strategy_soc_0_to_50",
+	[BATT_SOC_0_TO_50_MID]	= "strategy_soc_0_to_50_mid",
+	[BATT_SOC_0_TO_50_HIGH]	= "strategy_soc_0_to_50_high",
 	[BATT_SOC_50_TO_75]	= "strategy_soc_50_to_75",
 	[BATT_SOC_75_TO_85]	= "strategy_soc_75_to_85",
 	[BATT_SOC_85_TO_90]	= "strategy_soc_85_to_90",
@@ -3922,6 +4105,7 @@ static const char * const strategy_temp[] = {
 	[BATT_SYS_CURVE_TEMP_LITTLE_COLD]	= "strategy_temp_little_cold",
 	[BATT_SYS_CURVE_TEMP_COOL]	= "strategy_temp_cool",
 	[BATT_SYS_CURVE_TEMP_LITTLE_COOL]	= "strategy_temp_little_cool",
+	[BATT_SYS_CURVE_TEMP_LITTLE_COOL_HIGH]	= "strategy_temp_little_cool_high",
 	[BATT_SYS_CURVE_TEMP_NORMAL_LOW]	= "strategy_temp_normal_low",
 	[BATT_SYS_CURVE_TEMP_NORMAL_HIGH] = "strategy_temp_normal_high",
 	[BATT_SYS_CURVE_TEMP_WARM] = "strategy_temp_warm",
@@ -3930,7 +4114,7 @@ static const char * const strategy_temp[] = {
 static void oplus_voocphy_parse_dt(struct oplus_voocphy_manager *chip)
 {
 	int rc;
-	struct device_node * node = chip->dev->of_node;
+	struct device_node * node = oplus_get_node_by_type(chip->dev->of_node);
 
 	rc = of_property_read_u32(node, "ovp_reg",
 				  &chip->ovp_reg);
@@ -3977,6 +4161,11 @@ static void oplus_voocphy_parse_dt(struct oplus_voocphy_manager *chip)
 	voocphy_info("oplus dual chan buck_ucp_thre is %d\n", chip->buck_ucp_thre);
 
 	chip->workaround_for_100w = of_property_read_bool(node, "oplus,workaround_for_100w");
+
+	chip->ap_control_allow = of_property_read_bool(node, "oplus_spec,ap_control_allow");
+	if (!chip->ap_control_allow)
+		chip->oplus_ap_fastchg_allow = true;
+	voocphy_info("ap_control_allow=%d\n", chip->ap_control_allow);
 }
 
 static int oplus_voocphy_parse_svooc_batt_curves(struct oplus_voocphy_manager *chip)
@@ -3984,7 +4173,7 @@ static int oplus_voocphy_parse_svooc_batt_curves(struct oplus_voocphy_manager *c
 	struct device_node *node, *svooc_node, *soc_node;
 	int rc = 0, i, j, length;
 
-	node = chip->dev->of_node;
+	node = oplus_get_node_by_type(chip->dev->of_node);
 
 	svooc_node = of_get_child_by_name(node, "svooc_charge_strategy");
 	if (!svooc_node) {
@@ -3996,13 +4185,15 @@ static int oplus_voocphy_parse_svooc_batt_curves(struct oplus_voocphy_manager *c
 		soc_node = of_get_child_by_name(svooc_node, strategy_soc[i]);
 		if (!soc_node) {
 			voocphy_info("Can not find %s node\n", strategy_soc[i]);
+			if (i == BATT_SOC_0_TO_50_MID || i == BATT_SOC_0_TO_50_HIGH)
+				continue;
 			return -EINVAL;
 		}
 
 		for (j = 0; j < BATT_SYS_CURVE_MAX; j++) {
 			rc = of_property_count_elems_of_size(soc_node, strategy_temp[j], sizeof(u32));
 			if (rc < 0) {
-				if (j == BATT_SYS_CURVE_TEMP_WARM) {
+				if (j == BATT_SYS_CURVE_TEMP_WARM || j == BATT_SYS_CURVE_TEMP_LITTLE_COOL_HIGH) {
 					continue;
 				} else {
 					voocphy_info("Count %s failed, rc=%d\n", strategy_temp[j], rc);
@@ -4018,6 +4209,18 @@ static int oplus_voocphy_parse_svooc_batt_curves(struct oplus_voocphy_manager *c
 				                                (u32 *)svooc_curves_soc0_2_50[j].batt_sys_curve,
 				                                length);
 				svooc_curves_soc0_2_50[j].sys_curv_num = length/5;
+				break;
+			case BATT_SOC_0_TO_50_MID:
+				rc = of_property_read_u32_array(soc_node, strategy_temp[j],
+				                                (u32 *)svooc_curves_soc0_2_50_mid[j].batt_sys_curve,
+				                                length);
+				svooc_curves_soc0_2_50_mid[j].sys_curv_num = length/5;
+				break;
+			case BATT_SOC_0_TO_50_HIGH:
+				rc = of_property_read_u32_array(soc_node, strategy_temp[j],
+				                                (u32 *)svooc_curves_soc0_2_50_high[j].batt_sys_curve,
+				                                length);
+				svooc_curves_soc0_2_50_high[j].sys_curv_num = length/5;
 				break;
 			case BATT_SOC_50_TO_75:
 				rc = of_property_read_u32_array(soc_node, strategy_temp[j],
@@ -4051,7 +4254,7 @@ static int oplus_voocphy_parse_vooc_batt_curves(struct oplus_voocphy_manager *ch
 	struct device_node *node, *vooc_node, *soc_node;
 	int rc = 0, i, j, length;
 
-	node = chip->dev->of_node;
+	node = oplus_get_node_by_type(chip->dev->of_node);
 
 	vooc_node = of_get_child_by_name(node, "vooc_charge_strategy");
 	if (!vooc_node) {
@@ -4063,13 +4266,15 @@ static int oplus_voocphy_parse_vooc_batt_curves(struct oplus_voocphy_manager *ch
 		soc_node = of_get_child_by_name(vooc_node, strategy_soc[i]);
 		if (!soc_node) {
 			voocphy_info("Can not find %s node\n", strategy_soc[i]);
+			if (i == BATT_SOC_0_TO_50_MID || i == BATT_SOC_0_TO_50_HIGH)
+				continue;
 			return -EINVAL;
 		}
 
 		for (j = 0; j < BATT_SYS_CURVE_MAX; j++) {
 			rc = of_property_count_elems_of_size(soc_node, strategy_temp[j], sizeof(u32));
 			if (rc < 0) {
-				if (j == BATT_SYS_CURVE_TEMP_WARM) {
+				if (j == BATT_SYS_CURVE_TEMP_WARM || j == BATT_SYS_CURVE_TEMP_LITTLE_COOL_HIGH) {
 					continue;
 				} else {
 					voocphy_info("Count %s failed, rc=%d\n", strategy_temp[j], rc);
@@ -4085,6 +4290,18 @@ static int oplus_voocphy_parse_vooc_batt_curves(struct oplus_voocphy_manager *ch
 				                                (u32 *)vooc_curves_soc0_2_50[j].batt_sys_curve,
 				                                length);
 				vooc_curves_soc0_2_50[j].sys_curv_num = length/5;
+				break;
+			case BATT_SOC_0_TO_50_MID:
+				rc = of_property_read_u32_array(soc_node, strategy_temp[j],
+				                                (u32 *)vooc_curves_soc0_2_50_mid[j].batt_sys_curve,
+				                                length);
+				vooc_curves_soc0_2_50_mid[j].sys_curv_num = length/5;
+				break;
+			case BATT_SOC_0_TO_50_HIGH:
+				rc = of_property_read_u32_array(soc_node, strategy_temp[j],
+				                                (u32 *)vooc_curves_soc0_2_50_high[j].batt_sys_curve,
+				                                length);
+				vooc_curves_soc0_2_50_high[j].sys_curv_num = length/5;
 				break;
 			case BATT_SOC_50_TO_75:
 				rc = of_property_read_u32_array(soc_node, strategy_temp[j],
@@ -4133,7 +4350,7 @@ static void oplus_voocphy_check_chg_out_work_func(struct oplus_voocphy_manager *
 
 	chip->fastchg_commu_ing = false;
 	chg_vol = oplus_chglib_get_charger_voltage();
-	if (chg_vol >= 0 && chg_vol < 2000) {
+	if (chg_vol >= 0 && chg_vol < 2500) {
 		complete_all(&vooc_init_check_ack);
 		if (chip->adapter_type == ADAPTER_VOOC20)
 			cancel_delayed_work(&chip->voocphy_send_ongoing_notify);
@@ -4364,6 +4581,11 @@ static void oplus_voocphy_notify_fastchg_work(struct work_struct *work)
 	case FAST_NOTIFY_PRESENT:
 		oplus_voocphy_handle_present_notify(chip);
 		oplus_chglib_notify_ap(chip->dev, intval);
+		if (oplus_get_chg_spec_version() == OPLUS_CHG_SPEC_VER_V3P7) {
+			oplus_chg_strategy_init(chip->svooc_lcf_strategy);
+			if (chip->parallel_charge_support && chip->svooc_sub_lcf_strategy)
+				oplus_chg_strategy_init(chip->svooc_sub_lcf_strategy);
+		}
 		break;
 	case FAST_NOTIFY_DUMMY_START:
 		oplus_voocphy_handle_dummy_notify(chip);
@@ -4482,7 +4704,7 @@ static void oplus_voocphy_handle_err_commu_status(struct oplus_voocphy_manager *
 	 */
 	oplus_voocphy_get_chg_enable(chip, &dchg_enable_status);
 	if (chip->fastchg_err_commu == false && ((chip->adapter_type == ADAPTER_SVOOC && dchg_enable_status == 0)
-	    ||(chip->adapter_type == ADAPTER_VOOC20 && chip->fastchg_allow))) {
+	    ||(chip->adapter_type == ADAPTER_VOOC20 && chip->fastchg_allow && chip->oplus_ap_fastchg_allow))) {
 		voocphy_info("!VOOC_THREAD_TIMER_FASTCHG_CHECK abnormal status, should run fastchg check");
 		chip->fastchg_err_commu = true;
 		oplus_voocphy_reset_fastchg_after_usbout(chip);
@@ -4601,6 +4823,16 @@ static void oplus_voocphy_set_status_and_notify_ap(struct oplus_voocphy_manager 
 	oplus_voocphy_wake_notify_fastchg_work(chip);
 }
 
+static bool is_batt_bal_topic_available(void)
+{
+	static struct oplus_mms *batt_bal_topic;
+
+	if (!batt_bal_topic)
+		batt_bal_topic = oplus_mms_get_by_name("batt_bal");
+
+	return !!batt_bal_topic;
+}
+
 unsigned char oplus_voocphy_set_fastchg_current(struct oplus_voocphy_manager *chip)
 {
 	unsigned char current_expect_temp = chip->current_expect;
@@ -4612,7 +4844,8 @@ unsigned char oplus_voocphy_set_fastchg_current(struct oplus_voocphy_manager *ch
 
 	chip->current_expect =
 		chip->current_expect > chip->current_batt_temp ? chip->current_batt_temp : chip->current_expect;
-	if (chip->parallel_charge_project == PARALLEL_MOS_CTRL && chip->current_spec > 0) {
+	if ((chip->parallel_charge_project == PARALLEL_MOS_CTRL ||
+	     is_batt_bal_topic_available()) && chip->current_spec > 0) {
 		voocphy_info("batt_spec_curr[%d]", chip->current_spec);
 		chip->current_expect =
 			chip->current_expect > chip->current_spec ? chip->current_spec : chip->current_expect;
@@ -4688,6 +4921,54 @@ static int oplus_voocphy_ap_event_handle(struct device *dev, unsigned long data)
 	return status;
 }
 
+static void oplus_voocphy_set_chg_pmid2out(bool enable)
+{
+	if (!g_voocphy_chip)
+		return;
+
+	if (g_voocphy_chip->ops && g_voocphy_chip->ops->set_chg_pmid2out) {
+		g_voocphy_chip->ops->set_chg_pmid2out(enable);
+	} else {
+		return;
+	}
+}
+
+static bool oplus_voocphy_get_chg_pmid2out(void)
+{
+	if (!g_voocphy_chip)
+		return false;
+
+	if (g_voocphy_chip->ops && g_voocphy_chip->ops->get_chg_pmid2out) {
+		return g_voocphy_chip->ops->get_chg_pmid2out();
+	} else {
+		return false;
+	}
+}
+
+static void oplus_voocphy_set_slave_chg_pmid2out(bool enable)
+{
+	if (!g_voocphy_chip)
+		return;
+
+	if (g_voocphy_chip->slave_ops && g_voocphy_chip->slave_ops->set_chg_pmid2out) {
+		g_voocphy_chip->slave_ops->set_chg_pmid2out(enable);
+	} else {
+		return;
+	}
+}
+
+static bool oplus_voocphy_get_slave_chg_pmid2out(void)
+{
+	if (!g_voocphy_chip)
+		return false;
+
+	if (g_voocphy_chip->slave_ops && g_voocphy_chip->slave_ops->get_chg_pmid2out) {
+		return g_voocphy_chip->slave_ops->get_chg_pmid2out();
+	} else {
+		return false;
+	}
+}
+
 static int oplus_voocphy_curr_event_handle(struct device *dev, unsigned long data)
 {
 	struct oplus_voocphy_manager *chip = dev_get_drvdata(dev);
@@ -4703,8 +4984,14 @@ static int oplus_voocphy_curr_event_handle(struct device *dev, unsigned long dat
 	int chg_temp = oplus_chglib_get_shell_temp(chip->dev);
 	int i;
 	bool low_curr = false;
+	bool pmid2out_status = true;
 	int temp_current = 0;
 	int temp_vbatt = 0;
+	int rc;
+	int ret_val = 0;
+	int sub_rc = 0;
+	int sub_ret_val = 0;
+	int discharge_threshold = (oplus_gauge_get_batt_num() == 1) ? -3000 : -2000;
 
 	if (chip->fastchg_monitor_stop == true) {
 		voocphy_info( "oplus_voocphy_curr_event_handle ignore");
@@ -4794,6 +5081,21 @@ static int oplus_voocphy_curr_event_handle(struct device *dev, unsigned long dat
 			disable_sub_cp_count = 0;
 			voocphy_err("Discontinuity satisfies the condition, count = 0!\n");
 		}
+
+		if (chip->chip_id == CHIP_ID_NU2112A) {
+			pmid2out_status = oplus_voocphy_get_chg_pmid2out();
+			voocphy_err("pmid2out master = %d, chip->master_cp_ichg = %d\n", pmid2out_status, chip->master_cp_ichg);
+			if (pmid2out_status == false && chip->master_cp_ichg > 500) {
+				voocphy_err("IBUS > 500mA set 0x5 to 0x33!\n");
+				oplus_voocphy_set_chg_pmid2out(true);
+			}
+			pmid2out_status = oplus_voocphy_get_slave_chg_pmid2out();
+			voocphy_err("pmid2out slave = %d, chip->cp_ichg = %d\n", pmid2out_status, chip->cp_ichg);
+			if (pmid2out_status == false && (chip->cp_ichg - chip->master_cp_ichg)> 500) {
+				voocphy_err("slave cp IBUS > 500mA set 0x5 to 0x33!\n");
+				oplus_voocphy_set_slave_chg_pmid2out(true);
+			}
+		}
 	}
 
 	voocphy_info("[oplus_voocphy_curr_event_handle] chg_temp: %d, current: %d, vbatt: %d btb: %d current_pwd[%d %d]"
@@ -4817,11 +5119,11 @@ static int oplus_voocphy_curr_event_handle(struct device *dev, unsigned long dat
 	}
 
 	if (!chip->btb_temp_over) {//non btb temp over
-		if (vbat_temp_cur < -2000) { 	//BATT OUPUT 2000MA
+		if (vbat_temp_cur < discharge_threshold) {
 			curr_over_count++;
-			if (curr_over_count > 3) {
-				voocphy_info("vcurr low than -2000mA\n");
-				oplus_voocphy_set_status_and_notify_ap(chip, FAST_NOTIFY_ABSENT);
+			if (curr_over_count > 6) {
+				voocphy_info("vcurr low than %dmA\n", discharge_threshold);
+				oplus_voocphy_set_status_and_notify_ap(chip, FAST_NOTIFY_BAD_CONNECTED);
 			}
 		} else {
 			curr_over_count = 0;
@@ -4843,83 +5145,97 @@ static int oplus_voocphy_curr_event_handle(struct device *dev, unsigned long dat
 			temp_current = vbat_temp_cur;
 			temp_vbatt = chip->gauge_vbatt;
 		}
-		if (chg_temp >= chip->low_curr_full_t1 && chg_temp <= chip->low_curr_full_t2) {
-			if (chip->range1_low_curr_full_num != 0 && chip->range1_low_curr_full) {
-				for (i = 0; i < chip->range1_low_curr_full_num; i++) {
-					if (temp_current <= chip->range1_low_curr_full[i].curr && temp_vbatt >= chip->range1_low_curr_full[i].vbatt) {
-						low_curr = true;
-						break;
-					}
-				}
-				if (low_curr) {
-					term_curr_over_count++;
-				} else {
-					term_curr_over_count = 0;
-				}
-				if (term_curr_over_count > 5) {
-					voocphy_info("range1 lowcurr ntime fastchg full %d, %d\n", temp_vbatt, temp_current);
+		if (oplus_get_chg_spec_version() == OPLUS_CHG_SPEC_VER_V3P7) {
+			rc = oplus_chg_strategy_get_data(chip->svooc_lcf_strategy, &ret_val);
+			if (chip->parallel_charge_support && chip->svooc_sub_lcf_strategy)
+				sub_rc = oplus_chg_strategy_get_data(chip->svooc_sub_lcf_strategy, &sub_ret_val);
+			if (rc < 0 || sub_rc < 0) {
+				chg_err("can't get lcf_strategy data, rc=%d\n", rc);
+			} else {
+				if (ret_val || sub_ret_val) {
 					oplus_voocphy_set_status_and_notify_ap(chip, FAST_NOTIFY_FULL);
+					voocphy_info("FAST_NOTIFY_FULL is true\n");
 				}
 			}
-
-		} else if (chg_temp > chip->low_curr_full_t2 && chg_temp <= chip->low_curr_full_t3) {
-			if (chip->range2_low_curr_full_num != 0 && chip->range2_low_curr_full) {
-				for (i = 0; i < chip->range2_low_curr_full_num; i++) {
-					if (temp_current <= chip->range2_low_curr_full[i].curr && temp_vbatt >= chip->range2_low_curr_full[i].vbatt) {
-						low_curr = true;
-						break;
-					}
-				}
-				if (low_curr) {
-					term_curr_over_count++;
-				} else {
-					term_curr_over_count = 0;
-				}
-				if (term_curr_over_count > 5) {
-					voocphy_info("range2 lowcurr ntime fastchg full %d, %d\n", temp_vbatt, temp_current);
-					oplus_voocphy_set_status_and_notify_ap(chip, FAST_NOTIFY_FULL);
-				}
-			}
-		}
-		if (chip->parallel_charge_support) {
-			temp_current = chip->sub_batt_icharging;
-			temp_vbatt = chip->sub_vbatt;
-			low_curr = 0;
-			voocphy_info("sub range lowcurr ntime fastchg full %d, %d, %d\n", temp_vbatt, temp_current, chg_temp);
+		} else {
 			if (chg_temp >= chip->low_curr_full_t1 && chg_temp <= chip->low_curr_full_t2) {
-				if (chip->sub_range1_low_curr_full_num != 0 && chip->sub_range1_low_curr_full) {
-					for (i = 0; i < chip->sub_range1_low_curr_full_num; i++) {
-						if (temp_current <= chip->sub_range1_low_curr_full[i].curr && temp_vbatt >= chip->sub_range1_low_curr_full[i].vbatt) {
+				if (chip->range1_low_curr_full_num != 0 && chip->range1_low_curr_full) {
+					for (i = 0; i < chip->range1_low_curr_full_num; i++) {
+						if (temp_current <= chip->range1_low_curr_full[i].curr && temp_vbatt >= chip->range1_low_curr_full[i].vbatt) {
 							low_curr = true;
 							break;
 						}
 					}
 					if (low_curr) {
-						sub_term_curr_over_count++;
+						term_curr_over_count++;
 					} else {
-						sub_term_curr_over_count = 0;
+						term_curr_over_count = 0;
 					}
-					if (sub_term_curr_over_count > 5) {
-						voocphy_info("sub_range1 lowcurr ntime fastchg full %d, %d\n", temp_vbatt, temp_current);
+					if (term_curr_over_count > 5) {
+						voocphy_info("range1 lowcurr ntime fastchg full %d, %d\n", temp_vbatt, temp_current);
 						oplus_voocphy_set_status_and_notify_ap(chip, FAST_NOTIFY_FULL);
 					}
 				}
+
 			} else if (chg_temp > chip->low_curr_full_t2 && chg_temp <= chip->low_curr_full_t3) {
-				if (chip->sub_range2_low_curr_full_num != 0 && chip->sub_range2_low_curr_full) {
-					for (i = 0; i < chip->sub_range2_low_curr_full_num; i++) {
-						if (temp_current <= chip->sub_range2_low_curr_full[i].curr && temp_vbatt >= chip->sub_range2_low_curr_full[i].vbatt) {
+				if (chip->range2_low_curr_full_num != 0 && chip->range2_low_curr_full) {
+					for (i = 0; i < chip->range2_low_curr_full_num; i++) {
+						if (temp_current <= chip->range2_low_curr_full[i].curr && temp_vbatt >= chip->range2_low_curr_full[i].vbatt) {
 							low_curr = true;
 							break;
 						}
 					}
 					if (low_curr) {
-						sub_term_curr_over_count++;
+						term_curr_over_count++;
 					} else {
-						sub_term_curr_over_count = 0;
+						term_curr_over_count = 0;
 					}
-					if (sub_term_curr_over_count > 5) {
-						voocphy_info("sub_range2 lowcurr ntime fastchg full %d, %d\n", temp_vbatt, temp_current);
+					if (term_curr_over_count > 5) {
+						voocphy_info("range2 lowcurr ntime fastchg full %d, %d\n", temp_vbatt, temp_current);
 						oplus_voocphy_set_status_and_notify_ap(chip, FAST_NOTIFY_FULL);
+					}
+				}
+			}
+			if (chip->parallel_charge_support) {
+				temp_current = chip->sub_batt_icharging;
+				temp_vbatt = chip->sub_vbatt;
+				low_curr = 0;
+				voocphy_info("sub range lowcurr ntime fastchg full %d, %d, %d\n", temp_vbatt, temp_current, chg_temp);
+				if (chg_temp >= chip->low_curr_full_t1 && chg_temp <= chip->low_curr_full_t2) {
+					if (chip->sub_range1_low_curr_full_num != 0 && chip->sub_range1_low_curr_full) {
+						for (i = 0; i < chip->sub_range1_low_curr_full_num; i++) {
+							if (temp_current <= chip->sub_range1_low_curr_full[i].curr && temp_vbatt >= chip->sub_range1_low_curr_full[i].vbatt) {
+								low_curr = true;
+								break;
+							}
+						}
+						if (low_curr) {
+							sub_term_curr_over_count++;
+						} else {
+							sub_term_curr_over_count = 0;
+						}
+						if (sub_term_curr_over_count > 5) {
+							voocphy_info("sub_range1 lowcurr ntime fastchg full %d, %d\n", temp_vbatt, temp_current);
+							oplus_voocphy_set_status_and_notify_ap(chip, FAST_NOTIFY_FULL);
+						}
+					}
+				} else if (chg_temp > chip->low_curr_full_t2 && chg_temp <= chip->low_curr_full_t3) {
+					if (chip->sub_range2_low_curr_full_num != 0 && chip->sub_range2_low_curr_full) {
+						for (i = 0; i < chip->sub_range2_low_curr_full_num; i++) {
+							if (temp_current <= chip->sub_range2_low_curr_full[i].curr && temp_vbatt >= chip->sub_range2_low_curr_full[i].vbatt) {
+								low_curr = true;
+								break;
+							}
+						}
+						if (low_curr) {
+							sub_term_curr_over_count++;
+						} else {
+							sub_term_curr_over_count = 0;
+						}
+						if (sub_term_curr_over_count > 5) {
+							voocphy_info("sub_range2 lowcurr ntime fastchg full %d, %d\n", temp_vbatt, temp_current);
+							oplus_voocphy_set_status_and_notify_ap(chip, FAST_NOTIFY_FULL);
+						}
 					}
 				}
 			}
@@ -5042,7 +5358,7 @@ void oplus_voocphy_request_fastchg_curv(struct oplus_voocphy_manager *chip)
 			             (&(batt_sys_curv_by_tmprange->batt_sys_curve[idx]))->target_ibus,
 			             (&(batt_sys_curv_by_tmprange->batt_sys_curve[idx]))->target_vbat);
 			convert_ibus = batt_sys_curve->target_ibus * 100;
-			if (oplus_switching_support_parallel_chg(chip)) {
+			if (chip->parallel_charge_support) {
 				if (chip->sub_batt_icharging > chip->voocphy_max_sub_ibat ||
 				    chip->main_batt_icharging > chip->voocphy_max_main_ibat) {
 					switch_ocp_cnt++;
@@ -5134,7 +5450,7 @@ static int oplus_voocphy_vol_event_handle(struct device *dev, unsigned long data
 			chip->pre_gauge_vbatt = chip->main_vbatt > chip->sub_vbatt ? chip->main_vbatt : chip->sub_vbatt;
 		chip->main_batt_icharging = -oplus_chglib_gauge_main_current(chip->dev);
 		chip->sub_batt_icharging = -oplus_chglib_gauge_sub_current(chip->dev);
-		chip->icharging = chip->main_batt_icharging + chip->sub_batt_icharging;
+		chip->icharging = -oplus_chglib_gauge_current(chip->dev);
 		voocphy_info("batt[%d, %d], main_batt[%d, %d], sub_batt[%d, %d]\n",
 			     chip->pre_gauge_vbatt, chip->icharging, chip->main_vbatt, chip->main_batt_icharging,
 			     chip->sub_vbatt, chip->sub_batt_icharging);
@@ -5153,6 +5469,25 @@ static int oplus_voocphy_vol_event_handle(struct device *dev, unsigned long data
 			chip->ap_need_change_current
 			    = oplus_voocphy_set_fastchg_current(chip);
 
+		if (chip->batt_temp_plugin >= 0 && chip->batt_temp_plugin < VOOCPHY_BATT_TEMP_MAX &&
+		    chip->full_voltage[0].vol_1time > 0) {
+			if (chip->gauge_vbatt > chip->full_voltage[chip->batt_temp_plugin].vol_1time) {
+				voocphy_info("%s vbatt 1time fastchg full: %d > %d",
+					     temp_region_text[chip->batt_temp_plugin], chip->gauge_vbatt,
+					     chip->full_voltage[chip->batt_temp_plugin].vol_1time);
+				oplus_voocphy_set_status_and_notify_ap(chip, FAST_NOTIFY_FULL);
+			} else if (chip->gauge_vbatt > chip->full_voltage[chip->batt_temp_plugin].vol_ntime) {
+				fast_full_count++;
+				if (fast_full_count > 5) {
+					voocphy_info("%s vbatt ntime fastchg full: %d > %d",
+						     temp_region_text[chip->batt_temp_plugin], chip->gauge_vbatt,
+						     chip->full_voltage[chip->batt_temp_plugin].vol_ntime);
+					oplus_voocphy_set_status_and_notify_ap(chip, FAST_NOTIFY_FULL);
+				}
+			}
+			goto check_vol_end;
+		}
+
 		//notify full at some condition
 		if ((chip->batt_temp_plugin == VOOCPHY_BATT_TEMP_LITTLE_COLD				/*0-5 chg to 4430mV*/
 		     && chip->gauge_vbatt > chip->vooc_little_cold_full_voltage)
@@ -5160,6 +5495,9 @@ static int oplus_voocphy_vol_event_handle(struct device *dev, unsigned long data
 		        && chip->gauge_vbatt > chip->vooc_cool_full_voltage)
 		    || (chip->batt_temp_plugin == VOOCPHY_BATT_TEMP_LITTLE_COOL				/*12-16 chg to 4430mV*/
 		        && chip->gauge_vbatt > chip->vooc_little_cool_full_voltage)
+		    || (chip->batt_temp_plugin == VOOCPHY_BATT_TEMP_LITTLE_COOL_HIGH				/*12-16 chg to 4430mV*/
+		        && chip->vooc_little_cool_high_full_voltage != -EINVAL
+		        && chip->gauge_vbatt > chip->vooc_little_cool_high_full_voltage)
 		    || (chip->batt_temp_plugin == VOOCPHY_BATT_TEMP_WARM				/*43-52 chg to 4130mV*/
 		    	&& chip->vooc_warm_full_voltage != -EINVAL
 		        && chip->gauge_vbatt > chip->vooc_warm_full_voltage)
@@ -5174,6 +5512,7 @@ static int oplus_voocphy_vol_event_handle(struct device *dev, unsigned long data
 			}
 		}
 
+check_vol_end:
 		status = oplus_voocphy_monitor_timer_start(chip, VOOC_THREAD_TIMER_VOL, VOOC_VOL_EVENT_TIME);
 	}
 
@@ -5238,6 +5577,10 @@ static int oplus_voocphy_btb_event_handle(struct device *dev, unsigned long data
 			oplus_voocphy_set_chg_enable(chip, false);
 			oplus_voocphy_set_adc_forcedly_enable(chip, ADC_FORCEDLY_ENABLED);
 			chip->btb_temp_over = true;
+			if (!btb_err_report) {
+				btb_err_report = true;
+				oplus_voocphy_set_status_and_notify_ap(chip, FAST_NOTIFY_BTB_TEMP_OVER);
+			}
 		}
 		status = oplus_voocphy_monitor_timer_start(chip, VOOC_THREAD_TIMER_BTB, VOOC_BTB_EVENT_TIME);
 	} else {
@@ -5623,6 +5966,43 @@ static void oplus_voocphy_monitor_timer_init (struct oplus_voocphy_manager *chip
         voocphy_dbg( "vooc: create timers successfully");
 }
 
+static int oplus_voocphy_parse_lcf_strategy(struct oplus_voocphy_manager *chip)
+{
+	struct device_node *startegy_node;
+	struct device_node *sub_startegy_node;
+
+	startegy_node = of_get_child_by_name(oplus_get_node_by_type(chip->dev->of_node), "svooc_lcf_strategy");
+	if (!startegy_node) {
+		voocphy_err("Can not find svooc_lcf_strategy node\n");
+		return -EINVAL;
+	} else {
+		chip->svooc_lcf_strategy = oplus_chg_strategy_alloc_by_node("low_curr_full_strategy", startegy_node);
+		if (IS_ERR_OR_NULL(chip->svooc_lcf_strategy)) {
+			voocphy_err("alloc svooc_lcf_strategy error, rc=%ld", PTR_ERR(chip->svooc_lcf_strategy));
+			oplus_chg_strategy_release(chip->svooc_lcf_strategy);
+			chip->svooc_lcf_strategy = NULL;
+			return -EINVAL;
+		}
+	}
+	if (chip->parallel_charge_support) {
+		sub_startegy_node = of_get_child_by_name(oplus_get_node_by_type(chip->dev->of_node), "svooc_sub_lcf_strategy");
+		if (!sub_startegy_node) {
+			voocphy_err("Can not find svooc_sub_lcf_strategy node\n");
+		} else {
+			chip->svooc_sub_lcf_strategy = oplus_chg_strategy_alloc_by_node("low_curr_full_strategy", sub_startegy_node);
+			if (IS_ERR_OR_NULL(chip->svooc_sub_lcf_strategy)) {
+				voocphy_err("alloc svooc_sub_lcf_strategy error, rc=%ld", PTR_ERR(chip->svooc_sub_lcf_strategy));
+				oplus_chg_strategy_release(chip->svooc_sub_lcf_strategy);
+				chip->svooc_sub_lcf_strategy = NULL;
+				return -EINVAL;
+			}
+		}
+	}
+	voocphy_info("parse svooc_lcf_strategy succ\n");
+
+	return 0;
+}
+
 static int oplus_voocphy_parse_batt_curves(struct oplus_voocphy_manager *chip)
 {
 	struct device_node *node;
@@ -5631,7 +6011,7 @@ static int oplus_voocphy_parse_batt_curves(struct oplus_voocphy_manager *chip)
 	u32 data[BATT_SYS_ARRAY*7] = {0};
 	char buf[32];
 
-	node = chip->dev->of_node;
+	node = oplus_get_node_by_type(chip->dev->of_node);
 	chip->parallel_charge_support = of_property_read_bool(node, "parallel_charge_support");
 	voocphy_info("parallel_charge_support:%d\n", chip->parallel_charge_support);
 	if(chip->parallel_charge_support) {
@@ -5676,6 +6056,20 @@ static int oplus_voocphy_parse_batt_curves(struct oplus_voocphy_manager *chip)
 	chip->copycat_vooc_support = of_property_read_bool(node,
 	                                "oplus_spec,copycat_vooc_support");
 	voocphy_info("copycat_vooc_support = %d\n", chip->copycat_vooc_support);
+
+	rc = of_property_read_u32(node, "oplus,copycat-vooc-count",
+				&chip->copycat_vooc_count);
+	if (rc)
+		chip->copycat_vooc_count = 2;
+
+	voocphy_info("copycat_vooc_count = %d\n", chip->copycat_vooc_count);
+
+	rc = of_property_read_u32(node, "oplus_spec,copycat_vooc_accuracy_value",
+				&chip->copycat_vooc_accuracy_value);
+	if (rc)
+		chip->copycat_vooc_accuracy_value = 100;
+
+	voocphy_info("copycat_vooc_accuracy_value = %d\n", chip->copycat_vooc_accuracy_value);
 
 	rc = of_property_read_u32(node, "oplus,ovp_ctrl_cp_index",
 				&chip->ovp_ctrl_cpindex);
@@ -5788,6 +6182,15 @@ static int oplus_voocphy_parse_batt_curves(struct oplus_voocphy_manager *chip)
 		voocphy_dbg("oplus_spec,vooc_warm_soc_thr is %d\n", chip->vooc_warm_allow_soc);
 	}
 
+	rc = of_property_read_u32(node, "oplus_spec,vooc_little_cool_high_temp",
+	                          &chip->vooc_little_cool_high_temp);
+	if (rc) {
+		chip->vooc_little_cool_high_temp = -EINVAL;
+	} else {
+		voocphy_dbg("oplus_spec,vooc_little_cool_high_temp is %d\n", chip->vooc_little_cool_high_temp);
+	}
+	chip->vooc_little_cool_high_temp_default = chip->vooc_little_cool_high_temp;
+
 	rc = of_property_read_u32(node, "oplus_spec,vooc_multistep_initial_batt_temp",
 	                          &chip->vooc_multistep_initial_batt_temp);
 	if (rc) {
@@ -5795,159 +6198,6 @@ static int oplus_voocphy_parse_batt_curves(struct oplus_voocphy_manager *chip)
 	} else {
 		voocphy_info("oplus_spec,vooc_multistep_initial_batt_temp is %d\n",
 		             chip->vooc_multistep_initial_batt_temp);
-	}
-
-	rc = of_property_read_u32(node, "oplus_spec,vooc_strategy_normal_current",
-	                          &chip->vooc_strategy_normal_current);
-	if (rc) {
-		chip->vooc_strategy_normal_current = 0x03;
-	} else {
-		voocphy_info("oplus_spec,vooc_strategy_normal_current is %d\n",
-		             chip->vooc_strategy_normal_current);
-	}
-
-	rc = of_property_read_u32(node, "oplus_spec,vooc_strategy1_high_current0_vooc",
-	                          &chip->vooc_strategy1_high_current0_vooc);
-	if (rc) {
-		chip->vooc_strategy1_high_current0_vooc = chip->vooc_strategy1_high_current0;
-	} else {
-		voocphy_info("oplus_spec,vooc_strategy1_high_current0_vooc is %d\n",
-		             chip->vooc_strategy1_high_current0_vooc);
-	}
-
-	rc = of_property_read_u32(node, "oplus_spec,vooc_strategy1_high_current1_vooc",
-	                          &chip->vooc_strategy1_high_current1_vooc);
-	if (rc) {
-		chip->vooc_strategy1_high_current1_vooc = chip->vooc_strategy1_high_current1;
-	} else {
-		voocphy_info("oplus_spec,vooc_strategy1_high_current1_vooc is %d\n",
-		             chip->vooc_strategy1_high_current1_vooc);
-	}
-
-	rc = of_property_read_u32(node, "oplus_spec,vooc_strategy1_high_current2_vooc",
-	                          &chip->vooc_strategy1_high_current2_vooc);
-	if (rc) {
-		chip->vooc_strategy1_high_current2_vooc = chip->vooc_strategy1_high_current2;
-	} else {
-		voocphy_info("oplus_spec,vooc_strategy1_high_current2_vooc is %d\n",
-		             chip->vooc_strategy1_high_current2_vooc);
-	}
-
-	rc = of_property_read_u32(node, "oplus_spec,vooc_strategy1_low_current2_vooc",
-	                          &chip->vooc_strategy1_low_current2_vooc);
-	if (rc) {
-		chip->vooc_strategy1_low_current2_vooc = chip->vooc_strategy1_low_current2;
-	} else {
-		voocphy_info("oplus_spec,vooc_strategy1_low_current2_vooc is %d\n",
-		             chip->vooc_strategy1_low_current2_vooc);
-	}
-
-	rc = of_property_read_u32(node, "oplus_spec,vooc_strategy1_low_current1_vooc",
-	                          &chip->vooc_strategy1_low_current1_vooc);
-	if (rc) {
-		chip->vooc_strategy1_low_current1_vooc = chip->vooc_strategy1_low_current1;
-	} else {
-		voocphy_info("oplus_spec,vooc_strategy1_low_current1_vooc is %d\n",
-		             chip->vooc_strategy1_low_current1_vooc);
-	}
-
-	rc = of_property_read_u32(node, "oplus_spec,vooc_strategy1_low_current0_vooc",
-	                          &chip->vooc_strategy1_low_current0_vooc);
-	if (rc) {
-		chip->vooc_strategy1_low_current0_vooc = chip->vooc_strategy1_low_current0;
-	} else {
-		voocphy_info("oplus_spec,vooc_strategy1_low_current0_vooc is %d\n",
-		             chip->vooc_strategy1_low_current0_vooc);
-	}
-
-	rc = of_property_read_u32(node, "oplus_spec,vooc_strategy2_batt_up_temp1",
-	                          &chip->vooc_strategy2_batt_up_temp1);
-	if (rc) {
-		chip->vooc_strategy2_batt_up_temp1  = chip->vooc_multistep_initial_batt_temp;
-	} else {
-		voocphy_info("oplus_spec,vooc_strategy2_batt_up_temp1 is %d\n",
-		             chip->vooc_strategy2_batt_up_temp1);
-	}
-
-	rc = of_property_read_u32(node, "oplus_spec,vooc_strategy2_batt_up_down_temp2",
-	                          &chip->vooc_strategy2_batt_up_down_temp2);
-	if (rc) {
-		chip->vooc_strategy2_batt_up_down_temp2  = chip->vooc_multistep_initial_batt_temp;
-	} else {
-		voocphy_info("oplus_spec,vooc_strategy2_batt_up_down_temp2 is %d\n",
-		             chip->vooc_strategy2_batt_up_down_temp2);
-	}
-
-	rc = of_property_read_u32(node, "oplus_spec,vooc_strategy2_batt_up_temp3",
-	                          &chip->vooc_strategy2_batt_up_temp3);
-	if (rc) {
-		chip->vooc_strategy2_batt_up_temp3  = chip->vooc_multistep_initial_batt_temp;
-	} else {
-		voocphy_info("oplus_spec,vooc_strategy2_batt_up_temp3 is %d\n",
-		             chip->vooc_strategy2_batt_up_temp3);
-	}
-
-	rc = of_property_read_u32(node, "oplus_spec,vooc_strategy2_batt_up_down_temp4",
-	                          &chip->vooc_strategy2_batt_up_down_temp4);
-	if (rc) {
-		chip->vooc_strategy2_batt_up_down_temp4  = chip->vooc_multistep_initial_batt_temp;
-	} else {
-		voocphy_info("oplus_spec,vooc_strategy2_batt_up_down_temp4 is %d\n",
-		             chip->vooc_strategy2_batt_up_down_temp4);
-	}
-
-	rc = of_property_read_u32(node, "oplus_spec,vooc_strategy2_batt_up_temp5",
-	                          &chip->vooc_strategy2_batt_up_temp5);
-	if (rc) {
-		chip->vooc_strategy2_batt_up_temp5  = chip->vooc_multistep_initial_batt_temp;
-	} else {
-		voocphy_info("oplus_spec,vooc_strategy2_batt_up_temp5 is %d\n",
-		             chip->vooc_strategy2_batt_up_temp5);
-	}
-
-	rc = of_property_read_u32(node, "oplus_spec,vooc_strategy2_batt_up_temp6",
-	                          &chip->vooc_strategy2_batt_up_temp6);
-	if (rc) {
-		chip->vooc_strategy2_batt_up_temp6  = chip->vooc_multistep_initial_batt_temp;
-	} else {
-		voocphy_info("oplus_spec,vooc_strategy2_batt_up_temp6 is %d\n",
-		             chip->vooc_strategy2_batt_up_temp6);
-	}
-
-	rc = of_property_read_u32(node, "oplus_spec,vooc_strategy2_high0_current",
-	                          &chip->vooc_strategy2_high0_current);
-	if (rc) {
-		chip->vooc_strategy2_high0_current	= chip->vooc_strategy_normal_current;
-	} else {
-		voocphy_info("oplus_spec,vooc_strategy2_high0_current is %d\n",
-		             chip->vooc_strategy2_high0_current);
-	}
-
-	rc = of_property_read_u32(node, "oplus_spec,vooc_strategy2_high1_current",
-	                          &chip->vooc_strategy2_high1_current);
-	if (rc) {
-		chip->vooc_strategy2_high1_current	= chip->vooc_strategy_normal_current;
-	} else {
-		voocphy_info("oplus_spec,vooc_strategy2_high1_current is %d\n",
-		             chip->vooc_strategy2_high1_current);
-	}
-
-	rc = of_property_read_u32(node, "oplus_spec,vooc_strategy2_high2_current",
-	                          &chip->vooc_strategy2_high2_current);
-	if (rc) {
-		chip->vooc_strategy2_high2_current	= chip->vooc_strategy_normal_current;
-	} else {
-		voocphy_info("oplus_spec,vooc_strategy2_high2_current is %d\n",
-		             chip->vooc_strategy2_high2_current);
-	}
-
-	rc = of_property_read_u32(node, "oplus_spec,vooc_strategy2_high3_current",
-	                          &chip->vooc_strategy2_high3_current);
-	if (rc) {
-		chip->vooc_strategy2_high3_current	= chip->vooc_strategy_normal_current;
-	} else {
-		voocphy_info("oplus_spec,vooc_strategy2_high3_current is %d\n",
-		             chip->vooc_strategy2_high3_current);
 	}
 
 	rc = of_property_read_u32(node, "oplus_spec,vooc_low_soc", &chip->vooc_low_soc);
@@ -6020,48 +6270,6 @@ static int oplus_voocphy_parse_batt_curves(struct oplus_voocphy_manager *chip)
 	                               "oplus_spec,external_gauge_support");
 	voocphy_info("external_gauge_support = %d\n", chip->external_gauge_support);
 
-	rc = of_property_count_elems_of_size(node, "oplus_spec,svooc_cool_down_current_limit", sizeof(u32));
-	if (rc < 0) {
-		voocphy_info("Count svooc_cool_down_current_limit failed, rc=%d\n", rc);
-		chip->svooc_cool_down_num = 0;
-		return rc;
-	}
-
-	length = rc;
-
-	chip->svooc_cool_down_num = length;
-
-	voocphy_info("parse svooc_cool_down_current_limit, size=%d svooc_cool_down_num =%d\n", length, chip->svooc_cool_down_num);
-
-	rc = of_property_read_u32_array(node, "oplus_spec,svooc_cool_down_current_limit",
-	                                chip->svooc_cool_down_current_limit,
-	                                length);
-	if (rc < 0) {
-		voocphy_info("parse svooc_cool_down_current_limit failed, rc=%d\n", rc);
-		return rc;
-	}
-
-	rc = of_property_count_elems_of_size(node, "oplus_spec,vooc_cool_down_current_limit", sizeof(u32));
-	if (rc < 0) {
-		voocphy_info("Count vooc_cool_down_current_limit failed, rc=%d\n", rc);
-		chip->vooc_cool_down_num = 0;
-		return rc;
-	}
-
-	length = rc;
-
-	chip->vooc_cool_down_num = length;
-
-	voocphy_info("parse vooc_cool_down_current_limit, size=%d vooc_cool_down_num =%d\n", length, chip->vooc_cool_down_num);
-
-	rc = of_property_read_u32_array(node, "oplus_spec,vooc_cool_down_current_limit",
-	                                chip->vooc_cool_down_current_limit,
-	                                length);
-	if (rc < 0) {
-		voocphy_info("parse vooc_cool_down_current_limit failed, rc=%d\n", rc);
-		return rc;
-	}
-
 	rc = of_property_read_u32(node, "oplus_spec,fastchg_timeout_time_init",
 	                                &chip->fastchg_timeout_time_init);
 	if (rc < 0) {
@@ -6088,6 +6296,13 @@ static int oplus_voocphy_parse_batt_curves(struct oplus_voocphy_manager *chip)
 	if (rc < 0) {
 		voocphy_info("parse vooc_warm_full_voltage failed, rc=%d\n", rc);
 		chip->vooc_warm_full_voltage = -EINVAL;
+	}
+
+	rc = of_property_read_u32(node, "oplus_spec,vooc_little_cool_high_full_voltage",
+	                                &chip->vooc_little_cool_high_full_voltage);
+	if (rc < 0) {
+		voocphy_info("parse vooc_warm_full_voltage failed, rc=%d\n", rc);
+		chip->vooc_little_cool_high_full_voltage = -EINVAL;
 	}
 
 	rc = of_property_read_u32(node, "oplus_spec,vooc_1time_full_voltage",
@@ -6272,6 +6487,34 @@ static int oplus_voocphy_parse_batt_curves(struct oplus_voocphy_manager *chip)
 	}
 	voocphy_info("voocphy_freq_maxcore is %d\n", chip->voocphy_freq_maxcore);
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0))
+	length = 0;
+	rc = of_property_count_elems_of_size(node, "oplus_spec,voocphy_req_freq", sizeof(u32));
+	if (rc > 0 && rc < MAX_SUPPORT_CLUSTER) {
+		length = rc;
+		rc = of_property_read_u32_array(node, "oplus_spec,voocphy_req_freq", (u32 *)charger_boost_req_freq, length);
+		if (rc < 0) {
+			voocphy_info("read oplus_spec,voocphy_req_freq failed, rc=%d\n", rc);
+			length = 0;
+		}
+	} else {
+		voocphy_info("parse oplus_spec,voocphy_req_freq failed, rc=%d\n", rc);
+	}
+
+	if (length < 3) {
+		charger_boost_req_freq[0] = chip->voocphy_freq_mincore;
+		charger_boost_req_freq[1] = chip->voocphy_freq_midcore;
+		charger_boost_req_freq[2] = chip->voocphy_freq_maxcore;
+		length = 3;
+	}
+
+	for (i = 0; i< MAX_SUPPORT_CLUSTER; i++) {
+		if (i >= length)
+			charger_boost_req_freq[i] = charger_boost_req_freq[i - 1];
+		voocphy_info("charger_boost_req_freq[%d]=%d\n", i, charger_boost_req_freq[i]);
+	}
+#endif
+
 	rc = of_property_read_u32(node, "oplus_spec,voocphy_current_change_timeout",
 	                          &chip->voocphy_current_change_timeout);
 	if (rc) {
@@ -6292,19 +6535,6 @@ static int oplus_voocphy_parse_batt_curves(struct oplus_voocphy_manager *chip)
 		chip->voocphy_cp_max_ibus = 3200;
 	}
 	voocphy_info("voocphy_cp_max_ibus is %d\n", chip->voocphy_cp_max_ibus);
-	rc = of_property_read_u32(node, "oplus_spec,voocphy_svooc_cp_max_ibus",
-	                          &chip->voocphy_svooc_cp_max_ibus);
-	if (rc) {
-		chip->voocphy_svooc_cp_max_ibus = VOOCPHY_SVOOC_CP_MAX_IBUS_DEFAULT;
-	}
-	voocphy_info("voocphy_svooc_cp_max_ibus is %d\n", chip->voocphy_svooc_cp_max_ibus);
-	rc = of_property_read_u32(node, "oplus_spec,voocphy_vooc_cp_max_ibus",
-	                          &chip->voocphy_vooc_cp_max_ibus);
-	if (rc) {
-		chip->voocphy_vooc_cp_max_ibus = VOOCPHY_VOOC_CP_MAX_IBUS_DEFAULT;
-	}
-	voocphy_info("voocphy_vooc_cp_max_ibus is %d\n", chip->voocphy_vooc_cp_max_ibus);
-
 	rc = of_property_read_u32(node, "oplus_spec,voocphy_max_main_ibat", &chip->voocphy_max_main_ibat);
 	if (rc) {
 		chip->voocphy_max_main_ibat = 3600;
@@ -6329,9 +6559,40 @@ static int oplus_voocphy_parse_batt_curves(struct oplus_voocphy_manager *chip)
 	}
 	voocphy_info("batt_pwd_vol_thd1 is %d\n", chip->batt_pwd_vol_thd1);
 
+	rc = of_property_count_elems_of_size(node, "oplus_spec,soc_range", sizeof(s32));
+	if (rc < 0 || rc != BATT_SOC_90_TO_100 + 1) {
+		voocphy_info("soc_range failed, rc=%d\n", rc);
+		chip->soc_range_data[0] = -EINVAL;
+	} else {
+		length = rc;
+		rc = of_property_read_u32_array(node, "oplus_spec,soc_range", (s32 *)chip->soc_range_data, length);
+		if (rc) {
+			chg_err("Read oplus_spec,soc_range failed, rc=%d\n", rc);
+			chip->soc_range_data[0] = -EINVAL;
+		}
+	}
+
+	rc = of_property_count_elems_of_size(node, "oplus_spec,full_voltage", sizeof(u8));
+	if (rc == sizeof(chip->full_voltage)) {
+		length = rc / sizeof(u32);
+		rc = of_property_read_u32_array(node, "oplus_spec,full_voltage", (u32 *)chip->full_voltage, length);
+		if (rc) {
+			chg_err("read oplus_spec,full_voltage failed, rc=%d\n", rc);
+			memset(chip->full_voltage, 0, sizeof(chip->full_voltage));
+		}
+	} else {
+		voocphy_info("full_voltage failed, rc=%d\n", rc);
+		memset(chip->full_voltage, 0, sizeof(chip->full_voltage));
+	}
+	for (i = 0; i < VOOCPHY_BATT_TEMP_MAX; i++)
+		voocphy_info("%s_full_voltage 1time=%d, ntime=%d\n", temp_region_text[i],
+			     chip->full_voltage[i].vol_1time, chip->full_voltage[i].vol_ntime);
+
 	oplus_voocphy_parse_svooc_batt_curves(chip);
 
 	oplus_voocphy_parse_vooc_batt_curves(chip);
+
+	oplus_voocphy_parse_lcf_strategy(chip);
 
 	return 0;
 }
@@ -6522,6 +6783,11 @@ void update_highcap_mask(struct cpumask *cpu_highcap_mask)
 
 static int oplus_voocphy_init(struct oplus_voocphy_manager *chip)
 {
+	if (NULL == chip) {
+		chg_err("chip is NULL");
+		return -EINVAL;
+	}
+
 	init_completion(&vooc_init_check_ack);
 	oplus_voocphy_parse_dt(chip);
 	oplus_voocphy_parse_batt_curves(chip);
@@ -6632,6 +6898,26 @@ static void oplus_apvphy_set_switch_curr_limit(struct device *dev, int curr)
 	}
 }
 
+static void oplus_apvphy_set_bal_curr_limit(struct device *dev, int curr)
+{
+	int target_curr;
+	struct oplus_voocphy_manager *chip = dev_get_drvdata(dev);
+
+	if (!curr)
+		target_curr = chip->current_default;
+
+	target_curr = curr / VOOC_CURR_STEP;
+	if (target_curr < VOOC_MIN_CURR)
+		target_curr = VOOC_MIN_CURR;
+
+	voocphy_info("set target curr=%d\n", target_curr);
+	if (chip->current_spec != target_curr) {
+		chip->current_spec = target_curr;
+		if (!chip->ap_need_change_current)
+			chip->ap_need_change_current = oplus_voocphy_set_fastchg_current(chip);
+	}
+}
+
 static void oplus_apvphy_set_chg_auto_mode(struct device *dev, bool enable)
 {
 	struct oplus_voocphy_manager *chip = dev_get_drvdata(dev);
@@ -6666,8 +6952,7 @@ static void oplus_apvphy_switch_chg_mode(struct device *dev, int mode)
 	voocphy_info("switch charger mode: %s\n", mode ? "vooc" : "normal");
 
 	if (mode == 1) {
-		if (chip->fastchg_to_normal
-		    || (!oplus_voocphy_get_real_fastchg_allow(chip)
+		if ((!oplus_voocphy_get_real_fastchg_allow(chip)
 		    && chip->fastchg_dummy_start) || chip->user_exit_fastchg) {
 			voocphy_info(" not allow to fastchg [%d, %d, %d]\n",
 				     chip->fastchg_to_normal,
@@ -6706,6 +6991,8 @@ static void oplus_apvphy_switch_chg_mode(struct device *dev, int mode)
 		voocphy_cpufreq_init(chip);
 		oplus_voocphy_pm_qos_update(400);
 		chip->vbus_adjust_cnt = 0;
+		chip->eis_status = EIS_STATUS_DISABLE;
+		chip->eis_copycat_detect_cnt = 0;
 		oplus_voocphy_init_vooc(chip);
 		oplus_voocphy_reset_ibus_trouble_flag();
 		oplus_voocphy_slave_init_vooc(chip);
@@ -6755,6 +7042,18 @@ static void oplus_apvphy_disconnect_detect(struct device *dev)
 
 	cancel_delayed_work(&chip->check_chg_out_work);
 	oplus_voocphy_check_chg_out_work_func(chip);
+}
+
+static void oplus_apvphy_set_ap_fastchg_allow(struct device *dev, int allow, bool dummy)
+{
+	struct oplus_voocphy_manager *chip = dev_get_drvdata(dev);
+
+	if (chip->ap_control_allow) {
+		chg_err(" allow:%d, dummy:%d\n", allow, dummy);
+		chip->oplus_ap_fastchg_allow = allow;
+		if (dummy)
+			g_voocphy_chip->fastchg_notify_status = FAST_NOTIFY_DUMMY_START;
+	}
 }
 
 static int oplus_apvphy_get_fastchg_type(struct device *dev)
@@ -6851,6 +7150,21 @@ static bool oplus_apvphy_get_retry_flag(struct device *dev)
 	return chip->retry_flag;
 }
 
+static int oplus_apvphy_get_frame_head(struct device *dev, int *head)
+{
+	struct oplus_voocphy_manager *chip;
+
+	if (dev == NULL)
+		return -ENODEV;
+
+	chip = dev_get_drvdata(dev);
+	if (!chip)
+		return -ENODEV;
+
+	*head = chip->frame_head;
+	return 0;
+}
+
 int oplus_is_voocphy_charging(struct device *dev)
 {
 	struct oplus_voocphy_manager *chip = dev_get_drvdata(dev);
@@ -6928,6 +7242,7 @@ int oplus_voocphy_get_bcc_min_curr(struct device *dev)
 	int svooc_current_factor = 1;
 	int current_min;
 	int current_bcc_min;
+	int exit_curr = 0;
 
 	if (!chip) {
 		chg_err("voocphy_get_bcc_min_curr g_charger_chip or chip is null\n");
@@ -6948,6 +7263,10 @@ int oplus_voocphy_get_bcc_min_curr(struct device *dev)
 	}
 
 	current_bcc_min = current_bcc_min / BCC_CURRENT_ROUNDING_BY * BCC_CURRENT_ROUNDING_BY;
+	exit_curr = oplus_voocphy_get_bcc_exit_curr(dev) / 100;
+	if (current_bcc_min < exit_curr)
+		current_bcc_min = exit_curr;
+
 	return current_bcc_min;
 }
 
@@ -7010,10 +7329,13 @@ static struct hw_vphy_info ap_vinf = {
 	.vphy_get_batt_curve_current	= oplus_apvphy_get_batt_curve_current,
 	.vphy_reset_sleep		= oplus_chg_vphy_reset_sleep,
 	.vphy_set_switch_curr_limit	= oplus_apvphy_set_switch_curr_limit,
+	.vphy_set_bal_curr_limit	= oplus_apvphy_set_bal_curr_limit,
 	.vphy_clear_variables		= oplus_voocphy_clear_variables,
 	.vphy_set_ucp_time		= oplus_voocphy_set_ucp_time,
 	.vphy_get_real_batt_curve_current	= oplus_apvphy_get_real_batt_curve_current,
 	.vphy_get_retry_flag		= oplus_apvphy_get_retry_flag,
+	.vphy_set_fastchg_ap_allow	= oplus_apvphy_set_ap_fastchg_allow,
+	.vphy_get_frame_head		= oplus_apvphy_get_frame_head,
 };
 
 #if IS_ENABLED(CONFIG_OPLUS_DYNAMIC_CONFIG_CHARGER)

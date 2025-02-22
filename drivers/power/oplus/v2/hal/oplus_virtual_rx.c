@@ -856,7 +856,7 @@ static int oplus_chg_vr_set_tx_enable(struct oplus_chg_ic_dev *ic_dev, bool enab
 	return rc;
 }
 
-static int oplus_chg_vr_set_tx_start(struct oplus_chg_ic_dev *ic_dev)
+static int oplus_chg_vr_set_tx_start(struct oplus_chg_ic_dev *ic_dev, bool start)
 {
 	struct oplus_virtual_rx_ic *vr;
 	int i;
@@ -875,7 +875,7 @@ static int oplus_chg_vr_set_tx_start(struct oplus_chg_ic_dev *ic_dev)
 			continue;
 		}
 		rc = oplus_chg_ic_func(vr->child_list[i].ic_dev,
-			OPLUS_IC_FUNC_RX_SET_TRX_START);
+			OPLUS_IC_FUNC_RX_SET_TRX_START, start);
 		if (rc < 0)
 			chg_err("child ic[%d] set_tx_start error, rc=%d\n", i, rc);
 		break;
@@ -912,7 +912,7 @@ static int oplus_chg_vr_get_tx_status(struct oplus_chg_ic_dev *ic_dev, u8 *statu
 	return rc;
 }
 
-static int oplus_chg_vr_get_tx_err(struct oplus_chg_ic_dev *ic_dev, u8 *err)
+static int oplus_chg_vr_get_tx_err(struct oplus_chg_ic_dev *ic_dev, u32 *err)
 {
 	struct oplus_virtual_rx_ic *vr;
 	int i;
@@ -996,7 +996,7 @@ static int oplus_chg_vr_set_headroom(struct oplus_chg_ic_dev *ic_dev, int val)
 	return rc;
 }
 
-static int oplus_chg_vr_send_match_q(struct oplus_chg_ic_dev *ic_dev, u8 data)
+static int oplus_chg_vr_send_match_q(struct oplus_chg_ic_dev *ic_dev, u8 data[])
 {
 	struct oplus_virtual_rx_ic *vr;
 	int i;
@@ -1024,7 +1024,7 @@ static int oplus_chg_vr_send_match_q(struct oplus_chg_ic_dev *ic_dev, u8 data)
 	return rc;
 }
 
-static int oplus_chg_vr_set_fod_parm(struct oplus_chg_ic_dev *ic_dev, u8 data[], int len)
+static int oplus_chg_vr_set_fod_parm(struct oplus_chg_ic_dev *ic_dev, u8 data[], int len, int mode, int magcvr)
 {
 	struct oplus_virtual_rx_ic *vr;
 	int i;
@@ -1043,7 +1043,7 @@ static int oplus_chg_vr_set_fod_parm(struct oplus_chg_ic_dev *ic_dev, u8 data[],
 			continue;
 		}
 		rc = oplus_chg_ic_func(vr->child_list[i].ic_dev,
-			OPLUS_IC_FUNC_RX_SET_FOD_PARM, data, len);
+			OPLUS_IC_FUNC_RX_SET_FOD_PARM, data, len, mode, magcvr);
 		if (rc < 0)
 			chg_err("child ic[%d] set_fod_parm error, rc=%d\n", i, rc);
 		break;
@@ -1052,7 +1052,7 @@ static int oplus_chg_vr_set_fod_parm(struct oplus_chg_ic_dev *ic_dev, u8 data[],
 	return rc;
 }
 
-static int oplus_chg_vr_send_msg(struct oplus_chg_ic_dev *ic_dev, unsigned char msg[], int len)
+static int oplus_chg_vr_send_msg(struct oplus_chg_ic_dev *ic_dev, unsigned char msg[], int len, int raw_data)
 {
 	struct oplus_virtual_rx_ic *vr;
 	int i;
@@ -1071,7 +1071,7 @@ static int oplus_chg_vr_send_msg(struct oplus_chg_ic_dev *ic_dev, unsigned char 
 			continue;
 		}
 		rc = oplus_chg_ic_func(vr->child_list[i].ic_dev,
-			OPLUS_IC_FUNC_RX_SEND_MSG, msg, len);
+			OPLUS_IC_FUNC_RX_SEND_MSG, msg, len, raw_data);
 		if (rc < 0)
 			chg_err("child ic[%d] send_msg error, rc=%d\n", i, rc);
 		break;
@@ -1277,6 +1277,118 @@ static int oplus_chg_vr_get_event_code(struct oplus_chg_ic_dev *ic_dev,  enum op
 	return rc;
 }
 
+static int oplus_chg_vr_get_bridge_mode(struct oplus_chg_ic_dev *ic_dev, int *mode)
+{
+	struct oplus_virtual_rx_ic *vr;
+	int i;
+	int rc = 0;
+
+	if (ic_dev == NULL) {
+		chg_err("oplus_chg_ic_dev is NULL\n");
+		return -ENODEV;
+	}
+
+	vr = oplus_chg_ic_get_drvdata(ic_dev);
+	for (i = 0; i < vr->child_num; i++) {
+		if (!func_is_support(&vr->child_list[i],
+				     OPLUS_IC_FUNC_RX_GET_BRIDGE_MODE)) {
+			rc = (rc == 0) ? -ENOTSUPP : rc;
+			continue;
+		}
+		rc = oplus_chg_ic_func(vr->child_list[i].ic_dev,
+			OPLUS_IC_FUNC_RX_GET_BRIDGE_MODE, mode);
+		if (rc < 0)
+			chg_err("child ic[%d] get_bridge_mode error, rc=%d\n", i, rc);
+		break;
+	}
+
+	return rc;
+}
+
+static int oplus_chg_vr_set_insert_disable(struct oplus_chg_ic_dev *ic_dev, bool en)
+{
+	struct oplus_virtual_rx_ic *vr;
+	int i;
+	int rc = 0;
+
+	if (ic_dev == NULL) {
+		chg_err("oplus_chg_ic_dev is NULL\n");
+		return -ENODEV;
+	}
+
+	vr = oplus_chg_ic_get_drvdata(ic_dev);
+	for (i = 0; i < vr->child_num; i++) {
+		if (!func_is_support(&vr->child_list[i],
+				     OPLUS_IC_FUNC_RX_DIS_INSERT)) {
+			rc = (rc == 0) ? -ENOTSUPP : rc;
+			continue;
+		}
+		rc = oplus_chg_ic_func(vr->child_list[i].ic_dev,
+			OPLUS_IC_FUNC_RX_DIS_INSERT, en);
+		if (rc < 0)
+			chg_err("child ic[%d] set_insert_disable error, rc=%d\n", i, rc);
+		break;
+	}
+
+	return rc;
+}
+
+static int oplus_chg_vr_standby_config(struct oplus_chg_ic_dev *ic_dev, bool en)
+{
+	struct oplus_virtual_rx_ic *vr;
+	int i;
+	int rc = 0;
+
+	if (ic_dev == NULL) {
+		chg_err("oplus_chg_ic_dev is NULL\n");
+		return -ENODEV;
+	}
+
+	vr = oplus_chg_ic_get_drvdata(ic_dev);
+	for (i = 0; i < vr->child_num; i++) {
+		if (!func_is_support(&vr->child_list[i],
+				     OPLUS_IC_FUNC_RX_STANDBY_CONFIG)) {
+			rc = (rc == 0) ? -ENOTSUPP : rc;
+			continue;
+		}
+		rc = oplus_chg_ic_func(vr->child_list[i].ic_dev,
+			OPLUS_IC_FUNC_RX_STANDBY_CONFIG, en);
+		if (rc < 0)
+			chg_err("child ic[%d] standby_config error, rc=%d\n", i, rc);
+		break;
+	}
+
+	return rc;
+}
+
+static int oplus_chg_vr_set_comu(struct oplus_chg_ic_dev *ic_dev, int comu)
+{
+	struct oplus_virtual_rx_ic *vr;
+	int i;
+	int rc = 0;
+
+	if (ic_dev == NULL) {
+		chg_err("oplus_chg_ic_dev is NULL\n");
+		return -ENODEV;
+	}
+
+	vr = oplus_chg_ic_get_drvdata(ic_dev);
+	for (i = 0; i < vr->child_num; i++) {
+		if (!func_is_support(&vr->child_list[i],
+				     OPLUS_IC_FUNC_RX_SET_COMU)) {
+			rc = (rc == 0) ? -ENOTSUPP : rc;
+			continue;
+		}
+		rc = oplus_chg_ic_func(vr->child_list[i].ic_dev,
+			OPLUS_IC_FUNC_RX_SET_COMU, comu);
+		if (rc < 0)
+			chg_err("child ic[%d] set_comu error, rc=%d\n", i, rc);
+		break;
+	}
+
+	return rc;
+}
+
 static void *oplus_chg_vr_get_func(struct oplus_chg_ic_dev *ic_dev,
 				   enum oplus_chg_ic_func func_id)
 {
@@ -1428,6 +1540,22 @@ static void *oplus_chg_vr_get_func(struct oplus_chg_ic_dev *ic_dev,
 	case OPLUS_IC_FUNC_RX_GET_EVENT_CODE:
 		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_RX_GET_EVENT_CODE,
 			    oplus_chg_vr_get_event_code);
+		break;
+	case OPLUS_IC_FUNC_RX_GET_BRIDGE_MODE:
+		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_RX_GET_BRIDGE_MODE,
+			    oplus_chg_vr_get_bridge_mode);
+		break;
+	case OPLUS_IC_FUNC_RX_DIS_INSERT:
+		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_RX_DIS_INSERT,
+			    oplus_chg_vr_set_insert_disable);
+		break;
+	case OPLUS_IC_FUNC_RX_STANDBY_CONFIG:
+		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_RX_STANDBY_CONFIG,
+			    oplus_chg_vr_standby_config);
+		break;
+	case OPLUS_IC_FUNC_RX_SET_COMU:
+		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_RX_SET_COMU,
+			    oplus_chg_vr_set_comu);
 		break;
 	default:
 		chg_err("this func(=%d) is not supported\n", func_id);

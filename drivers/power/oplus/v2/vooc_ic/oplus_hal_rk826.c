@@ -52,6 +52,8 @@
 #include <oplus_chg_ic.h>
 #include <oplus_hal_vooc.h>
 
+#ifndef CONFIG_DISABLE_OPLUS_FUNCTION
+
 struct rk826_chip {
 	struct i2c_client *client;
 	struct device *dev;
@@ -753,7 +755,7 @@ int Download_00_code(struct rk826_chip *chip)
 	u8 transfer_buf[TRANSFER_LIMIT];
 	u32 onetime_size = TRANSFER_LIMIT - 8;
 	u32 index = 0;
-	u32 offset = 0;
+	/* u32 offset = 0;*/
 	int ret = 0;
 	int size = 16384; /* erase 16kb */
 
@@ -765,10 +767,10 @@ int Download_00_code(struct rk826_chip *chip)
 		if (size >= onetime_size) {
 			/* memcpy(transfer_buf, buf + offset, onetime_size); */
 			size -= onetime_size;
-			offset += onetime_size;
+			/* offset += onetime_size; */
 		} else {
 			/* memcpy(transfer_buf, buf + offset, size); */
-			offset += size;
+			/* offset += size; */
 			size = 0;
 		}
 		*((u32 *)(transfer_buf + onetime_size)) = index;
@@ -790,7 +792,7 @@ int Download_ff_code(struct rk826_chip *chip)
 	u8 transfer_buf[TRANSFER_LIMIT];
 	u32 onetime_size = TRANSFER_LIMIT - 8;
 	u32 index = 0;
-	u32 offset = 0;
+	/*  u32 offset = 0; */
 	int ret = 0;
 	int size = 16384; /* erase 16kb */
 	chg_debug("size: %d\n", size);
@@ -801,10 +803,10 @@ int Download_ff_code(struct rk826_chip *chip)
 		if (size >= onetime_size) {
 			/* memcpy(transfer_buf, buf + offset, onetime_size); */
 			size -= onetime_size;
-			offset += onetime_size;
+			/*  offset += onetime_size; */
 		} else {
 			/* memcpy(transfer_buf, buf + offset, size); */
-			offset += size;
+			/*  offset += size; */
 			size = 0;
 		}
 		*((u32 *)(transfer_buf + onetime_size)) = index;
@@ -2059,8 +2061,12 @@ static int init_voocbin_proc(struct rk826_chip *chip)
 	return 0;
 }
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0))
+static int rk826_driver_probe(struct i2c_client *client)
+#else
 static int rk826_driver_probe(struct i2c_client *client,
 			      const struct i2c_device_id *id)
+#endif
 {
 	struct rk826_chip *chip;
 	struct device_node *node = client->dev.of_node;
@@ -2238,3 +2244,5 @@ oplus_chg_module_register(rk826_driver);
 
 MODULE_DESCRIPTION("Driver for oplus vooc rk826 fast mcu");
 MODULE_LICENSE("GPL v2");
+
+#endif /*CONFIG_DISABLE_OPLUS_FUNCTION*/

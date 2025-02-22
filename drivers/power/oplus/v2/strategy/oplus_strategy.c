@@ -113,6 +113,48 @@ oplus_chg_strategy_alloc_by_node(const char *name, struct device_node *node)
 	return strategy;
 }
 
+#if IS_ENABLED(CONFIG_OPLUS_DYNAMIC_CONFIG_CHARGER)
+struct oplus_chg_strategy *
+oplus_chg_strategy_alloc_by_param_head(const char *name, const char *node_name, struct oplus_param_head *head)
+{
+	struct oplus_chg_strategy *strategy;
+	struct oplus_chg_strategy_desc *desc;
+
+	if (name == NULL) {
+		chg_err("name is NULL\n");
+		return NULL;
+	}
+	if (node_name == NULL) {
+		chg_err("node_name is NULL\n");
+		return NULL;
+	}
+	if (head == NULL) {
+		chg_err("head is NULL\n");
+		return NULL;
+	}
+
+	desc = strategy_desc_find_by_name(name);
+	if (desc == NULL) {
+		chg_err("No strategy with name %s was found\n", name);
+		return NULL;
+	}
+
+	if (desc->strategy_alloc_by_param_head == NULL) {
+		chg_err("%s: strategy_alloc_by_param_head method not found\n", name);
+		return NULL;
+	}
+
+	strategy = desc->strategy_alloc_by_param_head(node_name, head);
+	if (IS_ERR_OR_NULL(strategy)) {
+		chg_err("%s strategy alloc error, rc=%ld\n", name, PTR_ERR(strategy));
+		return NULL;
+	}
+	strategy->desc = desc;
+
+	return strategy;
+}
+#endif
+
 int oplus_chg_strategy_release(struct oplus_chg_strategy *strategy)
 {
 	if (strategy == NULL) {
@@ -160,6 +202,39 @@ int oplus_chg_strategy_get_data(struct oplus_chg_strategy *strategy, void *ret)
 	}
 
 	return strategy->desc->strategy_get_data(strategy, ret);
+}
+
+int oplus_chg_strategy_set_process_data(struct oplus_chg_strategy *strategy, const char *type, unsigned long arg)
+{
+	if (strategy == NULL) {
+		chg_err("strategy is NULL\n");
+		return -EINVAL;
+	}
+	if (type == NULL) {
+		chg_err("type is NULL\n");
+		return -EINVAL;
+	}
+	if (!strategy->desc || !strategy->desc->strategy_set_process_data)
+		return -ENOTSUPP;
+
+	return strategy->desc->strategy_set_process_data(strategy, type, arg);
+}
+
+int oplus_chg_strategy_get_metadata(struct oplus_chg_strategy *strategy, void *ret)
+{
+	if (strategy == NULL) {
+		chg_err("strategy is NULL\n");
+		return -EINVAL;
+	}
+	if (ret == NULL) {
+		chg_err("ret is NULL\n");
+		return -EINVAL;
+	}
+
+	if (!strategy->desc || !strategy->desc->strategy_get_metadata)
+		return -ENOTSUPP;
+
+	return strategy->desc->strategy_get_metadata(strategy, ret);
 }
 
 int oplus_chg_strategy_register(struct oplus_chg_strategy_desc *desc)
@@ -232,11 +307,19 @@ int oplus_chg_strategy_read_data(struct device *dev,
 
 extern int cgcl_strategy_register(void);
 extern int puc_strategy_register(void);
+extern int lcf_strategy_register(void);
+extern int puc2_strategy_register(void);
+extern int inr_strategy_register(void);
+extern int ddrc_strategy_register(void);
 
 static __init int oplus_chg_strategy_module_init(void)
 {
 	cgcl_strategy_register();
 	puc_strategy_register();
+	lcf_strategy_register();
+	puc2_strategy_register();
+	inr_strategy_register();
+	ddrc_strategy_register();
 
 	return 0;
 }

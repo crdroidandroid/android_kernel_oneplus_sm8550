@@ -1698,7 +1698,7 @@ static const struct oplus_mms_desc oplus_mms_parallel_desc = {
 };
 
 static void oplus_switch_comm_subs_callback(struct mms_subscribe *subs,
-	enum mms_msg_type type, u32 id)
+	enum mms_msg_type type, u32 id, bool sync)
 {
 	switch (type) {
 	case MSG_TYPE_ITEM:
@@ -1732,7 +1732,7 @@ static void oplus_switch_subscribe_comm_topic(struct oplus_mms *topic,
 }
 
 static void oplus_switch_wired_subs_callback(struct mms_subscribe *subs,
-	enum mms_msg_type type, u32 id)
+	enum mms_msg_type type, u32 id, bool sync)
 {
 	struct oplus_parallel_chip *chip = subs->priv_data;
 	union mms_msg_data data = { 0 };
@@ -1787,7 +1787,7 @@ static void oplus_switch_subscribe_wired_topic(struct oplus_mms *topic,
 }
 
 static void oplus_switch_vooc_subs_callback(struct mms_subscribe *subs,
-	enum mms_msg_type type, u32 id)
+	enum mms_msg_type type, u32 id, bool sync)
 {
 	switch (type) {
 	case MSG_TYPE_ITEM:
@@ -1818,7 +1818,7 @@ static void oplus_switch_subscribe_vooc_topic(struct oplus_mms *topic,
 }
 
 static void oplus_switch_gauge_subs_callback(struct mms_subscribe *subs,
-	enum mms_msg_type type, u32 id)
+	enum mms_msg_type type, u32 id, bool sync)
 {
 	switch (type) {
 	case MSG_TYPE_TIMER:
@@ -1845,7 +1845,7 @@ static void oplus_switch_subscribe_gauge_topic(struct oplus_mms *topic,
 }
 
 static void oplus_switch_main_gauge_subs_callback(struct mms_subscribe *subs,
-	enum mms_msg_type type, u32 id)
+	enum mms_msg_type type, u32 id, bool sync)
 {
 	switch (type) {
 	case MSG_TYPE_TIMER:
@@ -1906,7 +1906,7 @@ static void oplus_switch_subscribe_main_gauge_topic(struct oplus_mms *topic,
 }
 
 static void oplus_switch_sub_gauge_subs_callback(struct mms_subscribe *subs,
-	enum mms_msg_type type, u32 id)
+	enum mms_msg_type type, u32 id, bool sync)
 {
 	switch (type) {
 	case MSG_TYPE_TIMER:

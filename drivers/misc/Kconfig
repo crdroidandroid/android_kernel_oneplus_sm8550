@@ -559,11 +559,6 @@ config OPLUS_GPIO
     help
       define this config to control oplus gpio.
 
-config HAPTIC_FEEDBACK
-    tristate "Haptic driver feedback"
-    help
-      This option enables support for Haptic Driver Feedback.
-
 source "drivers/misc/c2port/Kconfig"
 source "drivers/misc/eeprom/Kconfig"
 source "drivers/misc/cb710/Kconfig"
@@ -583,4 +578,5 @@ source "drivers/misc/uacce/Kconfig"
 source "drivers/misc/pvpanic/Kconfig"
 source "drivers/misc/qrc/Kconfig"
 source "drivers/misc/tri_state_key/Kconfig"
+source "drivers/misc/aw8697_haptic/Kconfig"
 endmenu

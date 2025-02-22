@@ -417,6 +417,8 @@
 #define SC8547_ADC_RATE_CONTINOUS           0
 #define SC8547_ADC_RATE_ONESHOT             1
 
+#define SC8547_ADC_FREEZE_MASK              0x20
+
 #define SC8547_ADC_DONE_STAT_MASK           0x04
 #define SC8547_ADC_DONE_STAT_SHIFT          2
 
@@ -756,6 +758,7 @@
 
 
 #define SC8547_REG_3A						0x3A
+#define SC8547_REG_34						0x34
 
 /* Register 3Ch */
 #define SC8547_REG_3C                       0x3C
@@ -764,7 +767,10 @@
 #define SC8547_VBUS_EN_RANGE_ENABLE         0
 #define SC8547_VBUS_EN_RANGE_DISABLE        1
 
+#define SC8547_REG_CC                       0xCC
+
 #define SC8547A_DEVICE_ID 0x67
+#define SC8547D_DEVICE_ID 0x49
 #define GET_VBAT_PREDATA_DEFAULT (0x64 << SC8547_DATA_H_SHIFT) | 0x02;
 #define EXEC_TIME_THR	1500
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0))

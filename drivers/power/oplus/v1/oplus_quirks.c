@@ -243,7 +243,7 @@ int oplus_quirks_keep_connect_status(void) {
 	if(oplus_is_vooc_project() == DUAL_BATT_150W || oplus_is_vooc_project() == DUAL_BATT_240W) {
 		if (chip->keep_connect) {
 			chg_err("keep_connect!:last_plugin_status:%d, keep_connect:%d, keep_connect_jiffies:%lu, jiffies:%lu\n",
-					chip->last_plugin_status, chip->keep_connect, chip->keep_connect_jiffies, jiffies);
+					atomic_read(&chip->last_plugin_status), chip->keep_connect, chip->keep_connect_jiffies, jiffies);
 			return 1;
 		}
 	}

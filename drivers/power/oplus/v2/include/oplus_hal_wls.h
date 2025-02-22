@@ -29,14 +29,14 @@ int oplus_chg_wls_rx_get_rx_mode(struct oplus_chg_ic_dev *rx_ic, enum oplus_chg_
 int oplus_chg_wls_rx_set_rx_mode(struct oplus_chg_ic_dev *rx_ic, enum oplus_chg_wls_rx_mode rx_mode);
 int oplus_chg_wls_rx_set_dcdc_enable(struct oplus_chg_ic_dev *rx_ic, bool en);
 int oplus_chg_wls_rx_set_trx_enable(struct oplus_chg_ic_dev *rx_ic, bool en);
-int oplus_chg_wls_rx_set_trx_start(struct oplus_chg_ic_dev *rx_ic);
+int oplus_chg_wls_rx_set_trx_start(struct oplus_chg_ic_dev *rx_ic, bool start);
 int oplus_chg_wls_rx_get_trx_status(struct oplus_chg_ic_dev *rx_ic, u8 *status);
-int oplus_chg_wls_rx_get_trx_err(struct oplus_chg_ic_dev *rx_ic, u8 *err);
+int oplus_chg_wls_rx_get_trx_err(struct oplus_chg_ic_dev *rx_ic, u32 *err);
 int oplus_chg_wls_get_headroom(struct oplus_chg_ic_dev *rx_ic, int *val);
 int oplus_chg_wls_set_headroom(struct oplus_chg_ic_dev *rx_ic, int val);
-int oplus_chg_wls_rx_send_match_q(struct oplus_chg_ic_dev *rx_ic, u8 data);
-int oplus_chg_wls_rx_set_fod_parm(struct oplus_chg_ic_dev *rx_ic, u8 buf[], int len);
-int oplus_chg_wls_rx_send_msg_raw(struct oplus_chg_ic_dev *rx_ic, u8 buf[], int len);
+int oplus_chg_wls_rx_send_match_q(struct oplus_chg_ic_dev *rx_ic, u8 data[]);
+int oplus_chg_wls_rx_set_fod_parm(struct oplus_chg_ic_dev *rx_ic, u8 buf[], int len, int mode, int magcvr);
+int oplus_chg_wls_rx_send_msg_raw(struct oplus_chg_ic_dev *rx_ic, u8 buf[], int len, int raw_data);
 int oplus_chg_wls_rx_register_msg_callback(struct oplus_chg_ic_dev *rx_ic, void *data, void (*call_back)(void *, u8[]));
 int oplus_chg_wls_rx_get_rx_version(struct oplus_chg_ic_dev *rx_ic, u32 *version);
 int oplus_chg_wls_rx_get_trx_version(struct oplus_chg_ic_dev *rx_ic, u32 *version);
@@ -44,6 +44,10 @@ int oplus_chg_wls_rx_upgrade_firmware_by_buf_raw(struct oplus_chg_ic_dev *rx_ic,
 int oplus_chg_wls_rx_upgrade_firmware_by_img_raw(struct oplus_chg_ic_dev *rx_ic);
 int oplus_chg_wls_rx_connect_check(struct oplus_chg_ic_dev *rx_ic);
 int oplus_chg_wls_rx_get_event_code(struct oplus_chg_ic_dev *rx_ic, enum oplus_chg_wls_event_code *code);
+int oplus_chg_wls_rx_get_bridge_mode(struct oplus_chg_ic_dev *rx_ic, int *mode);
+int oplus_chg_wls_rx_set_insert_disable(struct oplus_chg_ic_dev *rx_ic, bool en);
+int oplus_chg_wls_rx_standby_config(struct oplus_chg_ic_dev *rx_ic, bool en);
+int oplus_chg_wls_rx_set_comu(struct oplus_chg_ic_dev *rx_ic, int coum);
 
 /*wls nor APIs*/
 int oplus_chg_wls_nor_set_input_enable(struct oplus_chg_ic_dev *nor_ic, bool en);

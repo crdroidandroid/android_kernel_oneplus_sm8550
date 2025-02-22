@@ -213,24 +213,4 @@
 #define ERROR_INFO_NUM 16
 #define ERROR_INFO_LEN 4
 #define VALID_ERROR_INFO_BITS 0x7fff
-
-const char *adapter_error_info[16] = {
-	"adapter output OVP!",
-	"adapter outout UVP!",
-	"adapter output OCP!",
-	"adapter output SCP!",
-	"adapter USB OTP!",
-	"adapter inside OTP!",
-	"adapter CCOVP!",
-	"adapter D-OVP!",
-	"adapter D+OVP!",
-	"adapter input OVP!",
-	"adapter input UVP!",
-	"adapter drain over current!",
-	"adapter input current loss!",
-	"adapter CRC error!",
-	"adapter watchdog timeout!",
-	"invalid msg!",
-};
-
 #endif /*_OPLUS_SC8547A_H_*/

@@ -44,18 +44,9 @@
 #include <linux/version.h>
 
 #include "oplus_tri_key.h"
+#include "tri_key_exception.h"
+#include "tri_key_common_api.h"
 
-#define TRI_KEY_DEVICE "oplus,hall_tri_state_key"
-#define TRI_KEY_TAG                  "[tri_state_key] "
-#define TRI_KEY_ERR(fmt, args...)\
-	pr_err(TRI_KEY_TAG" %s : "fmt, __func__, ##args)
-#define TRI_KEY_LOG(fmt, args...)\
-	pr_err(TRI_KEY_TAG" %s : "fmt, __func__, ##args)
-#define TRI_KEY_DEBUG(fmt, args...)\
-	do {\
-		if (tri_key_debug == LEVEL_DEBUG)\
-			pr_info(TRI_KEY_TAG " %s: " fmt, __func__, ##args);\
-	} while (0)
 enum {
 	MODE_UNKNOWN,
 	MODE_MUTE,
@@ -86,7 +77,6 @@ static int last_position = -1;
 static int last_interf = -1;
 static int interf_count;
 static int time = 1;
-unsigned int tri_key_debug;
 
 static short tol0 = 15;
 static short tol2 = 40;
@@ -266,9 +256,16 @@ int oplus_hall_update_threshold(unsigned int id, int position,
 static int threeaxis_hall_update_threshold(unsigned int id, int position,
 					short lowthd, short highthd, struct dhall_data_xyz *data, int interf)
 {
+	int flag = interf;
+
 	if (!g_the_chip)
 		return -EINVAL;
 
+	if (g_the_chip->threeaxis_calib_data[0] < 0) {
+		flag = 1;
+	} else {
+		flag = 0;
+	}
 	switch (id) {
 	case DHALL_0:
 		fallthrough;
@@ -281,7 +278,7 @@ static int threeaxis_hall_update_threshold(unsigned int id, int position,
 			return -EINVAL;
 		} else {
 			g_the_chip->threeaxis_dhall_ops->update_threeaxis_threshold(position,
-					lowthd, highthd, data, interf);
+					lowthd, highthd, data, flag);
 			return true;
 		}
 	default:
@@ -433,7 +430,7 @@ bool oplus_hall_is_power_on(void)
 static void threeaxis_reboot_get_position(struct extcon_dev_data *chip)
 {
 	int xdata;
-	if (chip->hall_value.hall_y < 0)
+	if ((chip->hall_value.hall_y < 0) || (g_the_chip->turn_upside_down_support))
 		xdata = -chip->hall_value.hall_x;
 	else
 		xdata = chip->hall_value.hall_x;
@@ -824,7 +821,7 @@ static int oplus_get_data(struct extcon_dev_data *chip)
 	return res;
 }
 
-static void threeaxis_update_position(struct extcon_dev_data *chip , int xtolen, int ytolen, int ztolen) {
+static void threeaxis_update_position_V1(struct extcon_dev_data *chip , int xtolen, int ytolen, int ztolen) {
 	int xup_down_limit = 0;
 	int xup_up_limit = 0;
 	int xdown_down_limit = 0;
@@ -928,6 +925,89 @@ static void threeaxis_update_position(struct extcon_dev_data *chip , int xtolen,
 		}
 	}
 	last_interf = chip->interf;
+}
+
+static void threeaxis_update_position_V2(struct extcon_dev_data *chip , int xtolen, int ytolen, int ztolen)
+{
+	int no_use = 0;
+	int xup_over = 0;
+	int xdown_over = 0;
+	int xbuf[6];
+	int xstd_up = 0;
+	int xstd_mid = 0;
+	int xstd_down = 0;
+	int curx = 0;
+
+	TRI_KEY_LOG("%s: call interf = %d xtolen = %d, ytonlen=%d, ztolen =%d \n", __func__, chip->interf, xtolen, ytolen, ztolen);
+	no_use = xtolen + ytolen - ztolen;
+
+	xstd_up = chip->threeaxis_calib_data[0];
+	xstd_mid = chip->threeaxis_calib_data[3];
+	xstd_down = chip->threeaxis_calib_data[6];
+	curx = chip->hall_value.hall_x;
+	xup_over = (abs(xstd_up - xstd_mid)) * 6 / 10;
+	xdown_over = (abs(xstd_down - xstd_mid)) * 6 / 10;
+	if (xstd_up < 0) {
+	/*-0--UP--1-----2--MID--3-----4--DOWN--5-->*/
+		xbuf[0] = xstd_up - xup_over;
+		xbuf[1] = xstd_mid - xup_over;
+		xbuf[2] = xstd_up + xup_over;
+		xbuf[3] = xstd_down - xdown_over;
+		xbuf[4] = xstd_mid + xdown_over;
+		xbuf[5] = xstd_down + xdown_over;
+	} else {
+	/*<--1--UP--0-----3--MID--2-----5--DOWN--4--*/
+		xbuf[0] = xstd_mid + xup_over;
+		xbuf[1] = xstd_up + xup_over;
+		xbuf[2] = xstd_down + xdown_over;
+		xbuf[3] = xstd_up - xup_over;
+		xbuf[4] = xstd_down - xdown_over;
+		xbuf[5] = xstd_mid - xdown_over;
+	}
+
+	TRI_KEY_LOG("%s: xstd_up = %d, xstd_mid = %d, xstd_down = %d, curx = %d.\n",
+					__func__, xstd_up, xstd_mid, xstd_down, curx);
+	TRI_KEY_LOG("XTH[%d, %d] [%d, %d] [%d, %d] \n",
+					xbuf[0], xbuf[1], xbuf[2], xbuf[3], xbuf[4], xbuf[5]);
+
+	if ((curx > xbuf[0]) && (curx < xbuf[1])) {
+		chip->position = UP_STATE;
+		last_position = chip->position;
+		chip->pre_hall_value.hall_x = chip->hall_value.hall_x;
+		chip->pre_hall_value.hall_y = chip->hall_value.hall_y;
+		chip->pre_hall_value.hall_z = chip->hall_value.hall_z;
+		goto OUT1;
+	}
+
+	if ((curx > xbuf[2]) && (curx < xbuf[3])) {
+		chip->position = MID_STATE;
+		last_position = chip->position;
+		chip->pre_hall_value.hall_x = chip->hall_value.hall_x;
+		chip->pre_hall_value.hall_y = chip->hall_value.hall_y;
+		chip->pre_hall_value.hall_z = chip->hall_value.hall_z;
+		goto OUT1;
+	}
+
+	if ((curx > xbuf[4]) && (curx < xbuf[5])) {
+		chip->position = DOWN_STATE;
+		last_position = chip->position;
+		chip->pre_hall_value.hall_x = chip->hall_value.hall_x;
+		chip->pre_hall_value.hall_y = chip->hall_value.hall_y;
+		chip->pre_hall_value.hall_z = chip->hall_value.hall_z;
+	}
+
+OUT1:
+	TRI_KEY_LOG("%s: the position is %d\n", __func__, last_position);
+	last_interf = chip->interf;
+}
+
+static void threeaxis_update_position(struct extcon_dev_data *chip , int xtolen, int ytolen, int ztolen)
+{
+	if ((g_the_chip->new_posupdate_support) || (g_the_chip->turn_upside_down_support)) {
+		threeaxis_update_position_V2(chip , xtolen, ytolen, ztolen);
+	} else {
+		threeaxis_update_position_V1(chip , xtolen, ytolen, ztolen);
+	}
 }
 
 static int threeaxis_reupdata_threshold(struct extcon_dev_data *chip)
@@ -1331,10 +1411,16 @@ EXPORT_SYMBOL(oplus_hall_irq_handler);
 int threeaxis_hall_irq_handler(unsigned int id)
 {
 	int err = 0;
+	struct history_data history;
+	short health_state = 0;
+	ktime_t starttime;
+
+	memset(&history, 0, sizeof(history));
 	if (!g_the_chip) {
 		TRI_KEY_LOG("g_the_chip null\n :%s\n", __func__);
 		return -EINVAL;
 	}
+	starttime = ktime_get();
 	disable_irq(g_the_chip->irq);
 	TRI_KEY_LOG("%d tri_key:call :%s\n", id, __func__);
 	err = threeaxis_judge_calibration_data(g_the_chip);
@@ -1345,6 +1431,18 @@ int threeaxis_hall_irq_handler(unsigned int id)
 	err = threeaxis_get_data(g_the_chip);
 	threeaxis_judge_interference(g_the_chip);
 	err = threeaxis_get_position(g_the_chip);
+	if (g_the_chip->health_monitor_support) {
+		history.dhall_data0 = g_the_chip->dhall_data0;
+		history.dhall_data1 = g_the_chip->dhall_data1;
+		history.state = g_the_chip->state;
+		history.msecs64 = (s64)ktime_to_ms(starttime);
+		history.interf_type = g_the_chip->interf;
+		memcpy(&history.hall_value, &g_the_chip->hall_value, sizeof(history.hall_value));
+		tri_healthinfo_report(&g_the_chip->monitor_data, HEALTH_IRQ_DATA, &history);
+
+		health_state = g_the_chip->state;
+		tri_healthinfo_report(&g_the_chip->monitor_data, HEALTH_STATE_COUNT, &health_state);
+	}
 	report_key_value(g_the_chip);
 	msleep(10);
 	enable_irq(g_the_chip->irq);
@@ -1388,7 +1486,10 @@ static void tri_key_dev_work(struct work_struct *work)
 	char payload[1024] = {0x00};
 #endif
 	int interf_type = INTERF_TYPE_NONE;
+	struct history_data history;
+	short health_state = 0;
 
+	memset(&history, 0, sizeof(history));
 	mutex_lock(&chip->mtx);
 
 	starttime = ktime_get();
@@ -1446,6 +1547,20 @@ static void tri_key_dev_work(struct work_struct *work)
 		}
 		threeaxis_judge_interference(chip);
 		res = threeaxis_get_position(chip);
+
+		if (g_the_chip->health_monitor_support) {
+			history.dhall_data0 = chip->dhall_data0;
+			history.dhall_data1 = chip->dhall_data1;
+			history.state = chip->state;
+			history.key_upload_state = 1;
+			history.msecs64 = (s64)ktime_to_ms(starttime);
+			history.interf_type = chip->interf;
+			memcpy(&history.hall_value, &chip->hall_value, sizeof(history.hall_value));
+			tri_healthinfo_report(&g_the_chip->monitor_data, HEALTH_IRQ_DATA, &history);
+
+			health_state = chip->state;
+			tri_healthinfo_report(&g_the_chip->monitor_data, HEALTH_STATE_COUNT, &health_state);
+		}
 		mutex_unlock(&chip->mtx);
 		return;
 	}
@@ -1582,6 +1697,26 @@ FINAL:
 		oplus_kevent_fb(FB_TRI_STATE_KEY, TRIKEY_FB_INTERF_TYPE, payload);
 	}
 #endif
+	/*
+	if (chip->exception_upload_support) {
+		if (interf_type > INTERF_TYPE_1) {
+			tri_key_exception_report(&chip->tri_excep_data, EXCEP_NOISE, TRI_KEY_NOISE_TYPE, sizeof(TRI_KEY_NOISE_TYPE));
+		}
+	}*/
+
+	if (g_the_chip->health_monitor_support && !g_the_chip->threeaxis_hall_support) {
+		history.dhall_data0 = chip->dhall_data0;
+		history.dhall_data1 = chip->dhall_data1;
+		history.state = chip->state;
+		history.key_upload_state = 1;
+		history.msecs64 = (s64)ktime_to_ms(starttime);
+		history.interf_type = interf_type;
+		tri_healthinfo_report(&g_the_chip->monitor_data, HEALTH_IRQ_DATA, &history);
+
+		health_state = chip->state;
+		tri_healthinfo_report(&g_the_chip->monitor_data, HEALTH_STATE_COUNT, &health_state);
+	}
+
 	TRI_KEY_LOG("%s achieve\n", __func__);
 	mutex_unlock(&chip->mtx);
 }
@@ -1890,7 +2025,7 @@ static short Minus(short value0, short value1)
 	return minus;
 }
 
-void initialCalibValue(short calib_dnHall_UpV, short calib_dnHall_MdV,
+static void initialCalibValue(short calib_dnHall_UpV, short calib_dnHall_MdV,
 			short calib_dnHall_DnV, short calib_upHall_UpV,
 			short calib_upHall_MdV, short calib_upHall_DnV)
 {
@@ -1932,6 +2067,7 @@ void initialCalibValue(short calib_dnHall_UpV, short calib_dnHall_MdV,
 			   up_mid_tol, up_tolerance, mid_down_tol, down_tolerance, up_mid_distance, mid_down_distance);
 	oplus_kevent_fb(FB_TRI_STATE_KEY, TRIKEY_FB_CALIB_DATA_TYPE, payload);
 #endif
+
 	TRI_KEY_LOG("Upmin:%d, Mdmin:%d, Dnmin:%d\n",
 		calib_upvaluemin, calib_mdvaluemin, calib_dnvaluemin);
 	TRI_KEY_LOG("up_mid_tol:%d, mid_down_tol:%d\n",
@@ -2002,6 +2138,8 @@ static ssize_t proc_tri_state_read(struct file *file, char __user *user_buf,
 {
 	int ret = 0;
 	char page[6] = {0};
+	short key_upload_state = 0;
+
 	TRI_KEY_LOG("%s:call", __func__);
 	if (!g_the_chip) {
 		TRI_KEY_ERR("g_the_chip null\n");
@@ -2012,6 +2150,10 @@ static ssize_t proc_tri_state_read(struct file *file, char __user *user_buf,
 			oplus_hall_get_data(DHALL_1);
 		}
 		snprintf(page, 6, "%d\n", g_the_chip->state);
+		if (g_the_chip->health_monitor_support) {
+			key_upload_state = 2;
+			tri_healthinfo_report(&g_the_chip->monitor_data, HEALTH_KEY_UPLOAD_STATE, &key_upload_state);
+		}
 	}
 	ret = simple_read_from_buffer(user_buf, count, ppos, page, strlen(page));
 	return ret;
@@ -2108,6 +2250,9 @@ static ssize_t proc_hall_data_calib_write(struct file *file, const char __user *
 			report_key_value(g_the_chip);
 		} else {
 			TRI_KEY_LOG("sscanf fail\n");
+			if (g_the_chip->exception_upload_support) {
+				tri_key_exception_report(&g_the_chip->tri_excep_data, EXCEP_CAL, TRI_KEY_CALI_TYPE, sizeof(TRI_KEY_CALI_TYPE));
+			}
 		}
 	} else {
 		if (sscanf(temp, "%d,%d,%d,%d,%d,%d", &data[0], &data[1], &data[2],
@@ -2120,9 +2265,12 @@ static ssize_t proc_hall_data_calib_write(struct file *file, const char __user *
 			g_the_chip->uphall_dnv = data[5]; /* DOWN H2 */
 			TRI_KEY_ERR("data[%d %d %d %d %d %d]\n", data[0], data[1],
 					data[2], data[3], data[4], data[5]);
-		} else
+		} else {
 			TRI_KEY_ERR("fail\n");
-
+			if (g_the_chip->exception_upload_support) {
+				tri_key_exception_report(&g_the_chip->tri_excep_data, EXCEP_CAL, TRI_KEY_CALI_TYPE, sizeof(TRI_KEY_CALI_TYPE));
+			}
+		}
 			initialCalibValue(g_the_chip->dnhall_upv, g_the_chip->dnhall_mdv,
 				g_the_chip->dnhall_dnv, g_the_chip->uphall_upv,
 				g_the_chip->uphall_mdv, g_the_chip->uphall_dnv);
@@ -2323,12 +2471,82 @@ static int dump_register_open(struct inode *inode, struct file *file)
 
 CREATE_PROC_OPS(proc_hall_dump_register_read_ops, dump_register_open, seq_read, NULL, single_release);
 
+static int trikey_health_monitor_read_func(struct seq_file *s, void *v)
+{
+	struct extcon_dev_data *chip = s->private;
+	struct monitor_data *monitor_data = &chip->monitor_data;
+
+	if (!chip) {
+		TRI_KEY_ERR("chip is null.\n");
+		return -EINVAL;
+	}
+
+	if (!monitor_data) {
+		TRI_KEY_ERR("monitor_data is null.\n");
+		return -EINVAL;
+	}
+
+	mutex_lock(&g_hall_dev->mtx);
+
+	tri_healthinfo_read(s, monitor_data);
+
+	mutex_unlock(&g_hall_dev->mtx);
+	return 0;
+}
+
+static ssize_t health_monitor_control(struct file *file, const char __user *buf, size_t count, loff_t *lo)
+{
+	struct extcon_dev_data *chip = PDE_DATA(file_inode(file));
+	struct monitor_data *monitor_data = &chip->monitor_data;
+	char buffer[4] = {0};
+	int tmp = 0;
+
+	if (!chip) {
+		TRI_KEY_ERR("chip is null.\n");
+		return -EINVAL;
+	}
+
+	if (!monitor_data) {
+		TRI_KEY_ERR("monitor_data is null.\n");
+		return -EINVAL;
+	}
+
+	mutex_lock(&g_hall_dev->mtx);
+	if (count > 2) {
+		goto EXIT;
+	}
+	if (copy_from_user(buffer, buf, count)) {
+		TRI_KEY_ERR("%s: read proc input error.\n", __func__);
+		goto EXIT;
+	}
+
+	if (1 == sscanf(buffer, "%d", &tmp) && tmp == 0) {
+		tri_healthinfo_clear(monitor_data);
+	} else {
+		TRI_KEY_ERR("invalid operation\n");
+	}
+
+EXIT:
+	mutex_unlock(&g_hall_dev->mtx);
+	return count;
+}
+
+static int health_monitor_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, trikey_health_monitor_read_func, PDE_DATA(inode));
+}
+
+CREATE_PROC_OPS(trikey_health_monitor_proc_fops, health_monitor_open, seq_read, health_monitor_control, single_release);
+
 static int init_trikey_proc(struct extcon_dev_data *hall_dev)
 {
 	int ret = 0;
 	struct proc_dir_entry *prEntry_trikey = NULL;
 	struct proc_dir_entry *prEntry_tmp = NULL;
 
+	if (!hall_dev) {
+		return -EINVAL;
+	}
 	TRI_KEY_LOG("%s start\n", __func__);
 	prEntry_trikey = proc_mkdir("tristatekey", NULL);
 	if (prEntry_trikey == NULL) {
@@ -2398,6 +2616,15 @@ static int init_trikey_proc(struct extcon_dev_data *hall_dev)
 		TRI_KEY_ERR("%s: Couldn't create dump_register proc, %d\n", __func__, __LINE__);
 	}
 
+	if (g_the_chip->health_monitor_support) {
+		prEntry_tmp = proc_create_data("health_info", 0666, prEntry_trikey,
+			&trikey_health_monitor_proc_fops, g_the_chip);
+		if (prEntry_tmp == NULL) {
+			ret = -ENOMEM;
+			TRI_KEY_ERR("%s: Couldn't create health_info proc, %d\n", __func__, __LINE__);
+		}
+	}
+
 	return ret;
 }
 
@@ -2453,6 +2680,15 @@ static void register_tri_key_dev_work(struct work_struct *work)
 	}
 
 
+	/*step2 : initial health info parameter*/
+	if (chip->health_monitor_support) {
+		res = tri_healthinfo_init(chip->dev, &chip->monitor_data);
+		if (res < 0) {
+			TRI_KEY_ERR("health info init failed.\n");
+		}
+		chip->monitor_data.threeaxis_hall_support = chip->threeaxis_hall_support;
+		chip->monitor_data.health_monitor_support = chip->health_monitor_support;
+	}
 
 	INIT_WORK(&chip->dwork, tri_key_dev_work);
 	hrtimer_init(&tri_key_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
@@ -2528,8 +2764,11 @@ static int init_parse_dts(struct device *dev, struct extcon_dev_data *g_the_chip
 		TRI_KEY_LOG(" %s dts node is NULL\n", __func__);
 		g_the_chip->threeaxis_hall_support = false;
 		g_the_chip->new_threshold_support = false;
+		g_the_chip->health_monitor_support = false;
 		return -1;
 	}
+	g_the_chip->health_monitor_support = of_property_read_bool(np, "health_monitor_support");
+	TRI_KEY_LOG("%s:health_monitor_support:%d\n", __func__, g_the_chip->health_monitor_support);
 
 	g_the_chip->new_threshold_support = of_property_read_bool(np, "new_threshold_support");
 	TRI_KEY_LOG("%s:new_up_threshold_support:%d\n", __func__, g_the_chip->new_threshold_support);
@@ -2651,6 +2890,22 @@ static int init_parse_dts(struct device *dev, struct extcon_dev_data *g_the_chip
 		}
 	}
 
+	g_the_chip->exception_upload_support = of_property_read_bool(np, "exception_upload_support");
+	TRI_KEY_LOG("%s:exception_upload_support:%d\n", __func__, g_the_chip->exception_upload_support);
+
+	g_the_chip->turn_upside_down_support = of_property_read_bool(np, "turn_upside_down");
+	if (g_the_chip->turn_upside_down_support) {
+		TRI_KEY_LOG(" %s: Supports up-down position reversal.\n", __func__);
+	} else {
+		g_the_chip->turn_upside_down_support = false;
+	}
+
+	g_the_chip->new_posupdate_support = of_property_read_bool(np, "new_posupdate_support");
+	if (g_the_chip->new_posupdate_support) {
+		TRI_KEY_LOG(" %s: Supports new posupdate.\n", __func__);
+	} else {
+		g_the_chip->new_posupdate_support = false;
+	}
 	return ret;
 }
 

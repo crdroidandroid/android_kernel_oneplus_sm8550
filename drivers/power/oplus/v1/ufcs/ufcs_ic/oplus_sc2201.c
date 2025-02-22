@@ -26,6 +26,7 @@
 #include <linux/of_device.h>
 #include <linux/of_gpio.h>
 #include <linux/err.h>
+#include <linux/pinctrl/consumer.h>
 #include <linux/regulator/driver.h>
 #include <linux/regulator/of_regulator.h>
 #include <linux/regulator/machine.h>
@@ -717,7 +718,11 @@ struct oplus_ufcs_protocol_operations oplus_ufcs_sc2201_ops = {
 	.ufcs_ic_get_master_vout = sc2201_master_get_vout,
 };
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0))
+static int sc2201_driver_probe(struct i2c_client *client)
+#else
 static int sc2201_driver_probe(struct i2c_client *client, const struct i2c_device_id *id)
+#endif
 {
 	struct oplus_sc2201 *chip_ic;
 
@@ -805,12 +810,20 @@ static const struct dev_pm_ops sc2201_pm_ops = {
 	.suspend = sc2201_pm_suspend,
 };
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0))
+static void sc2201_driver_remove(struct i2c_client *client)
+#else
 static int sc2201_driver_remove(struct i2c_client *client)
+#endif
 {
 	struct oplus_sc2201 *chip = i2c_get_clientdata(client);
 
 	if (chip == NULL)
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0))
+		return;
+#else
 		return -ENODEV;
+#endif
 
 	if (!gpio_is_valid(chip->ufcs_en_gpio))
 		gpio_free(chip->ufcs_en_gpio);
@@ -819,7 +832,9 @@ static int sc2201_driver_remove(struct i2c_client *client)
 		gpio_free(chip->ufcs_int_gpio);
 	devm_kfree(&client->dev, chip);
 
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0))
 	return 0;
+#endif
 }
 
 static void sc2201_shutdown(struct i2c_client *chip_client)

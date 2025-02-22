@@ -19,6 +19,7 @@
 #include <linux/slab.h>
 #include <linux/kernel.h>
 #include <linux/delay.h>
+#include <linux/pinctrl/consumer.h>
 #include "../oplus_charger.h"
 #include "../oplus_gauge.h"
 #ifndef CONFIG_DISABLE_OPLUS_FUNCTION
@@ -1546,8 +1547,14 @@ struct oplus_switch_operations s2asl01_switching_ops = {
 	.switching_get_charge_enable = get_switching_charge_enable,
 	.switching_set_discharge_mode = s2asl01_switching_set_discharge_mode,
 };
+
+
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0))
+static int s2asl01_switching_probe(struct i2c_client *client)
+#else
 static int s2asl01_switching_probe(struct i2c_client *client,
 				const struct i2c_device_id *id)
+#endif
 {
 	struct device *dev = &client->dev;
 	struct device_node *of_node = client->dev.of_node;
@@ -1713,27 +1720,33 @@ static void s2asl01_switching_shutdown(struct i2c_client *client)
 	pr_info("%s\n", __func__);
 }
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0))
+static void s2asl01_switching_remove(struct i2c_client *client)
+#else
 static int s2asl01_switching_remove(struct i2c_client *client)
+#endif
 {
 	struct s2asl01_switching_data *switching = i2c_get_clientdata(client);
 
 	power_supply_unregister(switching->psy_sw);
 	mutex_destroy(&switching->i2c_lock);
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0))
 	return 0;
+#endif
 }
 
 #if IS_ENABLED(CONFIG_PM)
 static int s2asl01_switching_suspend(struct device *dev)
 {
 	atomic_set(&g_switching->suspended, 1);
-	pr_info("%s suspended:%d\n", __func__, g_switching->suspended);
+	pr_info("%s suspended:%d\n", __func__, atomic_read(&g_switching->suspended));
 	return 0;
 }
 
 static int s2asl01_switching_resume(struct device *dev)
 {
 	atomic_set(&g_switching->suspended, 0);
-	pr_info("%s suspended:%d\n", __func__, g_switching->suspended);
+	pr_info("%s suspended:%d\n", __func__, atomic_read(&g_switching->suspended));
 	return 0;
 }
 #else

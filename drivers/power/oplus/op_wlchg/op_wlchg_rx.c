@@ -580,14 +580,19 @@ cleanup:
 	i2c_set_clientdata(client, NULL);
 	return rc;
 }
-
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0))
+static void wlchg_rx_remove(struct i2c_client *client)
+#else
 static int wlchg_rx_remove(struct i2c_client *client)
+#endif
 {
 	struct rx_chip *chip = i2c_get_clientdata(client);
 
 	of_platform_depopulate(chip->dev);
 	i2c_set_clientdata(client, NULL);
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0))
 	return 0;
+#endif
 }
 
 static int wlchg_rx_suspend(struct device *dev)

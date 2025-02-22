@@ -49,7 +49,8 @@ int oplus_vooc_set_clock_active(struct oplus_chg_ic_dev *vooc_ic)
 
 	rc = oplus_chg_ic_func(vooc_ic, OPLUS_IC_FUNC_VOOC_SET_CLOCK_ACTIVE);
 	if (rc < 0) {
-		chg_err("set clock active error, rc=%d\n", rc);
+		if (rc != -ENOTSUPP)
+			chg_err("set clock active error, rc=%d\n", rc);
 		return rc;
 	}
 
@@ -67,7 +68,8 @@ int oplus_vooc_set_clock_sleep(struct oplus_chg_ic_dev *vooc_ic)
 
 	rc = oplus_chg_ic_func(vooc_ic, OPLUS_IC_FUNC_VOOC_SET_CLOCK_SLEEP);
 	if (rc < 0) {
-		chg_err("set clock sleep error, rc=%d\n", rc);
+		if (rc != -ENOTSUPP)
+			chg_err("set clock sleep error, rc=%d\n", rc);
 		return rc;
 	}
 
@@ -85,7 +87,8 @@ int oplus_vooc_set_reset_active(struct oplus_chg_ic_dev *vooc_ic)
 
 	rc = oplus_chg_ic_func(vooc_ic, OPLUS_IC_FUNC_VOOC_RESET_ACTIVE);
 	if (rc < 0) {
-		chg_err("set reset active error, rc=%d\n", rc);
+		if (rc != -ENOTSUPP)
+			chg_err("set reset active error, rc=%d\n", rc);
 		return rc;
 	}
 
@@ -103,7 +106,8 @@ int oplus_vooc_set_reset_sleep(struct oplus_chg_ic_dev *vooc_ic)
 
 	rc = oplus_chg_ic_func(vooc_ic, OPLUS_IC_FUNC_VOOC_RESET_SLEEP);
 	if (rc < 0) {
-		chg_err("set reset sleep error, rc=%d\n", rc);
+		if (rc != -ENOTSUPP)
+			chg_err("set reset sleep error, rc=%d\n", rc);
 		return rc;
 	}
 
@@ -121,7 +125,8 @@ __maybe_unused static int oplus_vooc_fw_update(struct oplus_chg_ic_dev *vooc_ic)
 
 	rc = oplus_chg_ic_func(vooc_ic, OPLUS_IC_FUNC_VOOC_FW_UPGRADE);
 	if (rc < 0) {
-		chg_err("firmware upgrade error, rc=%d\n", rc);
+		if (rc != -ENOTSUPP)
+			chg_err("firmware upgrade error, rc=%d\n", rc);
 		return rc;
 	}
 
@@ -139,7 +144,8 @@ int oplus_vooc_fw_check_then_recover(struct oplus_chg_ic_dev *vooc_ic)
 
 	rc = oplus_chg_ic_func(vooc_ic, OPLUS_IC_FUNC_VOOC_FW_CHECK_THEN_RECOVER);
 	if (rc != FW_CHECK_MODE) {
-		chg_err("fw_check_then_recover error, rc=%d\n", rc);
+		if (rc != -ENOTSUPP)
+			chg_err("fw_check_then_recover error, rc=%d\n", rc);
 		return rc;
 	}
 
@@ -207,7 +213,7 @@ void oplus_vooc_eint_register(struct oplus_chg_ic_dev *vooc_ic)
 	}
 
 	rc = oplus_chg_ic_func(vooc_ic, OPLUS_IC_FUNC_VOOC_EINT_REGISTER);
-	if (rc < 0)
+	if (rc < 0 && rc != -ENOTSUPP)
 		chg_err("eint register error, rc=%d\n", rc);
 }
 
@@ -221,8 +227,10 @@ void oplus_vooc_eint_unregister(struct oplus_chg_ic_dev *vooc_ic)
 	}
 
 	rc = oplus_chg_ic_func(vooc_ic, OPLUS_IC_FUNC_VOOC_EINT_UNREGISTER);
-	if (rc < 0)
-		chg_err("eint unregister error, rc=%d\n", rc);
+	if (rc < 0) {
+		if (rc != -ENOTSUPP)
+			chg_err("eint unregister error, rc=%d\n", rc);
+	}
 }
 
 void oplus_vooc_set_data_active(struct oplus_chg_ic_dev *vooc_ic)
@@ -235,8 +243,10 @@ void oplus_vooc_set_data_active(struct oplus_chg_ic_dev *vooc_ic)
 	}
 
 	rc = oplus_chg_ic_func(vooc_ic, OPLUS_IC_FUNC_VOOC_SET_DATA_ACTIVE);
-	if (rc < 0)
-		chg_err("set data active error, rc=%d\n", rc);
+	if (rc < 0) {
+		if (rc != -ENOTSUPP)
+			chg_err("set data active error, rc=%d\n", rc);
+	}
 }
 
 void oplus_vooc_set_data_sleep(struct oplus_chg_ic_dev *vooc_ic)
@@ -249,8 +259,10 @@ void oplus_vooc_set_data_sleep(struct oplus_chg_ic_dev *vooc_ic)
 	}
 
 	rc = oplus_chg_ic_func(vooc_ic, OPLUS_IC_FUNC_VOOC_SET_DATA_SLEEP);
-	if (rc < 0)
-		chg_err("set data sleep error, rc=%d\n", rc);
+	if (rc < 0) {
+		if (rc != -ENOTSUPP)
+			chg_err("set data sleep error, rc=%d\n", rc);
+	}
 }
 
 
@@ -674,6 +686,20 @@ int oplus_vooc_get_retry_flag(struct oplus_chg_ic_dev *vooc_ic, bool *retry_flag
 	}
 
 	rc = oplus_chg_ic_func(vooc_ic, OPLUS_IC_FUNC_VOOCPHY_GET_RETRY_FLAG, retry_flag);
+
+	return rc;
+}
+
+int oplus_vooc_get_frame_head(struct oplus_chg_ic_dev *vooc_ic, int *head)
+{
+	int rc;
+
+	if (vooc_ic == NULL) {
+		chg_err("vooc_ic is NULL\n");
+		return -ENODEV;
+	}
+
+	rc = oplus_chg_ic_func(vooc_ic, OPLUS_IC_FUNC_VOOCPHY_GET_FRAME_HEAD, head);
 
 	return rc;
 }

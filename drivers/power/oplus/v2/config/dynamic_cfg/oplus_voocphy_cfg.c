@@ -8,6 +8,8 @@ static const char * const strategy_temp[];
 
 struct batt_sys_curves *g_svooc_curves_metadata[] = {
 	svooc_curves_soc0_2_50,
+	svooc_curves_soc0_2_50_mid,
+	svooc_curves_soc0_2_50_high,
 	svooc_curves_soc50_2_75,
 	svooc_curves_soc75_2_85,
 	svooc_curves_soc85_2_90
@@ -15,6 +17,8 @@ struct batt_sys_curves *g_svooc_curves_metadata[] = {
 
 struct batt_sys_curves *g_vooc_curves_metadata[] = {
 	vooc_curves_soc0_2_50,
+	vooc_curves_soc0_2_50_mid,
+	vooc_curves_soc0_2_50_high,
 	vooc_curves_soc50_2_75,
 	vooc_curves_soc75_2_85,
 	vooc_curves_soc85_2_90
@@ -29,7 +33,7 @@ static int oplus_get_strategy_data(
 	const int range_data_size = sizeof(struct batt_sys_curve);
 	char *tmp_buf;
 	char name_buf[NAME_BUF_MAX];
-	int curv_num[BATT_SOC_90_TO_100][BATT_SYS_CURVE_MAX];
+	int curv_num[BATT_SOC_90_TO_100][BATT_SYS_CURVE_MAX] = { 0 };
 	bool skip[BATT_SOC_90_TO_100][BATT_SYS_CURVE_MAX] = { 0 };
 	int i, j;
 	int rc = 0;
@@ -100,8 +104,25 @@ err:
 	return rc;
 }
 
+static void oplus_voocphy_update_lcf_curves_strategy_config(
+	struct oplus_param_head *param_head, struct oplus_voocphy_manager *chip)
+{
+	struct oplus_chg_strategy *strategy;
+
+	strategy = oplus_chg_strategy_alloc_by_param_head("low_curr_full_strategy", "svooc_lcf_strategy", param_head);
+	if (IS_ERR_OR_NULL(strategy)) {
+		chg_err("alloc svooc_lcf_strategy error, rc=%ld", PTR_ERR(strategy));
+	} else {
+		(void)oplus_chg_strategy_release(chip->svooc_lcf_strategy);
+		chip->svooc_lcf_strategy = strategy;
+		chg_info("[TEST]: update svooc_lcf_strategy startegy\n");
+	}
+}
+
 static int oplus_voocphy_update_config(void *data, struct oplus_param_head *param_head)
 {
+	struct oplus_voocphy_manager *chip;
+
 	if (data == NULL) {
 		chg_err("data is NULL\n");
 		return -EINVAL;
@@ -110,9 +131,11 @@ static int oplus_voocphy_update_config(void *data, struct oplus_param_head *para
 		chg_err("param_head is NULL\n");
 		return -EINVAL;
 	}
+	chip = (struct oplus_voocphy_manager *)data;
 
 	(void)oplus_get_strategy_data(param_head, "vooc_charge_strategy", g_vooc_curves_metadata);
 	(void)oplus_get_strategy_data(param_head, "svooc_charge_strategy", g_svooc_curves_metadata);
+	oplus_voocphy_update_lcf_curves_strategy_config(param_head, chip);
 
 	return 0;
 }

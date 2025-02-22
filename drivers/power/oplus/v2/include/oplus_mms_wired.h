@@ -26,6 +26,8 @@ enum wired_topic_item {
 	WIRED_ITEM_REAL_CHG_TYPE,
 	WIRED_ITEM_VBUS,
 	WIRED_ITEM_ONLINE_STATUS_ERR,
+	WIRED_ITEM_CHARGING_DISABLE,
+	WIRED_ITEM_COEXISTENCE,
 };
 
 enum oplus_wired_cc_detect_status {
@@ -73,6 +75,7 @@ int oplus_wired_aicl_reset(void);
 int oplus_wired_set_aicl_point(void);
 int oplus_wired_get_cc_orientation(void);
 int oplus_wired_get_hw_detect(void);
+int oplus_wired_get_hw_detect_recheck(void);
 int oplus_wired_rerun_bc12(void);
 int oplus_wired_qc_detect_enable(bool enable);
 int oplus_wired_shipmode_enable(bool enable);
@@ -97,4 +100,6 @@ void oplus_wired_check_bcc_curr_done(struct oplus_mms *topic);
 int oplus_wired_get_bcc_curr_done_status(struct oplus_mms *topic);
 void oplus_wired_set_bcc_curr_request(struct oplus_mms *topic);
 int oplus_wired_get_byb_id_info(struct oplus_mms *topic);
+int oplus_wired_get_byb_id_match_info(struct oplus_mms *topic);
+
 #endif /* __OPLUS_MMS_WIRED_H__ */

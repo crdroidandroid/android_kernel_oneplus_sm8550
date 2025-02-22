@@ -42,6 +42,7 @@ enum {
 	LCM_HBM_LONG_INTE_TYPE,
 	LCM_HBM_SHORT_INTE_TYPE,
 	LCM_BLANK_MODE_TYPE,
+	LCM_SCREENSHOT_INFO_TYPE = 0x10,
 	MAX_INFO_TYPE,
 };
 
@@ -63,11 +64,22 @@ struct als_info{
 	uint16_t blank_mode;
 };
 
+#if IS_ENABLED(CONFIG_OPLUS_SENSOR_USE_SCREENSHOT_INFO)
+struct screenshot_info{
+	int64_t start_ts; /* unit: sf_start_ts */
+	int64_t end_ts; /* unit: sf_end_ts */
+	int32_t index; /* unit: sf_start_index */
+	int32_t info_type; /* unit: info_type */
+};
+#endif
+
 struct fifo_frame{
 	uint8_t type;
 	uint16_t data;
+#if IS_ENABLED(CONFIG_OPLUS_SENSOR_USE_SCREENSHOT_INFO)
+	struct screenshot_info ss_info;
+#endif
 };
-
 
 #define BRL_MAX_LEN 7
 
@@ -89,6 +101,12 @@ struct ssc_interactive{
 	wait_queue_head_t wq;
 	struct notifier_block nb;
 	struct br_level_info brl_info;
+
+#if IS_ENABLED(CONFIG_OPLUS_SENSOR_USE_SCREENSHOT_INFO)
+	struct screenshot_info ss_info;
+	struct miscdevice screenshot_info_dev;
+	bool receive_screenshot_info;
+#endif
 
 #if IS_ENABLED(CONFIG_OPLUS_SENSOR_DRM_PANEL_NOTIFY)
 	bool is_fold_dev;

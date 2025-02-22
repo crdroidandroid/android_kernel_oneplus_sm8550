@@ -34,7 +34,7 @@
                 },
                 {
                     "range": "0-*",
-                    "type": "out",
+                    "type": "in",
                     "desc": {
                         "zh": "要设置的电流，单位mA"
                     }
@@ -248,7 +248,7 @@
             "desc": {
                 "zh": "适配器鉴权校验"
             },
-            "auto_debug_code": true,
+            "auto_debug_code": false,
             "parameter_list": ["u8", "u8 *", "u8"],
             "parameter_desc": [
                 {
@@ -402,8 +402,40 @@
                 "write": false,
                 "overwrite": false
             }
+        },
+        {
+            "lable": "OPLUS_IC_FUNC_UFCS_SET_SM_PERIOD",
+            "desc": {
+                "zh": "设置UFCS协议状态机的周期"
+            },
+            "auto_debug_code": true,
+            "parameter_list": ["u16"],
+            "parameter_desc": [
+                {
+                    "range": "0-*",
+                    "type": "in",
+                    "desc": {
+                        "zh": "要设置的周期时间，单位ms"
+                    }
+                }
+            ],
+            "vict": {
+                "read": false,
+                "write": {
+                    "cmd": "vict -f {id} -S{0} vic-*",
+                    "desc": {
+                        "zh": "设置状态机周期时间, {0}为时间"
+                    }
+                },
+                "overwrite": {
+                    "cmd": "vict -f {id} -O {0} vic-*",
+                    "desc": {
+                        "zh": "覆盖状态机周期时间, {0}为时间"
+                    }
+                }
+            }
         }
     ],
 
-    "version": "V1.1:16:19ef358a3c5132fb6741cce40042737a889214ccdec134d0a74f1d8ad7741486"
+    "version": "V1.1:17:84c9311f8f9c2834f4134f3c138c710ec8581b04df64a5932803cf0baac4a548"
 }

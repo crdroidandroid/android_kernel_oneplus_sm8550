@@ -216,10 +216,10 @@ static int ak09970_get_data(struct dhall_data_xyz *data)
 	}
 	if (buf[0] & 0x01) {
 		value_v = (long)(value_x * value_x) +(long)(value_y * value_y) + (long)(value_z * value_z);
-		TRI_KEY_LOG("v data %d is been changed\n", value_v);
+		TRI_KEY_LOG("v data %ld is been changed\n", value_v);
 	} else {
 		value_v = (long)((u32)(buf[1] << 24) +(u32)(buf[2] << 16) + (u32)(buf[3] << 8) + (u32)buf[4]);
-		TRI_KEY_LOG("new hall value  v is %d\n", value_v);
+		TRI_KEY_LOG("new hall value  v is %ld\n", value_v);
 	}
 	data->hall_x = value_x;
 	data->hall_y = value_y;
@@ -408,7 +408,7 @@ static void ak09970_inttobuff(u8* th, int low, int high)
 }
 
 
-static bool ak09970_update_threshold(int position, short lowthd, short highthd, struct dhall_data_xyz *halldata, int interf)
+static bool ak09970_update_threshold(int position, short lowthd, short highthd, struct dhall_data_xyz *halldata, int flag)
 {
 	u8 th[4] = {0};
 	u8 sth[4] = {0};
@@ -447,12 +447,23 @@ static bool ak09970_update_threshold(int position, short lowthd, short highthd, 
 	}  */
 	switch (position) {
 	case UP_STATE:
-		lowthd = halldata->hall_x - YBOP_TOL;
-		highthd = halldata->hall_x - YBRP_TOL;
+		if (flag) {
+			lowthd = halldata->hall_x + YBOP_TOL;
+			highthd = lowthd + 1;
+		} else {
+			lowthd = halldata->hall_x - YBOP_TOL;
+			highthd = lowthd + 1;
+		}
 		break;
 	case DOWN_STATE:
-		lowthd = halldata->hall_x + YBRP_TOL;
-		highthd = halldata->hall_x + YBOP_TOL;
+		if (flag) {
+			lowthd = halldata->hall_x - YBRP_TOL;
+			highthd = lowthd + 1;
+		} else {
+			lowthd = halldata->hall_x + YBRP_TOL;
+			highthd = lowthd + 1;
+		}
+
 		break;
 	case MID_STATE:
 		break;
@@ -463,7 +474,11 @@ static bool ak09970_update_threshold(int position, short lowthd, short highthd, 
 	TRI_KEY_LOG("lowthd = %d, highthd=%d.\n", lowthd, highthd);
 	switch (position) {
 	case UP_STATE:
-		data[0] = 0x03;
+		if (flag) {
+			data[0] = 0x02;
+		} else {
+			data[0] = 0x03;
+		}
 		data[1] = 0x16;
 		err = ak09970_i2c_write_block(g_chip, AK09970_REG_CNTL1, data, 2);
 		if (err < 0) {
@@ -496,7 +511,11 @@ static bool ak09970_update_threshold(int position, short lowthd, short highthd, 
 		TRI_KEY_LOG("%s UP_STATE AK09970_REG_CNTL1 0x20 data is 0x%02X%02X \n", __func__, data[0], data[1]);
 		break;
 	case DOWN_STATE:
-		data[0] = 0x02;
+		if (flag) {
+			data[0] = 0x03;
+		} else {
+			data[0] = 0x02;
+		}
 		data[1] = 0x16;
 		err = ak09970_i2c_write_block(g_chip, AK09970_REG_CNTL1, data, 2);
 		if (err < 0) {
@@ -618,6 +637,8 @@ static bool ak09970_update_threshold(int position, short lowthd, short highthd, 
 static irqreturn_t ak09970_irq_handler(int irq, void *dev_id)
 {
 	struct extcon_dev_data *hall_dev = NULL;
+	struct monitor_data *moni = NULL;
+
 	TRI_KEY_LOG("call \n");
 
 	if (!g_chip) {
@@ -639,6 +660,8 @@ static irqreturn_t ak09970_irq_handler(int irq, void *dev_id)
 
 	if (hall_dev && hall_dev->bus_ready == false) {
 		TRI_KEY_LOG("The device not resume 50 ms!");
+		moni = &hall_dev->monitor_data;
+		moni->irq_need_dev_resume_all_count++;
 		goto exit;
 	}
 
@@ -880,6 +903,13 @@ static void ak09970_parse_dts(struct oplus_dhall_chip *chip)
 			chip->bias_ratio = value;
 		}
 	}
+
+	chip->is_turn_upside_down = of_property_read_bool(np, "turn_upside_down");
+	if (chip->is_turn_upside_down) {
+		TRI_KEY_LOG(" %d: Supports up-down position reversal.\n", chip->is_turn_upside_down);
+	} else {
+		chip->is_turn_upside_down = false;
+	}
 }
 
 static struct dhall_operations  ak09970_ops = {
@@ -950,15 +980,15 @@ static int ak09970_i2c_probe(struct i2c_client *client, const struct i2c_device_
 		return -EPROBE_DEFER; /* retry */
 	}
 #endif
+	if (!IS_ERR_OR_NULL(chip->pctrl) && !IS_ERR_OR_NULL(chip->irq_state)) {
+		TRI_KEY_ERR("set irq gpio input high.\n");
+		pinctrl_select_state(chip->pctrl, chip->irq_state);
+	}
 	ak09970_set_power(chip, 1);
 	ak09970_gpio_set_value(chip->reset_gpio, 0);
 	mdelay(1);
 	ak09970_gpio_set_value(chip->reset_gpio, 1);
 	mdelay(1);
-
-	if (!IS_ERR_OR_NULL(chip->pctrl) && !IS_ERR_OR_NULL(chip->irq_state)) {
-		pinctrl_select_state(chip->pctrl, chip->irq_state);
-	}
 
 	err = ak09970_reset_device(chip);
 	if (err < 0) {
@@ -1002,7 +1032,11 @@ fail:
 	return -ENXIO;
 }
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0))
+static void ak09970_i2c_remove(struct i2c_client *client)
+#else
 static int ak09970_i2c_remove(struct i2c_client *client)
+#endif
 {
 	struct extcon_dev_data	*hall_dev = NULL;
 
@@ -1010,14 +1044,18 @@ static int ak09970_i2c_remove(struct i2c_client *client)
 		wakeup_source_unregister(g_chip->ws);
 	}
 
-	oplus_hall_unregister_notifier();
-
 	hall_dev = i2c_get_clientdata(client);
 	if (hall_dev) {
 		kfree(hall_dev);
 		hall_dev = NULL;
 	}
+	if (g_chip) {
+		ak09970_set_power(g_chip, 0);
+	}
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0))
+#else
 	return 0;
+#endif
 }
 
 static int ak09970_i2c_suspend(struct device *dev)
@@ -1039,6 +1077,10 @@ static int ak09970_i2c_suspend(struct device *dev)
 	if (!g_chip->irq_wake) {
 		enable_irq_wake(g_chip->irq);
 		g_chip->irq_wake = true;
+	}
+
+	if (hall_dev && hall_dev->health_monitor_support) {
+		hall_dev->monitor_data.pm_suspend_count++;
 	}
 
 	return 0;
@@ -1066,6 +1108,10 @@ static int ak09970_i2c_resume(struct device *dev)
 	}
 
 	wake_up_interruptible(&g_chip->wait);
+
+	if (hall_dev && hall_dev->health_monitor_support) {
+		hall_dev->monitor_data.pm_resume_count++;
+	}
 
 	return 0;
 }
@@ -1117,6 +1163,10 @@ static void __exit ak09970_exit(void)
 
 module_init(ak09970_init);
 module_exit(ak09970_exit);
+
+ #if IS_ENABLED(CONFIG_DRM_OPLUS_PANEL_NOTIFY) || IS_ENABLED(CONFIG_QCOM_PANEL_EVENT_NOTIFIER)
+MODULE_SOFTDEP("pre: msm_drm");
+#endif
 
 MODULE_DESCRIPTION("AK09970 hallswitch driver");
 MODULE_LICENSE("GPL");

@@ -198,6 +198,7 @@ struct oplus_dhall_chip {
 	bool irq_wake;
 	wait_queue_head_t wait;
 	struct wakeup_source *ws;                           /*Qualcomm KBA-211220012446, To make power manager stay awake*/
+	bool is_turn_upside_down;
 };
 
 #endif  /* __AK09970_H__ */

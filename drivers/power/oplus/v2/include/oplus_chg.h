@@ -216,6 +216,8 @@ enum {
 	NOTIFY_CURRENT_UNBALANCE,
 	NOTIFY_GAUGE_STUCK = 26,
 	NOTIFY_GAUGE_SOC_JUMP,
+	NOTIFY_ANTI_EXPANSION_WARNING,
+	NOTIFY_ANTI_EXPANSION_ERROR,
 };
 
 enum oplus_chg_err_code {
@@ -265,17 +267,6 @@ enum oplus_chg_usb_type {
 	OPLUS_CHG_USB_TYPE_MAX,
 };
 
-enum oplus_chg_wls_type {
-	OPLUS_CHG_WLS_UNKNOWN,
-	OPLUS_CHG_WLS_BPP,
-	OPLUS_CHG_WLS_EPP,
-	OPLUS_CHG_WLS_EPP_PLUS,
-	OPLUS_CHG_WLS_VOOC,
-	OPLUS_CHG_WLS_SVOOC,
-	OPLUS_CHG_WLS_PD_65W,
-	OPLUS_CHG_WLS_TRX,
-};
-
 enum oplus_chg_temp_region_type {
 	OPLUS_CHG_BATT_TEMP_COLD = 0,
 	OPLUS_CHG_BATT_TEMP_LITTLE_COLD,
@@ -296,18 +287,16 @@ enum oplus_chg_wls_rx_mode {
 	OPLUS_CHG_WLS_RX_MODE_EPP_5W,
 };
 
-enum oplus_chg_wls_trx_status {
-	OPLUS_CHG_WLS_TRX_STATUS_ENABLE,
-	OPLUS_CHG_WLS_TRX_STATUS_CHARGING,
-	OPLUS_CHG_WLS_TRX_STATUS_DISENABLE,
-};
-
 enum oplus_chg_wls_event_code {
 	WLS_EVENT_RX_UNKNOWN,
 	WLS_EVENT_RX_EPP_CAP,
 	WLS_EVENT_RX_UVP_ALARM,
 	WLS_EVENT_RX_UVP_CLEAR,
 	WLS_EVENT_TRX_CHECK,
+	WLS_EVENT_VAC_PRESENT,
+	WLS_EVENT_FORCE_UPGRADE,
+	WLS_EVENT_RXAC_ATTACH,
+	WLS_EVENT_RXAC_DETACH,
 };
 
 enum fastchg_protocol_type {
@@ -321,16 +310,36 @@ enum fastchg_protocol_type {
 	PROTOCOL_CHARGING_MAX = 100,
 };
 
+enum oplus_sili_id_match_info {
+	ID_NOT_MATCH = 0,
+	ID_MATCH_SILI,
+	ID_MATCH_IGNORE,
+};
+
+struct oplus_gauge_lifetime {
+	short max_cell_vol;
+	short max_charge_curr;
+	short max_dischg_curr;
+	char max_cell_temp;
+	char min_cell_temp;
+};
+
+/*wired:bit[0~15], wireless:bit[16~30]*/
 #define USB_TEMP_HIGH		BIT(0)
 #define USB_WATER_DETECT	BIT(1)
-#define USB_RESERVE2		BIT(2)
+#define OTG_ENABLE_PENDING	BIT(2)
 #define USB_RESERVE3		BIT(3)
 #define USB_RESERVE4		BIT(4)
+#define WLS_CONNECT_PENDING	BIT(16)
+#define WLS_RESERVE17		BIT(17)
 #define USB_DONOT_USE		BIT(31)
 
 bool oplus_is_power_off_charging(void);
 bool oplus_is_charger_reboot(void);
 struct timespec oplus_current_kernel_time(void);
 bool oplus_is_ptcrb_version(void);
-
+int oplus_get_chg_spec_version(void);
+uint8_t oplus_chg_get_region_id(void);
+unsigned int oplus_chg_get_nvid_support_flags(void);
+bool oplus_chg_get_common_charge_icl_support_flags(void);
 #endif /* __OPLUS_CHG_CORE_H__ */

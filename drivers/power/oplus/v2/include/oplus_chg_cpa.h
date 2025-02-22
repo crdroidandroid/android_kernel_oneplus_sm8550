@@ -39,5 +39,10 @@ void oplus_cpa_protocol_add_type(struct protocol_map *map, int type);
 int oplus_cpa_protocol_set_power(struct oplus_mms *topic, enum oplus_chg_protocol_type type, int power_mw);
 int oplus_cpa_protocol_clear_power(struct oplus_mms *topic, enum oplus_chg_protocol_type type);
 int oplus_cpa_protocol_get_power(struct oplus_mms *topic, enum oplus_chg_protocol_type type);
-
+int oplus_cpa_protocol_get_max_power(struct oplus_mms *topic);
+int oplus_cpa_protocol_get_max_power_by_type(struct oplus_mms *topic, enum oplus_chg_protocol_type type);
+int oplus_cpa_request_lock(struct oplus_mms *topic, const char *name);
+int oplus_cpa_request_unlock(struct oplus_mms *topic, const char *name);
+int oplus_cpa_protocol_disable(struct oplus_mms *topic, enum oplus_chg_protocol_type type);
+int oplus_cpa_protocol_enable(struct oplus_mms *topic, enum oplus_chg_protocol_type type);
 #endif /* __OPLUS_CHG_CPA_H__ */

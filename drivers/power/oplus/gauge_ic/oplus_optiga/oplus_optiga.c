@@ -9,6 +9,7 @@
 #include <linux/leds.h>
 #include <linux/module.h>
 #include <linux/of.h>
+#include <linux/pinctrl/consumer.h>
 #include <linux/platform_device.h>
 #include <linux/property.h>
 #include <linux/slab.h>
@@ -491,7 +492,7 @@ int oplus_optiga_start_test(int count){
 	g_oplus_optiga_chip->test_result.test_fail_count = 0;
 	g_oplus_optiga_chip->test_result.real_test_count_now = 0;
 	g_oplus_optiga_chip->test_result.real_test_fail_count = 0;
-	schedule_delayed_work_on(7,&g_oplus_optiga_chip->test_work, 0);
+	schedule_delayed_work_on(g_oplus_optiga_chip->cpu_id, &g_oplus_optiga_chip->test_work, 0);
 	return 0;
 }
 
@@ -509,7 +510,7 @@ static void oplus_optiga_auth_work(struct work_struct *work)
 		g_oplus_optiga_chip->test_result.real_test_fail_count++;
 		g_oplus_optiga_chip->hmac_status.real_fail_count++;
 		if (try_count < g_oplus_optiga_chip->try_count) {
-			schedule_delayed_work_on(7, &g_oplus_optiga_chip->auth_work, 0);
+			schedule_delayed_work_on(g_oplus_optiga_chip->cpu_id, &g_oplus_optiga_chip->auth_work, 0);
 			return;
 		} else {
 			complete(&g_oplus_optiga_chip->is_complete);
@@ -528,7 +529,7 @@ int oplus_optiga_auth(void)
 		return 0;
 	}
 	reinit_completion(&g_oplus_optiga_chip->is_complete);
-	schedule_delayed_work_on(7, &g_oplus_optiga_chip->auth_work, 0);
+	schedule_delayed_work_on(g_oplus_optiga_chip->cpu_id, &g_oplus_optiga_chip->auth_work, 0);
 	if (!wait_for_completion_timeout(&g_oplus_optiga_chip->is_complete,
 			msecs_to_jiffies(5000 * g_oplus_optiga_chip->try_count))) {
 		chg_err("time out!\n");

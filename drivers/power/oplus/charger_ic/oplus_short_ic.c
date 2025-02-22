@@ -396,7 +396,11 @@ static void oplus_short_ic_shutdown(struct i2c_client *client)
 	return;
 }
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0))
+static int oplus_short_ic_driver_probe(struct i2c_client *client)
+#else
 static int oplus_short_ic_driver_probe(struct i2c_client *client, const struct i2c_device_id *id)
+#endif
 {
 	struct oplus_short_ic *chip;
 

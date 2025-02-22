@@ -12,8 +12,8 @@
 #define DRIVER_VERSION			"1.1.0"
 
 /* Bq28Z610 standard data commands */
-#define Bq28Z610_REG_TI			0x0c
-#define Bq28Z610_REG_AI			0x14
+#define BQ28Z610_REG_TI			0x0c
+#define BQ28Z610_REG_AI			0x14
 
 /* Bq27541 standard data commands */
 #define BQ27541_REG_CNTL		0x00
@@ -50,6 +50,41 @@
 #define BQ27541_CS_DLOGEN		BIT(15)
 #define BQ27541_CS_SS			BIT(13)
 
+/* Bq27426 standard data commands */
+#define BQ27426_REG_CNTL			0x00
+#define BQ27426_REG_TEMP			0x02
+#define BQ27426_REG_VOLT			0x04
+#define BQ27426_REG_FLAGS			0x06
+#define BQ27426_REG_NAC				0x08
+#define BQ27426_REG_FAC				0x0A
+#define BQ27426_REG_RM				0x0C
+#define BQ27426_REG_FCC				0x0E
+#define BQ27426_REG_AI				0x10
+#define BQ27426_QMAX_16				0x16
+#define BQ27426_REG_AP				0x18
+#define BQ27426_PRESENT_DOD_1A			0x1A
+#define BQ27426_REG_SOC				0x1C
+#define BQ27426_REG_INTTEMP			0x1E
+#define BQ27426_REG_SOH				0x20
+#define BQ27426_OCV_CURRENT			0x22
+#define BQ27426_OCV_VOLTAGE			0x24
+#define BQ27426_REM_CAP_UNFILT			0x28
+#define BQ27426_REM_CAP_FILT			0x2A
+#define BQ27426_FCC_UNFILT			0x2C
+#define BQ27426_FCC_FLIT			0x2E
+#define BQ27426_REG_UNFILT			0x30
+#define BQ27426_DOD0_66				0x66
+#define BQ27426_DOD_AT_EOC			0x68
+#define BQ27426_REM_CAP_6A			0x6A
+#define BQ27426_PASSED_CHG			0x6C
+#define BQ27426_QSTART				0x6E
+#define BQ27426_DOD_FINAL			0x70
+#define BQ27426_CMD_INVALID			0xFF
+#define BQ27426_BQFS_FILT			0x0A
+#define BQ27426_FLAG_DSC			BIT(0)
+#define BQ27426_FLAG_FC				BIT(9)
+
+
 /* Control subcommands */
 #define BQ27541_SUBCMD_CTNL_STATUS		0x0000
 #define BQ27541_SUBCMD_DEVCIE_TYPE		0x0001
@@ -79,6 +114,19 @@
 #define ZERO_DEGREE_CELSIUS_IN_TENTH_KELVIN		(-2731)
 #define BQ27541_INIT_DELAY		((HZ)*1)
 
+/* Bq27426 subcommands */
+#define BQ27426_SUBCMD_CTNL_STATUS		0x0000
+#define BQ27426_SUBCMD_DEVCIE_TYPE		0x0001
+#define BQ27426_SUBCMD_FW_VER			0x0002
+#define BQ27426_SUBCMD_DM_CODE			0x0004
+#define BQ27426_SUBCMD_PREV_MACW		0x0007
+#define BQ27426_SUBCMD_CHEM_ID			0x0008
+#define BQ27426_SUBCMD_BAT_INS			0x000C
+#define BQ27426_SUBCMD_BAT_REM			0x000D
+#define BQ27426_SUBCMD_SET_SLP			0x001C
+#define BQ27426_SUBCMD_FG_SYNC			0x0019
+#define BQ27426_SUBCMD_SEALED			0x0020
+#define BQ27426_SUBCMD_RESET			0x0041
 
 /*----------------------- Bq27411 standard data commands----------------------------------------- */
 
@@ -161,9 +209,10 @@
 
 #define DEVICE_TYPE_BQ27541			0x0541
 #define DEVICE_TYPE_BQ27411			0x0421
-#define DEVICE_TYPE_BQ28Z610		0xFFA5
+#define DEVICE_TYPE_BQ28Z610			0xFFA5
 #define DEVICE_TYPE_ZY0602			0x0602
 #define DEVICE_TYPE_ZY0603			0xA5FF
+#define DEVICE_TYPE_BQ27Z561        0x1561
 #define DEVICE_NAME_LEN				12
 
 #define DEVICE_BQ27541				0
@@ -171,6 +220,9 @@
 #define DEVICE_BQ28Z610				2
 #define DEVICE_ZY0602				3
 #define DEVICE_ZY0603				4
+
+#define DEVICE_TYPE_BQ27426			0x0426
+#define DEVICE_BQ27426				5
 
 #define DEVICE_TYPE_FOR_VOOC_BQ27541		0
 #define DEVICE_TYPE_FOR_VOOC_BQ27411		1
@@ -235,10 +287,26 @@
 #define BQ28Z610_MAC_CELL_VOLTAGE_ADDR			0x40
 #define BQ28Z610_MAC_CELL_VOLTAGE_SIZE			4//total 34byte,only read 4byte(aaAA bbBB)
 
-#define ZY602_MAC_CELL_DOD0_EN_ADDR			    0x00
-#define ZY602_MAC_CELL_DOD0_CMD				    0x00E3
-#define ZY602_MAC_CELL_DOD0_ADDR				0x40
-#define ZY602_MAC_CELL_DOD0_SIZE				12
+#define ZY0602_CMD_FIRMWARE_VERSION			0x00CF
+#define ZY0602_FIRMWARE_VERSION_DEFAULT			0
+#define ZY0602_FIRMWARE_VERSION_SUPPORT			4
+#define ZY0602_CMD_CHECKSUM				0x60
+#define ZY0602_SUBCMD_TRY_COUNT				2
+#define ZY0602_CMD_SBS_DELAY				3
+#define ZY0602_CMD_DFSTART				0x61
+#define ZY0602_CMD_DFCLASS				0x3E
+#define ZY0602_CMD_DFPAGE				0x3F
+#define ZY0602_CMD_BLOCK				0x40
+#define ZY0602_CMDMASK_RAMBLOCK_R			0x02000000
+#define ZY0602_CMD_GAUGEBLOCK6				(ZY0602_CMDMASK_RAMBLOCK_R | 0x002b)
+#define ZY602_MAC_CELL_DOD0_EN_ADDR			0x00
+#define ZY602_MAC_CELL_DOD0_CMD				0x00E3
+#define ZY602_MAC_CELL_E4_CMD				0x00E4
+#define ZY602_MAC_CELL_E5_CMD				0x00E5
+#define ZY602_MAC_CELL_E6_CMD				0x00E6
+#define ZY602_MAC_CELL_2B_CMD				0x002B
+#define ZY602_MAC_CELL_DOD0_ADDR			0x40
+#define ZY602_MAC_CELL_DOD0_SIZE			12
 #define ZY602_FW_CHECK_CMD				0xA0
 #define ZY602_FW_CHECK_ERROR				0x3602
 
@@ -253,6 +321,7 @@
 #define ZY602_MAC_CELL_QMAX_CMD				0x00E4
 #define ZY602_MAC_CELL_QMAX_ADDR_A			0x40
 #define ZY602_MAC_CELL_QMAX_SIZE_A			18
+#define ZY602_MAC_CELL_DOD_QMAX_SIZE_A			20
 
 #define BQ28Z610_MAC_CELL_QMAX_EN_ADDR			0x3E
 #define BQ28Z610_MAC_CELL_QMAX_CMD				0x0075
@@ -325,12 +394,42 @@ typedef enum
 {
 	TI_GAUGE = 0,
 	SW_GAUGE,
+	NFG_GAUGE,
 	UNKNOWN_GAUGE_TYPE,
 } SCC_GAUGE_TYPE;
 
 #define BCC_PARMS_COUNT 19
 #define BCC_PARMS_COUNT_LEN (BCC_PARMS_COUNT * sizeof(int))
 #define ZY0602_KEY_INDEX	0X02
+
+#define BQ28Z610_DATAFLASHBLOCK		0x3e
+#define BQ28Z610_SUBCMD_CHEMID		0x0006
+#define BQ28Z610_SUBCMD_GAUGEING_STATUS	0x0056
+#define BQ28Z610_SUBCMD_DA_STATUS1	0x0071
+#define BQ28Z610_SUBCMD_IT_STATUS1	0x0073
+#define BQ28Z610_SUBCMD_IT_STATUS2	0x0074
+#define BQ28Z610_SUBCMD_IT_STATUS3	0x0075
+#define BQ28Z610_SUBCMD_CB_STATUS	0x0076
+#define BQ28Z610_SUBCMD_TRY_COUNT	3
+#define CALIB_TIME_CHECK_ARGS		6
+
+#define BQ27Z561_DATAFLASHBLOCK	0x3e
+#define BQ27Z561_SUBCMD_DEVICE_TYPE	0X0001
+#define BQ27Z561_SUBCMD_CHEMID	0X0006
+#define BQ27Z561_SUBCMD_GAUGE_STATUS	0X0056
+#define BQ27Z561_SUBCMD_IT_STATUS1	0X0073
+#define BQ27Z561_SUBCMD_IT_STATUS2	0X0074
+#define BQ27Z561_SUBCMD_IT_STATUS3	0X0075
+#define BQ27Z561_SUBCMD_FILTERED_CAP	0X0078
+#define BQ27Z561_SUBCMD_TRY_COUNT	3
+
+#define BQ27Z561_AUTHENDATA_1ST	0x40
+#define BQ27Z561_AUTHENDATA_2ND	0x50
+#define BQ27Z561_AUTHENCHECKSUM	0x60
+#define BQ27Z561_AUTHENLEN		0x61
+#define BQ27Z561_OPERATION_STATUS	0x0054
+#define BQ27Z561_I2C_TRY_COUNT	7
+
 struct cmd_address {
 /*      bq27411 standard cmds     */
 	u8	reg_cntl;
@@ -433,6 +532,23 @@ struct bq27541_authenticate_data {
 #define GAUGE_AUTH_MSG_LEN 20
 #define WLS_AUTH_RANDOM_LEN					8
 #define WLS_AUTH_ENCODE_LEN					8
+#define UFCS_AUTH_MSG_LEN					16
+#define GAUGE_SHA256_AUTH_MSG_LEN				32
+
+typedef struct {
+	unsigned char msg[GAUGE_SHA256_AUTH_MSG_LEN];
+	unsigned char rcv_msg[GAUGE_SHA256_AUTH_MSG_LEN];
+} oplus_gauge_sha256_auth_result;
+
+typedef struct {
+	unsigned char random[GAUGE_SHA256_AUTH_MSG_LEN];
+	unsigned char ap_encode[GAUGE_SHA256_AUTH_MSG_LEN];
+	unsigned char gauge_encode[GAUGE_SHA256_AUTH_MSG_LEN];
+} oplus_gauge_sha256_auth;
+
+typedef struct {
+	unsigned char msg[UFCS_AUTH_MSG_LEN];
+} oplus_ufcs_auth_result;
 
 typedef struct {
 	int result;
@@ -450,6 +566,8 @@ typedef struct {
 	oplus_gauge_auth_result rst_k1;
 	struct wls_chg_auth_result wls_auth_data;
 	oplus_gauge_auth_result rst_k2;
+	oplus_ufcs_auth_result ufcs_k0;
+	oplus_gauge_sha256_auth_result sha256_rst_k0;
 } oplus_gauge_auth_info_type;
 
 #define MODE_CHECK_MAX_LENGTH 1024
@@ -461,6 +579,17 @@ struct gauge_track_mode_info {
 	oplus_chg_track_trigger *load_trigger;
 	struct delayed_work load_trigger_work;
 	bool track_init_done;
+};
+
+#define BQFS_INFO_LEN 128
+struct bqfs_para_info {
+	bool bqfs_status;
+	bool bqfs_ship;
+	int batt_type;
+	int bqfs_dm;
+	int fw_lenth;
+	char track_info[BQFS_INFO_LEN];
+	const u8 *firmware_data;
 };
 
 struct chip_bq27541 {
@@ -522,7 +651,11 @@ struct chip_bq27541 {
 	struct pinctrl_state *gpio_data_sleep;
 	struct pinctrl_state *gpio_reset_active;
 	struct pinctrl_state *gpio_reset_sleep;
+	struct iio_channel *batt_id_chan;
 
+	bool support_extern_cmd;
+	bool support_sha256_hmac;
+	struct delayed_work hw_config_retry_work;
 	bool modify_soc_smooth;
 	bool modify_soc_calibration;
 
@@ -546,14 +679,18 @@ struct chip_bq27541 {
 	unsigned int *afi_buf_len;
 
 	bool batt_bq28z610;
+	bool batt_bq27z561;
 	bool batt_zy0603;
+	bool batt_nfg1000a;
 	bool bq28z610_need_balancing;
 	bool enable_sleep_mode;
 	int bq28z610_device_chem;
 	int gauge_num;
 	struct mutex chip_mutex;
-	struct mutex bq28z610_alt_manufacturer_access;
+	struct mutex calib_time_mutex;
+	struct mutex gauge_alt_manufacturer_access;
 	struct bq27541_authenticate_data *authenticate_data;
+	oplus_gauge_sha256_auth *sha256_authenticate_data;
 	struct file_operations *authenticate_ops;
 	struct oplus_gauge_chip	*oplus_gauge;
 
@@ -565,6 +702,12 @@ struct chip_bq27541 {
 	int batt_qmax_2;
 	int batt_qmax_passed_q;
 	int bcc_buf[BCC_PARMS_COUNT];
+
+	int dod_time;
+	int qmax_time;
+	int dod_time_pre;
+	int qmax_time_pre;
+	int calib_check_args_pre[CALIB_TIME_CHECK_ARGS];
 
 	int capacity_pct;
 	int fg_soft_version;
@@ -578,9 +721,31 @@ struct chip_bq27541 {
 	bool gauge_cal_board;
 	bool gauge_check_model;
 	bool gauge_check_por;
+
+	struct bqfs_para_info bqfs_info;
+	struct mutex track_upload_lock;
+	struct mutex track_bqfs_err_lock;
+	u32 debug_force_bqfs_err;
+	bool bqfs_err_uploading;
+	oplus_chg_track_trigger *bqfs_err_load_trigger;
+	struct delayed_work bqfs_err_load_trigger_work;
+	struct delayed_work bqfs_track_update_work;
+};
+
+struct gauge_track_info_reg {
+	int addr;
+	int len;
+	int start_index;
+	int end_index;
 };
 
 int bq27541_track_update_mode_buf(struct chip_bq27541 *chip, char *buf);
+int bq27541_read_i2c_onebyte(struct chip_bq27541 *chip, u8 cmd, u8 *returnData);
+int gauge_read_i2c(struct chip_bq27541 *chip, int cmd, int *returnData);
+int gauge_i2c_txsubcmd_onebyte(struct chip_bq27541 *chip, u8 cmd, u8 writeData);
+int gauge_write_i2c_block(struct chip_bq27541 *chip, u8 cmd, u8 length, u8 *writeData);
+int gauge_i2c_txsubcmd(struct chip_bq27541 *chip, int cmd, int writeData);
+int gauge_read_i2c_block(struct chip_bq27541 *chip, u8 cmd, u8 length, u8 *returnData);
 extern bool oplus_gauge_ic_chip_is_null(void);
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0))
 int bq27541_driver_init(void);

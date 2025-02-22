@@ -5,11 +5,38 @@
     "enum_list": [
         {
             "name": "oplus_dpdm_switch_mode",
+            "desc":{
+                "zh": "虚拟IC框架dpdm开关工作模式类型"
+            },
             "list": [
-                "DPDM_SWITCH_TO_AP",
-                "DPDM_SWITCH_TO_VOOC",
-                "DPDM_SWITCH_TO_UFCS",
-                "DPDM_SWITCH_TO_HEADPHONE"
+                {
+                    "lable": "DPDM_SWITCH_TO_AP",
+                    "desc": {
+                        "zh": "切换到AP"
+                    },
+                    "str": "ap"
+                },
+                {
+                    "lable": "DPDM_SWITCH_TO_VOOC",
+                    "desc": {
+                        "zh": "切换到VOOC"
+                    },
+                    "str": "vooc"
+                },
+                {
+                    "lable": "DPDM_SWITCH_TO_UFCS",
+                    "desc": {
+                        "zh": "切换到UFCS"
+                    },
+                    "str": "ufcs"
+                },
+                {
+                    "lable": "DPDM_SWITCH_TO_HEADPHONE",
+                    "desc": {
+                        "zh": "切换到HEADPHONE"
+                    },
+                    "str": "headphone"
+                }
             ]
         }
     ],

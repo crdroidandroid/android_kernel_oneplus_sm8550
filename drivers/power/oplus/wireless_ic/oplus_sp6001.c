@@ -486,7 +486,11 @@ bool sp6001_device_reconize(void)
 	}
 }
 
-static int sp6001_driver_probe(struct i2c_client *client, const struct i2c_device_id *id) 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0))
+static int sp6001_driver_probe(struct i2c_client *client)
+#else
+static int sp6001_driver_probe(struct i2c_client *client, const struct i2c_device_id *id)
+#endif
 {
 	struct oplus_sp6001_ic	*chip;
 
@@ -511,16 +515,21 @@ static int sp6001_driver_probe(struct i2c_client *client, const struct i2c_devic
 
 	chg_debug( " call end\n");
 
-	return 0;                                                                                       
-
+	return 0;
 }
 
 
 static struct i2c_driver sp6001_i2c_driver;
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0))
+static void sp6001_driver_remove(struct i2c_client *client)
+#else
 static int sp6001_driver_remove(struct i2c_client *client)
-{    
+#endif
+{
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0))
 	return 0;
+#endif
 }
 
 

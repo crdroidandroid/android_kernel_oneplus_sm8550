@@ -101,9 +101,10 @@
 #include "fp_driver.h"
 #include "include/fingerprint_event.h"
 #include "include/fp_netlink.h"
-#ifdef CONFIG_FP_INJECT_ENABLE
+#include <linux/kconfig.h>
+#if (IS_ENABLED(CONFIG_OPLUS_FEATURE_BSP_DRV_VND_INJECT_TEST) || IS_ENABLED(CONFIG_FP_INJECT_ENABLE))
 #include "include/fp_fault_inject.h"
-#endif // CONFIG_FP_INJECT_ENABLE
+#endif  // CONFIG_OPLUS_FEATURE_BSP_DRV_VND_INJECT_TEST || CONFIG_FP_INJECT_ENABLE
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0)
 #define FB_EARLY_EVENT_BLANK 0x10
@@ -202,7 +203,7 @@ static int fp_panel_event_notifier_register(struct fp_dev *fp_dev)
     if (fp_dev->active_panel) {
         cookie = panel_event_notifier_register(
             PANEL_EVENT_NOTIFICATION_PRIMARY,
-            PANEL_EVENT_NOTIFIER_CLIENT_PRIMARY_ONSCREENFINGERPRINT,
+            (enum panel_event_notifier_client)PANEL_EVENT_NOTIFIER_CLIENT_PRIMARY_ONSCREENFINGERPRINT,
             fp_dev->active_panel, &fp_panel_notifier_callback,
             fp_dev);
 
@@ -521,7 +522,9 @@ static long fp_ioctl(struct file *filp, unsigned int cmd, unsigned long arg) {
             break;
 
         case FP_IOC_REMOVE:
-            irq_cleanup(fp_dev);
+            if (fp_dev->optical_irq_disable_flag == 0) {
+                irq_cleanup(fp_dev);
+            }
             fp_cleanup_device(fp_dev);
             pr_info("%s FP_IOC_REMOVE\n", __func__);
             send_fingerprint_msg_by_type(E_FP_HAL, 0, NULL, 0);
@@ -562,9 +565,11 @@ static long fp_ioctl(struct file *filp, unsigned int cmd, unsigned long arg) {
             break;
 #endif
         case FP_IOC_RD_IRQ_VALUE:
-            pr_info("%s FP_IOC_RD_IRQ_VALUE\n", __func__);
-            irq_value = fp_read_irq_value(fp_dev);
-            retval = __put_user(irq_value, (int32_t __user *)arg);
+            if (fp_dev->optical_irq_disable_flag == 0) {
+                pr_info("%s FP_IOC_RD_IRQ_VALUE\n", __func__);
+                irq_value = fp_read_irq_value(fp_dev);
+                retval = __put_user(irq_value, (int32_t __user *)arg);
+            }
             break;
         case FP_IOC_RESET_GPIO_CTL_LOW:
             pr_info("%s FP_IOC_RESET_GPIO_CTL_LOW\n", __func__);
@@ -575,12 +580,16 @@ static long fp_ioctl(struct file *filp, unsigned int cmd, unsigned long arg) {
             fp_reset_gpio_ctl(fp_dev, 1);
             break;
         case FP_IOC_IRQ_GPIO_CTL_HIGH:
-            pr_info("%s FP_IOC_IRQ_GPIO_CTL_HIGH\n", __func__);
-            gpio_set_value(fp_dev->irq_gpio, 1);
+            if (fp_dev->optical_irq_disable_flag == 0) {
+                pr_info("%s FP_IOC_IRQ_GPIO_CTL_HIGH\n", __func__);
+                gpio_set_value(fp_dev->irq_gpio, 1);
+            }
             break;
         case FP_IOC_IRQ_GPIO_CTL_LOW:
-            pr_info("%s FP_IOC_IRQ_GPIO_CTL_LOW\n", __func__);
-            gpio_set_value(fp_dev->irq_gpio, 0);
+            if (fp_dev->optical_irq_disable_flag == 0) {
+                pr_info("%s FP_IOC_IRQ_GPIO_CTL_LOW\n", __func__);
+                gpio_set_value(fp_dev->irq_gpio, 0);
+            }
             break;
         case FP_IOC_NETLINK_INIT:
             pr_info("%s FP_IOC_NETLINK_INIT\n", __func__);
@@ -595,7 +604,7 @@ static long fp_ioctl(struct file *filp, unsigned int cmd, unsigned long arg) {
             pr_info("%s FP_IOC_RD_NETLINK_VALUE\n", __func__);
             retval = __put_user(get_fp_driver_evt_type(), (int32_t __user *)arg);
             break;
-#ifdef CONFIG_FP_INJECT_ENABLE
+#if (IS_ENABLED(CONFIG_OPLUS_FEATURE_BSP_DRV_VND_INJECT_TEST) || IS_ENABLED(CONFIG_FP_INJECT_ENABLE))
         case FP_IOC_FAULT_INJECT_BLOCK_MSG_CLEAN:
         case FP_IOC_FAULT_INJECT_BLOCK_MSG_UP:
         case FP_IOC_FAULT_INJECT_BLOCK_MSG_DOWN:
@@ -603,7 +612,7 @@ static long fp_ioctl(struct file *filp, unsigned int cmd, unsigned long arg) {
             pr_info("%s falut inject cmd: %d\n", __func__, cmd);
             fault_inject_set_block_msg(cmd);
             break;
-#endif // CONFIG_FP_INJECT_ENABLE
+#endif  // CONFIG_OPLUS_FEATURE_BSP_DRV_VND_INJECT_TEST || CONFIG_FP_INJECT_ENABLE
         case FP_IOC_LHBM_TEMPERATURE:
             pr_info("%s FP_IOC_LHBM_TEMPERATURE\n", __func__);
             retval = __put_user(local_hbm_get_temperature(), (int32_t __user *)arg);
@@ -641,9 +650,11 @@ static int fp_open(struct inode *inode, struct file *filp) {
             if (status) {
                 goto err_parse_dt;
             }
-            status = irq_setup(fp_dev);
-            if (status) {
-                goto err_irq;
+            if (fp_dev->optical_irq_disable_flag == 0) {
+                status = irq_setup(fp_dev);
+                if (status) {
+                    goto err_irq;
+                }
             }
             status = fp_panel_event_notifier_register(fp_dev);
             if (status) {
@@ -658,8 +669,10 @@ static int fp_open(struct inode *inode, struct file *filp) {
 
     return status;
 err_panel:
-    irq_cleanup(fp_dev);
-    pr_info("panel_register fail\n");
+    if (fp_dev->optical_irq_disable_flag == 0) {
+        irq_cleanup(fp_dev);
+        pr_info("panel_register fail\n");
+    }
 err_irq:
     fp_cleanup_device(fp_dev);
     fp_exception_report_drv(FP_SCENE_DRV_OPEN_FAIL);
@@ -685,7 +698,9 @@ static int fp_release(struct inode *inode, struct file *filp) {
         fp_cs_ctl(fp_dev, 0);
         fp_power_off(fp_dev);
         fp_dev->device_available = 0;
-        irq_cleanup(fp_dev);
+        if (fp_dev->optical_irq_disable_flag == 0) {
+            irq_cleanup(fp_dev);
+        }
         fp_cleanup_device(fp_dev);
         /*power off the sensor*/
     }
@@ -734,17 +749,17 @@ static void fp_panel_notifier_callback(enum panel_event_notifier_tag tag, struct
         return;
     }
 
-    switch (notification->notif_type) {
-    case DRM_PANEL_EVENT_ONSCREENFINGERPRINT_UI_READY:
-        pr_err("[%s] UI ready\n", __func__);
-        send_fingerprint_msg_by_type(E_FP_LCD, 1, NULL, 0);
-        break;
-    case DRM_PANEL_EVENT_ONSCREENFINGERPRINT_UI_DISAPPEAR:
-        pr_err("[%s] UI disappear\n", __func__);
-        send_fingerprint_msg_by_type(E_FP_LCD, 0, NULL, 0);
-        break;
-    default:
-        break;
+    switch ((int)notification->notif_type) {
+        case (int)DRM_PANEL_EVENT_ONSCREENFINGERPRINT_UI_READY:
+            pr_err("[%s] UI ready\n", __func__);
+            send_fingerprint_msg_by_type(E_FP_LCD, 1, NULL, 0);
+            break;
+        case (int)DRM_PANEL_EVENT_ONSCREENFINGERPRINT_UI_DISAPPEAR:
+            pr_err("[%s] UI disappear\n", __func__);
+            send_fingerprint_msg_by_type(E_FP_LCD, 0, NULL, 0);
+            break;
+        default:
+            break;
     }
 }
 
@@ -1085,7 +1100,11 @@ static int __init fp_init(void) {
         return status;
     }
     SPIDEV_MAJOR = status;
-    fp_class     = class_create(THIS_MODULE, CLASS_NAME);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 4, 0)
+    fp_class = class_create(CLASS_NAME);
+#else
+    fp_class = class_create(THIS_MODULE, CLASS_NAME);
+#endif
     if (IS_ERR(fp_class)) {
         unregister_chrdev(SPIDEV_MAJOR, fp_driver.driver.name);
         pr_warn("Failed to create class.\n");
@@ -1127,6 +1146,10 @@ MODULE_SOFTDEP("pre:oplus_log_core");
 
 #if defined(CONFIG_FP_SUPPLY_MODE_LDO)
 MODULE_SOFTDEP("pre:wl2868c");
+#endif
+
+#if defined(CONFIG_FP_SUPPLY_MODE_LDO_DIO8018)
+MODULE_SOFTDEP("pre:DIO8018");
 #endif
 
 MODULE_DESCRIPTION("oplus fingerprint common driver");

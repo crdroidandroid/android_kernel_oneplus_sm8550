@@ -15,6 +15,7 @@
 #include "ufcs_event.h"
 #include "ufcs_msg.h"
 #include "ufcs_notify.h"
+#include "ufcs_intf.h"
 
 #define MSG_HEAD_SIZE		2
 #define MSG_HEAD_TYPE_MASK	0x7
@@ -194,7 +195,7 @@ static unsigned char crc8_calculate(const unsigned char *data, unsigned char siz
 	return crc;
 }
 
-static struct ufcs_msg *ufcs_unpack_msg(struct ufcs_class *class, const u8 *buf, int len)
+struct ufcs_msg *ufcs_unpack_msg(struct ufcs_class *class, const u8 *buf, int len)
 {
 	struct ufcs_msg *msg;
 	struct ufcs_config *config;
@@ -591,26 +592,25 @@ static int ufcs_check_error_info(struct ufcs_class *class, unsigned int dev_err_
 			}
 			goto err;
 		}
-		if (dev_err_flag & BIT(UFCS_RECV_ERR_ACK_TIMEOUT))
+		if (dev_err_flag & BIT(UFCS_RECV_ERR_ACK_TIMEOUT)) {
 			ufcs_err("sent packet complete, but ack receive timeout\n");
-		if (dev_err_flag & BIT(UFCS_RECV_ERR_DATA_READY))
-			ufcs_err("sent packet complete = 1 && data ready = 1\n");
+		} else {
+			if (sender->status == MSG_WAIT_ACK) {
+				stop_ack_receive_timer(class);
+				sender->status = MSG_SEND_OK;
+				complete(&sender->ack);
+			}
+
+			if (dev_err_flag & BIT(UFCS_RECV_ERR_DATA_READY))
+				ufcs_err("ack interrupt read delayed! need to read msg!\n");
+			else
+				return 1;
+		}
 	} else {
 		if (!(dev_err_flag & BIT(UFCS_RECV_ERR_DATA_READY))) {
 			ufcs_err("sent packet complete = 0 && data ready = 0\n");
 			goto err;
 		}
-	}
-
-	if (sender->status == MSG_WAIT_ACK) {
-		stop_ack_receive_timer(class);
-		sender->status = MSG_SEND_OK;
-		complete(&sender->ack);
-		if ((dev_err_flag & BIT(UFCS_RECV_ERR_SENT_CMP)) &&
-		    (dev_err_flag & BIT(UFCS_RECV_ERR_DATA_READY)))
-			ufcs_err("ack interrupt read delayed! need to read msg!\n");
-		else
-			return 1;
 	}
 
 	return 0;
@@ -678,11 +678,18 @@ recv:
 		 * non-ACK/NCK message to ensure that the message sending interval
 		 * meets the requirements.
 		 */
-		mutex_lock(&class->sender.lock);
-		class->sender.status = MSG_SEND_PENDIGN;
-		stop_msg_trans_delay_timer(class);
-		start_msg_trans_delay_timer(class);
-		mutex_unlock(&class->sender.lock);
+		if (!mutex_is_locked(&class->sender.lock)) {
+			/*
+			 * This operation is only needed when the sender is
+			 * idle, because the sender will do the same operation
+			 * after sending the message.
+			 */
+			mutex_lock(&class->sender.lock);
+			class->sender.status = MSG_SEND_PENDIGN;
+			stop_msg_trans_delay_timer(class);
+			start_msg_trans_delay_timer(class);
+			mutex_unlock(&class->sender.lock);
+		}
 	}
 
 	usleep_range(T_ACK_TRANSMIT_US, T_ACK_TRANSMIT_US + 1);
@@ -852,7 +859,7 @@ int ufcs_push_event(struct ufcs_class *class, struct ufcs_event *event)
 	return 0;
 }
 
-static int ufcs_process_event(struct ufcs_class *class, struct ufcs_event *event)
+int ufcs_process_event(struct ufcs_class *class, struct ufcs_event *event)
 {
 	struct ufcs_msg *msg;
 	int rc;
@@ -935,7 +942,7 @@ static void ufcs_event_work(struct kthread_work *work)
 		break;
 	default:
 		ufcs_err("not support msg type, type=%d\n", msg->head.type);
-		ufcs_source_hard_reset(class->ufcs);
+		ufcs_source_hard_reset(class);
 		goto msg_type_err;
 	}
 	if (config->reply_ack)
@@ -985,6 +992,11 @@ static void ufcs_msg_send_work(struct kthread_work *work)
 		ack_nck_msg = false;
 
 	if (!ack_nck_msg) {
+#if IS_ENABLED(CONFIG_OPLUS_UFCS_CLASS_DEBUG)
+		rc = ufcs_debug_check_nck_info(class, sender->msg);
+		if (rc > 0)
+			sender->status = MSG_NCK;
+#endif
 		switch (sender->status) {
 		case MSG_ACK_TIMEOUT:
 		case MSG_NCK:
@@ -1140,6 +1152,9 @@ void ufcs_free_all_event(struct ufcs_class *class)
 struct ufcs_event *ufcs_get_next_event(struct ufcs_class *class)
 {
 	struct ufcs_event *event;
+#if IS_ENABLED(CONFIG_OPLUS_UFCS_CLASS_DEBUG)
+	int rc;
+#endif
 
 	if (class == NULL) {
 		ufcs_err("class is NULL");
@@ -1165,6 +1180,15 @@ recheck:
 	spin_unlock(&class->event.event_list_lock);
 
 	ufcs_debug("get %s event\n", ufcs_get_event_name(event));
+
+#if IS_ENABLED(CONFIG_OPLUS_UFCS_CLASS_DEBUG)
+	/* check debug refuse info */
+	rc = ufcs_debug_check_refuse_info(class, event->msg);
+	if (rc > 0) {
+		ufcs_free_event(class, &event);
+		goto recheck;
+	}
+#endif
 
 	if (event->type != UFCS_EVENT_SEND_REFUSE)
 		return event;

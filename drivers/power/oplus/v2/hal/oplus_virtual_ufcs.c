@@ -93,26 +93,11 @@ static int oplus_chg_ufcs_pdo_set(struct oplus_chg_ic_dev *ic_dev, int vol_mv, i
 {
 	struct oplus_virtual_ufcs_ic *chip;
 	int rc;
-#ifdef CONFIG_OPLUS_CHG_IC_DEBUG
-	struct oplus_chg_ic_overwrite_data *data;
-	const void *buf;
-#endif
 
 	if (ic_dev == NULL) {
 		chg_err("oplus_chg_ic_dev is NULL");
 		return -ENODEV;
 	}
-
-#ifdef CONFIG_OPLUS_CHG_IC_DEBUG
-	data = oplus_chg_ic_get_overwrite_data(ic_dev, OPLUS_IC_FUNC_UFCS_PDO_SET);
-	if (unlikely(data != NULL)) {
-		buf = (const void *)data->buf;
-		if (!oplus_chg_ic_debug_data_check(buf, data->size))
-			return -EINVAL;
-		vol_mv = oplus_chg_ic_get_item_data(buf, 0);
-		curr_ma = oplus_chg_ic_get_item_data(buf, 1);
-	}
-#endif
 
 	chip = oplus_chg_ic_get_drvdata(ic_dev);
 	rc = ufcs_intf_pdo_set(chip->ufcs, vol_mv, curr_ma);
@@ -131,7 +116,7 @@ static int oplus_chg_ufcs_hard_reset(struct oplus_chg_ic_dev *ic_dev)
 	}
 	chip = oplus_chg_ic_get_drvdata(ic_dev);
 
-	rc = ufcs_source_hard_reset(chip->ufcs);
+	rc = ufcs_intf_source_hard_reset(chip->ufcs);
 
 	return rc;
 }
@@ -156,25 +141,12 @@ static int oplus_chg_ufcs_config_wd(struct oplus_chg_ic_dev *ic_dev, u16 time_ms
 {
 	struct oplus_virtual_ufcs_ic *chip;
 	int rc;
-#ifdef CONFIG_OPLUS_CHG_IC_DEBUG
-	struct oplus_chg_ic_overwrite_data *data;
-	const void *buf;
-#endif
 
 	if (ic_dev == NULL) {
 		chg_err("oplus_chg_ic_dev is NULL");
 		return -ENODEV;
 	}
 
-#ifdef CONFIG_OPLUS_CHG_IC_DEBUG
-	data = oplus_chg_ic_get_overwrite_data(ic_dev, OPLUS_IC_FUNC_UFCS_CONFIG_WD);
-	if (unlikely(data != NULL)) {
-		buf = (const void *)data->buf;
-		if (!oplus_chg_ic_debug_data_check(buf, data->size))
-			return -EINVAL;
-		time_ms = oplus_chg_ic_get_item_data(buf, 0);
-	}
-#endif
 	chip = oplus_chg_ic_get_drvdata(ic_dev);
 	rc = ufcs_intf_config_watchdog(chip->ufcs, time_ms);
 
@@ -506,109 +478,6 @@ static void *oplus_chg_ufcs_get_func(struct oplus_chg_ic_dev *ic_dev, enum oplus
 	return func;
 }
 
-#ifdef CONFIG_OPLUS_CHG_IC_DEBUG
-static int oplus_chg_ufcs_set_func_data(struct oplus_chg_ic_dev *ic_dev,
-				      enum oplus_chg_ic_func func_id,
-				      const void *buf, size_t buf_len)
-{
-	int rc = 0;
-
-	if (!ic_dev->online && (func_id != OPLUS_IC_FUNC_INIT) &&
-	    (func_id != OPLUS_IC_FUNC_EXIT))
-		return -EINVAL;
-
-	switch (func_id) {
-	case OPLUS_IC_FUNC_INIT:
-		if (!oplus_chg_ic_debug_data_check(buf, buf_len))
-			return -EINVAL;
-		rc = oplus_chg_ufcs_init(ic_dev);
-		break;
-	case OPLUS_IC_FUNC_EXIT:
-		if (!oplus_chg_ic_debug_data_check(buf, buf_len))
-			return -EINVAL;
-		rc = oplus_chg_ufcs_exit(ic_dev);
-		break;
-	case OPLUS_IC_FUNC_REG_DUMP:
-		if (!oplus_chg_ic_debug_data_check(buf, buf_len))
-			return -EINVAL;
-		rc = oplus_chg_ufcs_reg_dump(ic_dev);
-		break;
-	case OPLUS_IC_FUNC_UFCS_PDO_SET:
-		if (!oplus_chg_ic_debug_data_check(buf, buf_len))
-			return -EINVAL;
-		rc = oplus_chg_ufcs_pdo_set(ic_dev,
-			oplus_chg_ic_get_item_data(buf, 0),
-			oplus_chg_ic_get_item_data(buf, 1));
-		break;
-	case OPLUS_IC_FUNC_UFCS_HARD_RESET:
-		if (!oplus_chg_ic_debug_data_check(buf, buf_len))
-			return -EINVAL;
-		rc = oplus_chg_ufcs_hard_reset(ic_dev);
-		break;
-	case OPLUS_IC_FUNC_UFCS_EXIT:
-		if (!oplus_chg_ic_debug_data_check(buf, buf_len))
-			return -EINVAL;
-		rc = oplus_chg_ufcs_exit(ic_dev);
-		break;
-	case OPLUS_IC_FUNC_UFCS_CONFIG_WD:
-		if (!oplus_chg_ic_debug_data_check(buf, buf_len))
-			return -EINVAL;
-		rc = oplus_chg_ufcs_config_wd(ic_dev, oplus_chg_ic_get_item_data(buf, 0));
-		break;
-	default:
-		chg_err("this func(=%d) is not supported to set\n", func_id);
-		return -ENOTSUPP;
-		break;
-	}
-
-	return rc;
-}
-
-static ssize_t oplus_chg_ufcs_get_func_data(struct oplus_chg_ic_dev *ic_dev,
-					   enum oplus_chg_ic_func func_id,
-					   void *buf)
-{
-	ssize_t rc = 0;
-	int len;
-	char *tmp_buf;
-
-	if (!ic_dev->online && (func_id != OPLUS_IC_FUNC_INIT) &&
-	    (func_id != OPLUS_IC_FUNC_EXIT))
-		return -EINVAL;
-
-	switch (func_id) {
-	case OPLUS_IC_FUNC_SMT_TEST:
-		tmp_buf = (char *)get_zeroed_page(GFP_KERNEL);
-		if (!tmp_buf) {
-			rc = -ENOMEM;
-			break;
-		}
-		rc = oplus_chg_ufcs_smt_test(ic_dev, tmp_buf, PAGE_SIZE);
-		if (rc < 0) {
-			free_page((unsigned long)tmp_buf);
-			break;
-		}
-		len = oplus_chg_ic_debug_str_data_init(buf, rc);
-		memcpy(oplus_chg_ic_get_item_data_addr(buf, 0), tmp_buf, rc);
-		free_page((unsigned long)tmp_buf);
-		rc = len;
-		break;
-	default:
-		chg_err("this func(=%d) is not supported to get\n", func_id);
-		return -ENOTSUPP;
-		break;
-	}
-
-	return rc;
-}
-
-enum oplus_chg_ic_func oplus_ufcs_overwrite_funcs[] = {
-	OPLUS_IC_FUNC_UFCS_PDO_SET,
-	OPLUS_IC_FUNC_UFCS_CONFIG_WD,
-};
-
-#endif /* CONFIG_OPLUS_CHG_IC_DEBUG */
-
 struct oplus_chg_ic_virq oplus_ufcs_virq_table[] = {
 	{ .virq_id = OPLUS_IC_VIRQ_ERR },
 	{ .virq_id = OPLUS_IC_VIRQ_ONLINE },
@@ -650,14 +519,6 @@ static int oplus_virtual_ufcs_probe(struct platform_device *pdev)
 		goto reg_ic_err;
 	}
 	oplus_chg_ufcs_init(chip->ic_dev);
-#ifdef CONFIG_OPLUS_CHG_IC_DEBUG
-	chip->ic_dev->debug.get_func_data = oplus_chg_ufcs_get_func_data;
-	chip->ic_dev->debug.set_func_data = oplus_chg_ufcs_set_func_data;
-	oplus_chg_ic_func_table_sort(oplus_ufcs_overwrite_funcs,
-		ARRAY_SIZE(oplus_ufcs_overwrite_funcs));
-	chip->ic_dev->debug.overwrite_funcs = oplus_ufcs_overwrite_funcs;
-	chip->ic_dev->debug.func_num = ARRAY_SIZE(oplus_ufcs_overwrite_funcs);
-#endif
 
 	chg_err("probe success\n");
 	return 0;

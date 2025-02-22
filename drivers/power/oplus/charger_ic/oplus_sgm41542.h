@@ -243,6 +243,7 @@
 
 #define REG0B_SGM41542_PN_MASK				(BIT(6) | BIT(5) | BIT(4) | BIT(3))
 #define REG0B_SGM41542_PN				BIT(4)
+#define SGM41542_DEVID_SHIFT				3
 #define REG0B_SY6974B_PN				BIT(6)
 
 /* Address:0Dh */

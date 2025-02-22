@@ -27,6 +27,7 @@
 #include <linux/of_device.h>
 #include <linux/of_gpio.h>
 #include <linux/err.h>
+#include <linux/pinctrl/consumer.h>
 #include <linux/regulator/driver.h>
 #include <linux/regulator/of_regulator.h>
 #include <linux/regulator/machine.h>
@@ -50,6 +51,8 @@
 #include "oplus_sc8547a.h"
 #include "../oplus_ufcs_protocol.h"
 #include "../../voocphy/oplus_voocphy.h"
+#include "../../voocphy/oplus_cp_intf.h"
+#include "../oplus_pps.h"
 
 static struct oplus_sc8547a_ufcs *sc8547a_ufcs = NULL;
 static struct oplus_voocphy_manager *oplus_voocphy_mg = NULL;
@@ -57,6 +60,7 @@ static struct mutex i2c_rw_lock;
 
 static bool error_reported = false;
 extern void oplus_chg_sc8547_error(int report_flag, int *buf, int len);
+static irqreturn_t sc8547_protect_interrupt_handler(struct oplus_voocphy_manager *chip);
 
 #define DEFUALT_VBUS_LOW 100
 #define DEFUALT_VBUS_HIGH 200
@@ -96,6 +100,7 @@ static int __sc8547_read_byte(struct i2c_client *client, u8 reg, u8 *data)
 	chip = i2c_get_clientdata(client);
 	ret = i2c_smbus_read_byte_data(client, reg);
 	if (ret < 0) {
+		oplus_pps_notify_master_cp_error();
 		sc8547_i2c_error(true);
 		pr_err("i2c read fail: can't read from reg 0x%02X\n", reg);
 		sc8547_track_upload_i2c_err_info(oplus_voocphy_mg, ret, reg);
@@ -115,6 +120,7 @@ static int __sc8547_write_byte(struct i2c_client *client, u8 reg, u8 val)
 	chip = i2c_get_clientdata(client);
 	ret = i2c_smbus_write_byte_data(client, reg, val);
 	if (ret < 0) {
+		oplus_pps_notify_master_cp_error();
 		sc8547_i2c_error(true);
 		pr_err("i2c write fail: can't write 0x%02X to reg 0x%02X: %d\n", val, reg, ret);
 		sc8547_track_upload_i2c_err_info(oplus_voocphy_mg, ret, reg);
@@ -178,6 +184,7 @@ static s32 sc8547_read_word(struct i2c_client *client, u8 reg)
 	mutex_lock(&i2c_rw_lock);
 	ret = i2c_smbus_read_word_data(client, reg);
 	if (ret < 0) {
+		oplus_pps_notify_master_cp_error();
 		sc8547_i2c_error(true);
 		pr_err("i2c read word fail: can't read reg:0x%02X \n", reg);
 		sc8547_track_upload_i2c_err_info(oplus_voocphy_mg, ret, reg);
@@ -198,6 +205,7 @@ static s32 sc8547_write_word(struct i2c_client *client, u8 reg, u16 val)
 	mutex_lock(&i2c_rw_lock);
 	ret = i2c_smbus_write_word_data(client, reg, val);
 	if (ret < 0) {
+		oplus_pps_notify_master_cp_error();
 		sc8547_i2c_error(true);
 		pr_err("i2c write word fail: can't write 0x%02X to reg:0x%02X \n", val, reg);
 		sc8547_track_upload_i2c_err_info(oplus_voocphy_mg, ret, reg);
@@ -549,9 +557,8 @@ static void sc8547_update_data(struct oplus_voocphy_manager *chip)
 	} else {
 		sc8547_i2c_error(false);
 	}
-	for (i = 0; i < 4; i++) {
-		pr_info("read vsys vbat data_block[%d] = %u\n", i, data_block[i]);
-	}
+	for (i = 0; i < 4; i++)
+		pr_debug("read vsys vbat data_block[%d] = %u\n", i, data_block[i]);
 
 	chip->cp_vsys = ((data_block[0] << 8) | data_block[1]) * SC8547_VOUT_ADC_LSB;
 	chip->cp_vbat = ((data_block[2] << 8) | data_block[3]) * SC8547_VOUT_ADC_LSB;
@@ -565,9 +572,8 @@ static void sc8547_update_data(struct oplus_voocphy_manager *chip)
 	} else {
 		sc8547_i2c_error(false);
 	}
-	for (i = 0; i < 4; i++) {
-		pr_info("read ichg vbus data_block[%d] = %u\n", i, data_block[i]);
-	}
+	for (i = 0; i < 4; i++)
+		pr_debug("read ichg vbus data_block[%d] = %u\n", i, data_block[i]);
 
 	chip->cp_ichg = ((data_block[0] << 8) | data_block[1]) * SC8547_IBUS_ADC_LSB;
 	chip->cp_vbus = (((data_block[2] & SC8547_VBUS_POL_H_MASK) << 8) | data_block[3]) * SC8547_VBUS_ADC_LSB;
@@ -581,9 +587,8 @@ static void sc8547_update_data(struct oplus_voocphy_manager *chip)
 	} else {
 		sc8547_i2c_error(false);
 	}
-	for (i = 0; i < 2; i++) {
-		pr_info("read vac data_block[%d] = %u\n", i, data_block[i]);
-	}
+	for (i = 0; i < 2; i++)
+		pr_debug("read vac data_block[%d] = %u\n", i, data_block[i]);
 
 	chip->cp_vac = (((data_block[0] & SC8547_VAC_POL_H_MASK) << 8) | data_block[1]) * SC8547_VAC_ADC_LSB;
 
@@ -645,7 +650,7 @@ static int sc8547_get_cp_vbus(struct oplus_voocphy_manager *chip)
 	ret = i2c_smbus_read_i2c_block_data(chip->client, SC8547_REG_15, 2, data_block);
 	if (ret < 0) {
 		sc8547_i2c_error(true);
-		pr_err("sc8547 read vbat error \n");
+		pr_err("sc8547 read vbus error \n");
 	} else {
 		sc8547_i2c_error(false);
 	}
@@ -1005,6 +1010,8 @@ static irqreturn_t sc8547a_charger_interrupt(int irq, void *dev_id)
 {
 	struct oplus_voocphy_manager *chip = dev_id;
 	struct oplus_ufcs_protocol *chip_protocol = oplus_ufcs_get_protocol_struct();
+	irqreturn_t ret = IRQ_HANDLED;
+	u8 value = 0;
 
 	if (!chip || !sc8547a_ufcs) {
 		return IRQ_HANDLED;
@@ -1014,12 +1021,28 @@ static irqreturn_t sc8547a_charger_interrupt(int irq, void *dev_id)
 		return IRQ_HANDLED;
 	}
 
-	if (sc8547a_ufcs->ufcs_enable && chip_protocol) {
+	if (sc8547a_ufcs->ufcs_enable && chip_protocol)
+		chip->cp_work_mode = CP_WORKMODE_UFCS;
+
+	switch (chip->cp_work_mode) {
+	case CP_WORKMODE_VOOCPHY:
+		ret = oplus_voocphy_interrupt_handler(chip);
+		break;
+	case CP_WORKMODE_PPS:
+		ret = sc8547_protect_interrupt_handler(chip);
+		break;
+	case CP_WORKMODE_UFCS:
 		kthread_queue_work(chip_protocol->wq, &chip_protocol->rcv_work);
-		return IRQ_HANDLED;
-	} else {
-		return oplus_voocphy_interrupt_handler(chip);
+		break;
+	default:
+		sc8547_reset_voocphy(chip);
+		/* clear interrupt status register */
+		sc8547_read_byte(chip->client, SC8547_REG_0F, &value);
+		pr_err("%s default: SC8547_REG_0F = 0x%02x\n", __func__, value);
+		break;
 	}
+
+	return ret;
 }
 
 static int sc8547_init_device(struct oplus_voocphy_manager *chip)
@@ -1039,6 +1062,7 @@ static int sc8547_init_device(struct oplus_voocphy_manager *chip)
 			   (1 << SC8547_IBUS_UCP_RISE_MASK_SHIFT));
 	sc8547_write_byte(chip->client, SC8547_REG_10, 0x02); /* mask insert irq */
 	sc8547_write_byte(chip->client, SC8547A_ADDR_OTG_EN, 0x04); /* OTG EN */
+	chip->cp_work_mode = CP_WORKMODE_VOOCPHY;
 	pr_err("sc8547_init_device done");
 
 	return 0;
@@ -1303,14 +1327,30 @@ static int sc8547_gpio_init(struct oplus_voocphy_manager *chip)
 
 	pinctrl_select_state(chip->pinctrl, chip->charger_gpio_sw_ctrl2_low);
 
-	chip->slave_charging_inter_default = pinctrl_lookup_state(chip->pinctrl, "slave_charging_inter_default");
-	if (IS_ERR_OR_NULL(chip->slave_charging_inter_default)) {
-		chg_err("get slave_charging_inter_default fail\n");
-	} else {
-		pinctrl_select_state(chip->pinctrl, chip->slave_charging_inter_default);
+	printk(KERN_ERR "[OPLUS_CHG][%s]: oplus_chip is ready!\n", __func__);
+	return 0;
+}
+
+static int sc8547_slave_gpio_init(struct oplus_voocphy_manager *chip)
+{
+	if (!chip) {
+		printk(KERN_ERR "[OPLUS_CHG][%s]: oplus_chip not ready!\n", __func__);
+		return -EINVAL;
 	}
 
-	printk(KERN_ERR "[OPLUS_CHG][%s]: oplus_chip is ready!\n", __func__);
+	if (IS_ERR_OR_NULL(chip->pinctrl)) {
+		chip->pinctrl = devm_pinctrl_get(chip->dev);
+		if (IS_ERR_OR_NULL(chip->pinctrl)) {
+			chg_err("get sc8547_slave_gpio pinctrl fail\n");
+			return -EINVAL;
+		}
+	}
+
+	chip->slave_charging_inter_default = pinctrl_lookup_state(chip->pinctrl, "slave_charging_inter_default");
+	if (IS_ERR_OR_NULL(chip->slave_charging_inter_default))
+		chg_err("get slave_charging_inter_default fail\n");
+	else
+		pinctrl_select_state(chip->pinctrl, chip->slave_charging_inter_default);
 	return 0;
 }
 
@@ -1345,6 +1385,8 @@ static int sc8547_parse_dt(struct oplus_voocphy_manager *chip)
 		pr_debug("chip->switch1_gpio =%d\n", chip->switch1_gpio);
 	}
 
+	sc8547_slave_gpio_init(chip);
+
 	rc = of_property_read_u32(node, "ovp_reg", &chip->ovp_reg);
 	if (rc) {
 		chip->ovp_reg = 0xE;
@@ -1358,6 +1400,12 @@ static int sc8547_parse_dt(struct oplus_voocphy_manager *chip)
 	} else {
 		chg_err("ocp_reg is %d\n", chip->ocp_reg);
 	}
+
+	rc = of_property_read_u32(node, "oplus,pps_ocp_max", &chip->pps_ocp_max);
+	if (rc)
+		chip->pps_ocp_max = 3600;
+	else
+		chg_err("pps_ocp_max is %d\n", chip->pps_ocp_max);
 
 	rc = of_property_read_u32(node, "qcom,voocphy_vbus_low", &chip->voocphy_vbus_low);
 	if (rc) {
@@ -1953,6 +2001,26 @@ static int sc8547_master_get_vout(void)
 	return vout;
 }
 
+static int sc8547_master_get_vbat(void)
+{
+	int vout = 0;
+	u8 data_block[2] = {0};
+	s32 ret = 0;
+	if (!oplus_voocphy_mg)
+		return 0;
+
+	ret = i2c_smbus_read_i2c_block_data(oplus_voocphy_mg->client, SC8547_REG_1B, 2, data_block);
+	if (ret < 0) {
+		sc8547_i2c_error(true);
+		pr_err("sc8547 read vbat error \n");
+	} else {
+		sc8547_i2c_error(false);
+	}
+
+	vout = ((data_block[0] << 8) | data_block[1])*125 / 100;
+	return vout;
+}
+
 static int sc8547a_parse_dt(struct oplus_sc8547a_ufcs *chip)
 {
 	struct device_node *node = NULL;
@@ -2005,9 +2073,410 @@ struct oplus_ufcs_protocol_operations oplus_ufcs_sc8547a_ops = {
 	.ufcs_ic_get_master_ibus = sc8547_master_get_ibus,
 	.ufcs_ic_get_master_vac = sc8547_master_get_vac,
 	.ufcs_ic_get_master_vout = sc8547_master_get_vout,
+	.ufcs_ic_get_master_vbat = sc8547_master_get_vbat,
 };
 
+static int sc8547_cp_hardware_init(struct i2c_client *client)
+{
+	int ret = 0;
+	if (!oplus_voocphy_mg)
+		return -ENODEV;
+
+	ret = sc8547_init_device(oplus_voocphy_mg);
+	return ret;
+}
+
+static int sc8547_cp_reg_reset(struct i2c_client *client)
+{
+	int ret = 0;
+	if (!oplus_voocphy_mg)
+		return -ENODEV;
+
+	ret = sc8547_reg_reset(oplus_voocphy_mg, true);
+	oplus_voocphy_mg->cp_work_mode = CP_WORKMODE_DEFAULT;
+	pr_info("sc8547 reset ret=%d", ret);
+
+	return ret;
+}
+
+static int sc8547_cp_config_sc_mode(struct i2c_client *client)
+{
+	u8 reg_data;
+
+	if (!oplus_voocphy_mg || !client)
+		return -EINVAL;
+
+	reg_data = (((oplus_voocphy_mg->pps_ocp_max - SC8547_IBUS_OCP_BASE) / SC8547_IBUS_OCP_LSB) << SC8547_IBUS_OCP_SHIFT) & SC8547_IBUS_OCP_MASK;
+	reg_data |= ((SC8547A_IBUS_UCP_FALL_DEGLITCH_SET_5MS << SC8547A_IBUS_UCP_FALL_DEGLITCH_SET_SHIFT) & SC8547A_IBUS_UCP_FALL_DEGLITCH_SET_MASK);
+
+	sc8547_write_byte(client, SC8547_REG_02, 0x01); /* VAC_OVP:12v */
+	sc8547_write_byte(client, SC8547_REG_04, 0x64); /* VBUS_OVP:11v */
+	sc8547_write_byte(client, SC8547_REG_05, reg_data); /* IBUS_OCP_UCP:4.2A, config in dtsi */
+	sc8547_write_byte(client, SC8547_REG_09, 0x13); /* WD:1s bit7[0]-->2:1 */
+	sc8547_write_byte(client, SC8547_REG_11, 0x80); /* ADC_CTRL:ADC_EN */
+	sc8547_write_byte(client, SC8547_REG_0D, 0x70); /* PMID2OUT_UVP_OVP */
+	sc8547_write_byte(client, SC8547_REG_2B, 0x00); /* VOOC_CTRL:disable voocphy */
+	oplus_voocphy_mg->cp_work_mode = CP_WORKMODE_PPS;
+	pr_info("sc8547 configed sc mode, ocp_reg=0x%02x", reg_data);
+	return 0;
+}
+
+static int sc8547_cp_config_bypass_mode(struct i2c_client *client)
+{
+	if (!oplus_voocphy_mg || !client)
+		return -EINVAL;
+
+	sc8547_write_byte(client, SC8547_REG_02, 0x07); /* VAC_OVP:6.5V */
+	sc8547_write_byte(client, SC8547_REG_04, 0x0A); /* VBUS_OVP:6.5V */
+	sc8547_write_byte(client, SC8547_REG_05, 0x1a); /* IBUS_OCP_UCP:4.2A */
+	sc8547_write_byte(client, SC8547_REG_09, 0x93); /* WD:1s bit7[1]-->1:1 */
+	sc8547_write_byte(client, SC8547_REG_11, 0x80); /* ADC_CTRL:ADC_EN */
+	sc8547_write_byte(client, SC8547_REG_2B, 0x00); /* VOOC_CTRL:disable voocphy */
+	oplus_voocphy_mg->cp_work_mode = CP_WORKMODE_PPS;
+	pr_info("sc8547 configed bypass mode");
+	return 0;
+}
+
+static int sc8547_cp_get_ucp_flag(struct i2c_client *client)
+{
+	int ret = 0;
+	u8 value;
+	int ucp_fail = 0;
+	if (!client)
+		return -EINVAL;
+
+	ret = sc8547_read_byte(client, SC8547_REG_0F, &value);
+	if (ret < 0) {
+		pr_err("SC8547_REG_0F failed ret=%d\n", ret);
+		return 0;
+	}
+	ucp_fail = (value & SC8547_IBUS_UCP_FALL_FLAG_MASK) >>
+		   SC8547_IBUS_UCP_FALL_FLAG_SHIFT;
+	pr_info("SC8547_REG_0F[0x%x] ucp_fail = %d\n", value, ucp_fail);
+	return ucp_fail;
+}
+
+static int sc8547_set_cp_enable(struct i2c_client *client, int enable)
+{
+	int ret = 0;
+	if (!oplus_voocphy_mg)
+		return -ENODEV;
+
+	ret = sc8547_set_chg_enable(oplus_voocphy_mg, enable);
+	if (ret < 0)
+		pr_err("sc8547 set_cp_enable(%d) failed", enable);
+
+	pr_info("sc8547 set cp %sabled", enable ? "en" : "dis");
+	return ret;
+}
+
+static int sc8547_cp_get_vbus(struct i2c_client *client)
+{
+	int vbus = 0;
+	if (!oplus_voocphy_mg)
+		return -ENODEV;
+
+	vbus = sc8547_get_cp_vbus(oplus_voocphy_mg);
+	return vbus;
+}
+
+static int sc8547_cp_get_ibus(struct i2c_client *client)
+{
+	int ibus = 0;
+	if (!oplus_voocphy_mg)
+		return -ENODEV;
+
+	ibus = sc8547_get_cp_ichg(oplus_voocphy_mg);
+	return ibus;
+}
+
+static int sc8547_cp_get_vac(struct i2c_client *client)
+{
+	int cp_vac = 0;
+	u8 data_block[2] = {0};
+	s32 ret = 0;
+
+	if (!client)
+		return -EINVAL;
+
+	ret = i2c_smbus_read_i2c_block_data(client, SC8547_REG_17, 2, data_block);
+	if (ret < 0) {
+		sc8547_i2c_error(true);
+		pr_err("sc8547 read vac error \n");
+	} else {
+		sc8547_i2c_error(false);
+	}
+
+	cp_vac = (((data_block[0] & SC8547_VAC_POL_H_MASK) << 8) |
+		    data_block[1]) * SC8547_VAC_ADC_LSB;
+
+	return cp_vac;
+}
+
+static int sc8547_cp_get_vout(struct i2c_client *client)
+{
+	int cp_vout = 0;
+	u8 data_block[2] = {0};
+	s32 ret = 0;
+
+	if (!client)
+		return -EINVAL;
+
+	ret = i2c_smbus_read_i2c_block_data(client, SC8547_REG_19, 2, data_block);
+	if (ret < 0) {
+		sc8547_i2c_error(true);
+		pr_err("sc8547 read vout error \n");
+	} else {
+		sc8547_i2c_error(false);
+	}
+
+	cp_vout = (((data_block[0] & SC8547_VOUT_POL_H_MASK) << 8) |
+		    data_block[1]) * SC8547_VOUT_ADC_LSB;
+
+	return cp_vout;
+}
+
+static int sc8547_cp_get_vbat(struct i2c_client *client)
+{
+	int vbat = 0;
+	if (!oplus_voocphy_mg)
+		return -ENODEV;
+
+	vbat = sc8547_get_cp_vbat(oplus_voocphy_mg);
+	return vbat;
+}
+
+static int sc8547_cp_get_tdie(struct i2c_client *client)
+{
+	int cp_tdie = 0;
+	u8 data_block[2] = {0};
+	s32 ret = 0;
+
+	if (!client)
+		return -EINVAL;
+
+	ret = i2c_smbus_read_i2c_block_data(client, SC8547_REG_1F, 2, data_block);
+	if (ret < 0) {
+		sc8547_i2c_error(true);
+		pr_err("sc8547 read vout error \n");
+	} else {
+		sc8547_i2c_error(false);
+	}
+
+	cp_tdie = (((data_block[0] & SC8547_TDIE_POL_H_MASK) << 8) |
+		(data_block[1] & SC8547_TDIE_POL_L_MASK)) *
+	       SC8547_TDIE_ADC_LSB;
+	if (cp_tdie < SC8547_TDIE_MIN || cp_tdie > SC8547_TDIE_MAX)
+		cp_tdie = SC8547_TDIE_MAX;
+
+	return cp_tdie;
+}
+
+static int sc8547_cp_get_info(struct i2c_client *client, int type)
+{
+	if (!oplus_voocphy_mg)
+		return 0;
+
+	if (type == IBUS_MASTER_ALLOW_MAX)
+		return oplus_voocphy_mg->voocphy_cp_max_ibus;
+	else if (type == IBUS_SLAVE_DISABLE_HIGH)
+		return oplus_voocphy_mg->slave_cp_disable_thr_high;
+	else if (type == IBUS_SLAVE_ENABLE_MIN)
+		return oplus_voocphy_mg->slave_cp_enable_thr_low;
+	else if (type == IBUS_SLAVE_ENABLE_MAX)
+		return oplus_voocphy_mg->slave_cp_enable_thr;
+	else if (type == IBUS_CP_IBUS_DEVATION)
+		return oplus_voocphy_mg->cp_ibus_devation;
+	else
+		return 0;
+}
+
+/**
+ *when the watchdog is set to 1s,the allowed error of the chip is 800ms.
+ *any i2c communication can kick the dog.
+ */
+static bool sc8547_cp_feed_dog(struct i2c_client *client)
+{
+	u8 val;
+	int ret;
+
+	if (!client)
+		return -EINVAL;
+
+	ret = sc8547_read_byte(client, SC8547_REG_36, &val);
+	if (ret < 0)
+		return false;
+	else
+		return true;
+}
+
+static irqreturn_t sc8547_protect_interrupt_handler(struct oplus_voocphy_manager *chip)
+{
+	DEV_PROTECT_FLAG flag;
+	int ret = 0;
+	int i = 0;
+	int size = 0;
+	int array_size = 0;
+	int length = 0;
+	u8 int_flag = 0;
+	u8 converter_state = 0;
+	u8 pmid2out_state = 0;
+	int err_type = TRACK_CP_ERR_DEFAULT;
+	struct oplus_pps_chip *pps_chip;
+	struct sc8547_track_check_reg track_check_reg[] = {
+		{SC8547_REG_06, 0},
+		{SC8547_REG_0D, 0},
+		{SC8547_REG_0F, 0},
+	};
+
+	if (!chip)
+		return IRQ_HANDLED;
+
+	pps_chip = oplus_pps_get_pps_chip();
+	if (!pps_chip)
+		return 0;
+
+	array_size = ARRAY_SIZE(track_check_reg);
+	for (i=0; i < array_size; i++) {
+		ret = sc8547_read_byte(chip->client, track_check_reg[i].addr, &track_check_reg[i].data);
+		if (ret < 0) {
+			pr_err("read 0x%x failed 0x%x\n", track_check_reg[i].addr, ret);
+			return ret;
+		}
+		if (i == 0)
+			converter_state = track_check_reg[0].data;
+		if (i == 1)
+			pmid2out_state = track_check_reg[1].data;
+		if (i == 2)
+			int_flag = track_check_reg[2].data;
+		pr_info("reg 0x%x = 0x%02x\n", track_check_reg[i].addr, track_check_reg[i].data);
+	}
+
+	size = sizeof(track_check_reg);
+	length = sizeof(pps_chip->reg_dump);
+	memset(pps_chip->reg_dump, 0, length);
+	if (size <= length -1) {
+		pps_chip->reg_dump[0] = array_size;
+		memcpy(&pps_chip->reg_dump[1], &track_check_reg[0].addr, size);
+	} else {
+		pr_err("out of size\n");
+	}
+
+	flag.value_bit.ibus_ucp = (int_flag & SC8547_IBUS_UCP_FALL_FLAG_MASK) >>
+		   SC8547_IBUS_UCP_FALL_FLAG_SHIFT;
+	flag.value_bit.ibus_ocp = (int_flag & SC8547_IBUS_OCP_FLAG_MASK) >>
+		   SC8547_IBUS_OCP_FLAG_SHIFT;
+	flag.value_bit.vbus_ovp = (int_flag & SC8547_VBUS_OVP_FLAG_MASK) >>
+		   SC8547_VBUS_OVP_FLAG_SHIFT;
+	flag.value_bit.ibat_ocp = (int_flag & SC8547_IBAT_OCP_FLAG_MASK) >>
+		   SC8547_IBAT_OCP_FLAG_SHIFT;
+	flag.value_bit.vbat_ovp = (int_flag & SC8547_VBAT_OVP_FLAG_MASK) >>
+		   SC8547_VBAT_OVP_FLAG_SHIFT;
+	flag.value_bit.vout_ovp = (int_flag & SC8547_VOUT_OVP_FLAG_MASK) >>
+		   SC8547_VOUT_OVP_FLAG_SHIFT;
+
+	if (converter_state & SC8547_PIN_DIAG_FALL_FLAG_MASK)
+		err_type = TRACK_CP_ERR_CFLY_CDRV_FAULT;
+	else if (converter_state & SC8547_SS_TIMEOUT_FLAG_MASK)
+		err_type = TRACK_CP_ERR_SS_TIMEOUT;
+	else if (converter_state & SC8547_TSHUT_FLAG_MASK)
+		err_type = TRACK_CP_ERR_TSHUT;
+	else if (int_flag & SC8547_IBUS_UCP_FALL_FLAG_MASK)
+		err_type = TRACK_CP_ERR_IBUS_UCP;
+	else if (int_flag & SC8547_IBUS_OCP_FLAG_MASK)
+		err_type = TRACK_CP_ERR_IBUS_OCP;
+	else if (int_flag & SC8547_VBUS_OVP_FLAG_MASK)
+		err_type = TRACK_CP_ERR_VBUS_OVP;
+	else if (int_flag & SC8547_IBAT_OCP_FLAG_MASK)
+		err_type = TRACK_CP_ERR_IBAT_OCP;
+	else if (int_flag & SC8547_VBAT_OVP_FLAG_MASK)
+		err_type = TRACK_CP_ERR_VBAT_OVP;
+	else if (int_flag & SC8547_VOUT_OVP_FLAG_MASK)
+		err_type = TRACK_CP_ERR_VOUT_OVP;
+	else if (pmid2out_state & SC8547_PMID2OUT_OVP_FLAG_MASK)
+		err_type = TRACK_CP_ERR_PMID2OUT_OVP;
+	else if (pmid2out_state & SC8547_PMID2OUT_UVP_FLAG_MASK)
+		err_type = TRACK_CP_ERR_PMID2OUT_UVP;
+
+	pr_info("err_type=0x%02x flag=0x%02x\n", err_type, flag.value);
+
+	/*IBUS_UCP still trigger when normal plug out,so use for debug*/
+	if (flag.value_bit.ibus_ucp == 1)
+		err_type = TRACK_CP_ERR_DEFAULT;
+	if (flag.value_bit.ibus_ucp == 1 && pps_chip->debug_force_pps_err == TRACK_PPS_ERR_CP_PROTECT)
+		err_type = TRACK_CP_ERR_IBUS_UCP;
+	if (err_type != TRACK_CP_ERR_DEFAULT)
+		oplus_pps_track_upload_err_info(pps_chip, TRACK_PPS_ERR_CP_PROTECT, err_type);
+
+	oplus_pps_device_protect_irq_callback(flag);
+
+	return IRQ_HANDLED;
+}
+
+static struct oplus_pps_cp_device_operations sc8547_cp_pps_ops = {
+	.oplus_cp_hardware_init = sc8547_cp_hardware_init,
+	.oplus_cp_reset         = sc8547_cp_reg_reset,
+	.oplus_cp_cfg_sc        = sc8547_cp_config_sc_mode,
+	.oplus_cp_cfg_bypass    = sc8547_cp_config_bypass_mode,
+	.oplus_get_ucp_flag     = sc8547_cp_get_ucp_flag,
+	.oplus_set_cp_enable    = sc8547_set_cp_enable,
+	.oplus_get_cp_vbus      = sc8547_cp_get_vbus,
+	.oplus_get_cp_ibus      = sc8547_cp_get_ibus,
+	.oplus_get_cp_vac       = sc8547_cp_get_vac,
+	.oplus_get_cp_vout      = sc8547_cp_get_vout,
+	.oplus_get_cp_vbat      = sc8547_cp_get_vbat,
+	.oplus_get_cp_tdie      = sc8547_cp_get_tdie,
+	.oplus_get_cp_info      = sc8547_cp_get_info,
+	.oplus_cp_kick_dog      = sc8547_cp_feed_dog,
+};
+
+static int sc8547_pps_check_and_register(struct oplus_voocphy_manager *chip)
+{
+	PPS_CP_DEVICE_NUM index = CP_MAX;
+	struct chargepump_device *sc8547_cp;
+	struct device_node * node = NULL;
+
+	if (!chip) {
+		pr_err("chip null\n");
+		return -EINVAL;
+	}
+
+	node = chip->dev->of_node;
+
+	if (of_property_read_bool(node, "oplus,pps_role_master"))
+		index = CP_MASTER;
+	else if (of_property_read_bool(node, "oplus,pps_role_slave_a"))
+		index = CP_SLAVE_A;
+	else if (of_property_read_bool(node, "oplus,pps_role_slave_b"))
+		index = CP_SLAVE_B;
+
+	if (index < CP_MAX && index >= CP_MASTER) {
+		sc8547_cp = devm_kzalloc(chip->dev, sizeof(*sc8547_cp), GFP_KERNEL);
+		if (!sc8547_cp) {
+			dev_err(chip->dev, "Couldn't allocate sc8547_cp memory\n");
+			return -ENOMEM;
+		}
+		sc8547_cp->client = chip->client;
+		sc8547_cp->dev_ops = &sc8547_cp_pps_ops;
+		if (of_property_read_string(node, "oplus,pps_dev-name", &sc8547_cp->dev_name)) {
+			if (index != CP_MASTER) {
+				chg_err("Warn: there is a nameless non-master cp");
+				sc8547_cp->dev_name = "default_nameless_cp";
+			} else {
+				chg_err("Can't register a nameless master cp");
+				return -ENODEV;
+			}
+		}
+		oplus_cp_device_register(index, sc8547_cp);
+	}
+	return 0;
+}
+
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0))
+static int sc8547a_driver_probe(struct i2c_client *client)
+#else
 static int sc8547a_driver_probe(struct i2c_client *client, const struct i2c_device_id *id)
+#endif
 {
 	struct oplus_voocphy_manager *chip;
 	struct oplus_sc8547a_ufcs *chip_ic;
@@ -2089,6 +2558,8 @@ static int sc8547a_driver_probe(struct i2c_client *client, const struct i2c_devi
 	register_ufcs_devinfo();
 	ufcs_err("call end!\n");
 
+	sc8547_pps_check_and_register(chip);
+
 	return 0;
 regmap_init_err:
 	devm_kfree(&client->dev, chip_ic);
@@ -2107,7 +2578,7 @@ static int sc8547a_pm_resume(struct device *dev_chip)
 		return 0;
 
 	atomic_set(&chip->suspended, 0);
-	ufcs_err(" %d!\n", chip->suspended);
+	ufcs_err(" %d!\n", atomic_read(&chip->suspended));
 
 	return 0;
 }
@@ -2121,7 +2592,7 @@ static int sc8547a_pm_suspend(struct device *dev_chip)
 		return 0;
 
 	atomic_set(&chip->suspended, 1);
-	ufcs_err(" %d!\n", chip->suspended);
+	ufcs_err(" %d!\n", atomic_read(&chip->suspended));
 
 	return 0;
 }
@@ -2131,16 +2602,26 @@ static const struct dev_pm_ops sc8547a_pm_ops = {
 	.suspend = sc8547a_pm_suspend,
 };
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0))
+static void sc8547a_driver_remove(struct i2c_client *client)
+#else
 static int sc8547a_driver_remove(struct i2c_client *client)
+#endif
 {
 	struct oplus_sc8547a_ufcs *chip = i2c_get_clientdata(client);
 
 	if (chip == NULL)
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0))
+		return;
+#else
 		return -ENODEV;
+#endif
 
 	devm_kfree(&client->dev, chip);
 
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0))
 	return 0;
+#endif
 }
 
 static void sc8547a_shutdown(struct i2c_client *client)

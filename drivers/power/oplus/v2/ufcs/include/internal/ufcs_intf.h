@@ -23,5 +23,7 @@ int ufcs_verify_adapter(struct ufcs_class *class, u8 key_index, u8 *auth_data, u
 int ufcs_get_power_change_info(struct ufcs_class *class, u32 *pwr_change_info, int num);
 int ufcs_get_emark_info(struct ufcs_class *class, u64 *info);
 int ufcs_get_power_info_ext(struct ufcs_class *class, u64 *pie, int num);
+int ufcs_source_hard_reset(struct ufcs_class *class);
+int ufcs_cable_hard_reset(struct ufcs_class *class);
 
 #endif /* __OPLUS_UFCS_INTF_H__ */

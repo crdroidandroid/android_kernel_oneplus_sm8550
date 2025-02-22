@@ -548,13 +548,20 @@
                 "zh": "获取typec接口的连接状态"
             },
             "auto_debug_code": true,
-            "parameter_list": ["int *"],
+            "parameter_list": ["int *", "bool"],
             "parameter_desc": [
                 {
                     "range": "0-1",
                     "type": "out",
                     "desc": {
                         "zh": "0:无连接, 1:有连接"
+                    }
+                },
+                {
+                    "range": "0-1",
+                    "type": "in",
+                    "desc": {
+                        "zh": "0:不延时获取, 1:延时获取"
                     }
                 }
             ],
@@ -965,7 +972,7 @@
             "desc": {
                 "zh": "获取typec_state"
             },
-            "auto_debug_code": false,
+            "auto_debug_code": true,
             "parameter_list": ["int *"],
             "parameter_desc": [
                 {
@@ -1214,8 +1221,30 @@
                 "write": false,
                 "overwrite": false
             }
+        },
+        {
+            "lable": "OPLUS_IC_FUNC_BUCK_GET_BYBID_MATCH_INFO",
+            "desc": {
+                "zh": "获取bybid匹配信息"
+            },
+            "auto_debug_code": true,
+            "parameter_list": ["int *"],
+            "parameter_desc": [
+                {
+                    "range": "0-*",
+                    "type": "out",
+                    "desc": {
+                        "zh": "bybid匹配信息"
+                    }
+                }
+            ],
+            "vict": {
+                "read": false,
+                "write": false,
+                "overwrite": false
+            }
         }
     ],
 
-    "version": "V1.3:43:353f1f7be369bb3298cc7d6f7f4e250601ab69016c1fe0b21ffa0de49027e6f0"
+    "version": "V2.0:44:c0fa54ea9069c791033d11d212a084ec2aaa5d9d93be9149cfad779433b8b93b"
 }

@@ -29,3 +29,7 @@ config UFF_FINGERPRINT_REE_SPI
 config FP_SUPPLY_MODE_LDO
        default n
        bool "Fingerprint supply base on pmic's ldo"
+
+config FP_SUPPLY_MODE_LDO_DIO8018
+       default n
+       bool "Fingerprint supply base on DIO8018's ldo"

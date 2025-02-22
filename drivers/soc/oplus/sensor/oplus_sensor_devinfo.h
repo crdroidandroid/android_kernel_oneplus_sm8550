@@ -25,7 +25,7 @@
 
 #define REG_NUM 10
 #define PARAMETER_NUM 25
-#define FEATURE_NUM 10
+#define FEATURE_NUM 11
 #define SOURCE_NUM 2
 #define PANEL_SOURCE_NUM 2
 #define ALGO_PARAMETER_NUM 15

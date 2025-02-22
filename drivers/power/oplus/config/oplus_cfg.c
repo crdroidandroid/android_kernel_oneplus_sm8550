@@ -27,6 +27,10 @@ static const char * const oplus_param_type_name[] = {
 	[OPLUS_CHG_VOOC_NORMAL_PARAM]	= "VoocChargeConfig",
 	[OPLUS_CHG_VOOCPHY_PARAM]	= "VoocphyConfig",
 	[OPLUS_CHG_PPS_PARAM]		= "PpsChargeConfig",
+	[OPLUS_CHG_UFCS_PARAM]		= "UfcsChargeConfig",
+	[OPLUS_CHG_CPA_PARAM]		= "CpaChargeConfig",
+	[OPLUS_CHG_IMP_PARAM]		= "ImpChargeConfig",
+	[OPLUS_BATT_BAL_PARAM]		= "BatteryBalanceConfig",
 	[OPLUS_CFG_PARAM_MAX]		= "Invalid",
 };
 
@@ -174,7 +178,7 @@ static int oplus_verify_signature(u8 *s, u32 s_size, u8 *digest,
 	sig.pkey_algo = "rsa";
 	sig.hash_algo = "sha256";
 	sig.encoding = "pkcs1";
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0))
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0) && LINUX_VERSION_CODE < KERNEL_VERSION(6, 5, 0))
 	sig.data_size = 0;
 	sig.data = NULL;
 #endif
@@ -356,7 +360,7 @@ int oplus_cfg_get_data(struct oplus_cfg_data_head *data_head, u8 *buf,
 	}
 	data_len = oplus_cfg_get_data_size(data_head);
 	if (data_len != len) {
-		pr_err("buf length and data(=%s) length do not match, buf_len=%u, data_len=%d\n",
+		pr_err("buf length and data(=%s) length do not match, buf_len=%zu, data_len=%zd\n",
 			(char *)data_head->data, len, data_len);
 		return -EINVAL;
 	}
@@ -504,8 +508,13 @@ int oplus_cfg_unregister(struct oplus_cfg *cfg)
 }
 EXPORT_SYMBOL(oplus_cfg_unregister);
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 4, 0))
+static ssize_t update_show(const struct class *c, const struct class_attribute *attr,
+			   char *buf)
+#else
 static ssize_t update_show(struct class *c, struct class_attribute *attr,
 			   char *buf)
+#endif
 {
 	struct oplus_cfg *cfg_tmp;
 	ssize_t size = 0;
@@ -525,8 +534,13 @@ static ssize_t update_show(struct class *c, struct class_attribute *attr,
 #define RECEIVE_START	0
 #define RECEIVE_CFG	1
 #define RECEIVE_END	2
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 4, 0))
+static ssize_t update_store(const struct class *c, const struct class_attribute *attr,
+			    const char *buf, size_t count)
+#else
 static ssize_t update_store(struct class *c, struct class_attribute *attr,
 			    const char *buf, size_t count)
+#endif
 {
 	u8 temp_buf[sizeof(struct oplus_cfg_head)];
 	static u8 *cfg_buf;
@@ -589,13 +603,13 @@ start:
 			kfree(cfg_buf);
 			cfg_buf = NULL;
 			receive_step = RECEIVE_START;
-			pr_err("cfg data verification failed, rc=%d\n", rc);
+			pr_err("cfg data verification failed, rc=%zd\n", rc);
 			return rc;
 		}
 
 		rc = oplus_cfg_update_config(cfg_buf, cfg_size);
 		if (rc != 0) {
-			pr_err("update error, rc=%d\n", rc);
+			pr_err("update error, rc=%zd\n", rc);
 			kfree(cfg_buf);
 			cfg_buf = NULL;
 			receive_step = RECEIVE_START;

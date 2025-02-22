@@ -178,6 +178,160 @@ static int oplus_chg_get_module_num(void)
 	return (addr_size / sizeof(struct oplus_chg_module));
 }
 
+int oplus_get_chg_spec_version(void)
+{
+	struct device_node *node;
+	static int oplus_chg_spec_ver = -EINVAL;
+	int rc;
+
+	if (oplus_chg_spec_ver == -EINVAL) {
+		node = of_find_node_by_path("/soc/oplus_chg_core");
+		if (node != NULL) {
+			rc = of_property_read_u32(node, "oplus,chg_spec_version",
+						  &oplus_chg_spec_ver);
+			if (rc < 0) {
+				chg_err("get oplus,vooc_spec_version property error\n");
+				oplus_chg_spec_ver = OPLUS_CHG_SPEC_VER_V3P6;
+			}
+			chg_info("oplus_chg_spec_ver = %d\n", oplus_chg_spec_ver);
+		} else {
+			chg_err("not found oplus_chg_core node\n");
+			oplus_chg_spec_ver = OPLUS_CHG_SPEC_VER_V3P6;
+			rc = -ENODEV;
+		}
+	}
+
+	return oplus_chg_spec_ver;
+}
+
+#define DEFAULT_REGION_ID 0xFF
+uint8_t oplus_chg_get_region_id(void)
+{
+	struct device_node *node;
+	const char *bootparams = NULL;
+	char *str;
+	int tmp_region = 0;
+	int ret = 0;
+	static uint8_t region_id = 0xFF;
+	static bool initialized = false;
+
+	if (initialized)
+		return region_id;
+
+	node = of_find_node_by_path("/chosen");
+	if (node) {
+		ret = of_property_read_string(node, "bootargs", &bootparams);
+		if (!bootparams || ret < 0) {
+			chg_err("failed to get bootargs property");
+			goto err;
+		}
+
+		str = strstr(bootparams, "oplus_region=");
+		if (str) {
+			str += strlen("oplus_region=");
+			ret = get_option(&str, &tmp_region);
+			if (ret == 1) {
+				region_id = tmp_region & 0xFF;
+				chg_info("oplus_region=0x%02x", region_id);
+			}
+		}
+	}
+
+err:
+	initialized = true;
+	return region_id;
+}
+
+struct region_list {
+	int elem_count;
+	u8 *oplus_region_list;
+};
+
+static bool find_id_in_region_list(u8 id, struct region_list *region_list)
+{
+	int index = 0;
+
+	if (id == DEFAULT_REGION_ID || !region_list || !region_list->oplus_region_list)
+		return false;
+
+	for (index = 0; index < region_list->elem_count; index++) {
+		if (id == (region_list->oplus_region_list[index] & 0xFF))
+			return true;
+	}
+
+	return false;
+}
+
+unsigned int oplus_chg_get_nvid_support_flags(void)
+{
+	int len = 0;
+	int rc = 0;
+	int i = 0;
+	struct device_node *node = of_find_node_by_path("/soc/oplus_chg_core");
+	struct region_list region_list_arrry[REGION_INDEX_MAX] = {
+		{ 0, NULL },
+	};
+	uint8_t region_id = oplus_chg_get_region_id();
+	static unsigned int nvid_support_flags = 0;
+	static bool initialized = false;
+
+	if (initialized)
+		return nvid_support_flags;
+
+	for (i = 0; i < REGION_INDEX_MAX; i++) {
+		rc = of_property_count_elems_of_size(node, oplus_region_list_index_str(i), sizeof(u8));
+		if (rc > 0) {
+			len = rc;
+			region_list_arrry[i].oplus_region_list = kzalloc(len, GFP_KERNEL);
+			if (!region_list_arrry[i].oplus_region_list) {
+				chg_err("NOMEM for %s\n", oplus_region_list_index_str(i));
+				continue;
+			}
+			rc = of_property_read_u8_array(node, oplus_region_list_index_str(i),
+						       region_list_arrry[i].oplus_region_list, len);
+			if (rc < 0) {
+				len = 0;
+				chg_err("parse %s failed, rc=%d\n", oplus_region_list_index_str(i), rc);
+			}
+		} else {
+			len = 0;
+			chg_err("parse %s_length failed, rc=%d\n", oplus_region_list_index_str(i), rc);
+		}
+		region_list_arrry[i].elem_count = len;
+		if (len > 0 && find_id_in_region_list(region_id, &region_list_arrry[i]))
+			nvid_support_flags |= BIT(i);
+		if (region_list_arrry[i].oplus_region_list != NULL)
+			kfree(region_list_arrry[i].oplus_region_list);
+	}
+
+	initialized = true;
+	return nvid_support_flags;
+}
+
+bool oplus_chg_get_common_charge_icl_support_flags(void)
+{
+	struct device_node *node;
+	static int common_charge_icl_support = -EINVAL;
+
+	if (common_charge_icl_support == -EINVAL) {
+		node = of_find_node_by_path("/soc/oplus_chg_core");
+		if (node != NULL) {
+			if (!of_property_read_bool(node, "oplus,common-charge-icl-support")) {
+				common_charge_icl_support = 0;
+				chg_err("get oplus,vooc_spec_version property error\n");
+			} else {
+				common_charge_icl_support = 1;
+				chg_info("common_charge_icl_support = %d\n", common_charge_icl_support);
+			}
+		} else {
+			chg_err("not found oplus_chg_core node\n");
+			common_charge_icl_support = 0;
+		}
+	}
+
+	return ((common_charge_icl_support == 1) ? true : false);
+}
+
 static struct oplus_chg_module *oplus_chg_find_first_module(void)
 {
 	size_t start_addr = (size_t)&__oplus_chg_module_start;

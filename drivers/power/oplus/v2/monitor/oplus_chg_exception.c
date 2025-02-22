@@ -257,31 +257,31 @@ static int oplus_chg_olc_get_excep_reason(int type_reason, int flag_reason, int 
 
 	switch (type_reason) {
 	case TRACK_NOTIFY_TYPE_SOC_JUMP:
-		flag_base_value = TRACK_NOTIFY_FLAG_UI_SOC_LOAD_JUMP;
+		flag_base_value = TRACK_NOTIFY_FLAG_SOC_JUMP_FIRST;
 		olc_base_value = EXCEP_SOC_ERROR_DEFAULT;
 		break;
 	case TRACK_NOTIFY_TYPE_GENERAL_RECORD:
-		flag_base_value = TRACK_NOTIFY_FLAG_CHARGER_INFO;
+		flag_base_value = TRACK_NOTIFY_FLAG_GENERAL_RECORD_FIRST;
 		olc_base_value = EXCEP_GENERAL_RECORD_DEFAULT;
 		break;
 	case TRACK_NOTIFY_TYPE_NO_CHARGING:
-		flag_base_value = TRACK_NOTIFY_FLAG_NO_CHARGING;
+		flag_base_value = TRACK_NOTIFY_FLAG_NO_CHARGING_FIRST;
 		olc_base_value = EXCEP_NO_CHARGING_DEFAULT;
 		break;
 	case TRACK_NOTIFY_TYPE_CHARGING_SLOW:
-		flag_base_value = TRACK_NOTIFY_FLAG_CHG_SLOW_TBATT_WARM;
+		flag_base_value = TRACK_NOTIFY_FLAG_CHARGING_SLOW_FIRST;
 		olc_base_value = EXCEP_CHARGING_SLOW_DEFAULT;
 		break;
 	case TRACK_NOTIFY_TYPE_CHARGING_BREAK:
-		flag_base_value = TRACK_NOTIFY_FLAG_FAST_CHARGING_BREAK;
+		flag_base_value = TRACK_NOTIFY_FLAG_CHARGING_BREAK_FIRST;
 		olc_base_value = EXCEP_CHARGING_BREAK_DEFAULT;
 		break;
 	case TRACK_NOTIFY_TYPE_DEVICE_ABNORMAL:
-		flag_base_value = TRACK_NOTIFY_FLAG_WLS_ABNORMAL;
+		flag_base_value = TRACK_NOTIFY_FLAG_DEVICE_ABNORMAL_FIRST;
 		olc_base_value = EXCEP_DEVICE_ABNORMAL_DEFAULT;
 		break;
 	case TRACK_NOTIFY_TYPE_SOFTWARE_ABNORMAL:
-		flag_base_value = TRACK_NOTIFY_FLAG_SMART_CHG_ABNORMAL;
+		flag_base_value = TRACK_NOTIFY_FLAG_SOFTWARE_ABNORMAL_FIRST;
 		olc_base_value = EXCEP_SOFTWARE_ABNORMAL_DEFAULT;
 		break;
 	default:

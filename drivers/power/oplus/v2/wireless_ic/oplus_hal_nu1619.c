@@ -1088,12 +1088,14 @@ static int nu1619_set_tx_enable(struct oplus_chg_ic_dev *dev, bool en)
 	return rc;
 }
 
-static int nu1619_set_tx_start(struct oplus_chg_ic_dev *dev)
+static int nu1619_set_tx_start(struct oplus_chg_ic_dev *dev, bool start)
 {
 	int ret = -1;
 	static int cnt = 0;
 	struct oplus_nu1619 *chip;
 
+	if (!start)
+		return 0;
 	if (dev == NULL) {
 		chg_err("oplus_chg_ic_dev is NULL\n");
 		return -ENODEV;
@@ -1134,10 +1136,10 @@ static int nu1619_get_tx_status(struct oplus_chg_ic_dev *dev, u8 *status)
 	return 0;
 }
 
-static int nu1619_get_tx_err(struct oplus_chg_ic_dev *dev, u8 *err)
+static int nu1619_get_tx_err(struct oplus_chg_ic_dev *dev, u32 *err)
 {
 	struct oplus_nu1619 *chip;
-	u8 trx_err = 0;
+	u32 trx_err = 0;
 
 	if (dev == NULL) {
 		chg_err("oplus_chg_ic_dev is NULL\n");
@@ -1189,10 +1191,10 @@ static int nu1619_set_headroom(struct oplus_chg_ic_dev *dev, int val)
 	return 0;
 }
 
-static int nu1619_send_match_q(struct oplus_chg_ic_dev *dev, u8 data)
+static int nu1619_send_match_q(struct oplus_chg_ic_dev *dev, u8 data[])
 {
 	struct oplus_nu1619 *chip;
-	u8 buf[4] = {0x38, 0x48, 0x00, data};
+	u8 buf[4] = {0x38, 0x48, data[0], data[1]};
 
 	if (dev == NULL) {
 		chg_err("oplus_chg_ic_dev is NULL\n");
@@ -1210,26 +1212,30 @@ static int nu1619_send_match_q(struct oplus_chg_ic_dev *dev, u8 data)
 	return 0;
 }
 
-static int nu1619_set_fod_parm(struct oplus_chg_ic_dev *dev, u8 data[], int len)
+static int nu1619_set_fod_parm(struct oplus_chg_ic_dev *dev, u8 data[], int len, int mode, int magcvr)
 {
 	return 0;
 }
 
-static int nu1619_send_msg(struct oplus_chg_ic_dev *dev, unsigned char msg[], int len)
+static int nu1619_send_msg(struct oplus_chg_ic_dev *dev, unsigned char msg[], int len, int raw_data)
 {
 	struct oplus_nu1619 *chip;
+	int i;
 
 	if (dev == NULL) {
 		chg_err("oplus_chg_ic_dev is NULL\n");
 		return -ENODEV;
 	}
-	if (len != 4) {
+	if (len > 5) {
 		chg_err("data length error\n");
 		return -EINVAL;
 	}
 	chip = oplus_chg_ic_get_drvdata(dev);
 
-	if (msg[0] == WLS_CMD_GET_TX_PWR) {
+	if (raw_data) {
+		for (i = 0; i < len; i++)
+			nu1619_write_byte(chip, i, msg[i]);
+	} else if (msg[0] == WLS_CMD_GET_TX_PWR) {
 		nu1619_write_byte(chip, 0x0000, 0x18);
 		nu1619_write_byte(chip, 0x0001, msg[0]);
 		nu1619_write_byte(chip, 0x0002, ~msg[0]);

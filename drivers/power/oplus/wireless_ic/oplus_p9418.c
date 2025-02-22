@@ -18,6 +18,7 @@
 #include <linux/of_gpio.h>
 #include <linux/bitops.h>
 #include <linux/mutex.h>
+#include <linux/pinctrl/consumer.h>
 #include <linux/regulator/driver.h>
 #include <linux/regulator/of_regulator.h>
 #include <linux/regulator/machine.h>
@@ -2527,7 +2528,11 @@ static int p9418_track_init(struct oplus_p9418_ic *chip)
 	return rc;
 }
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0))
+static int p9418_driver_probe(struct i2c_client *client)
+#else
 static int p9418_driver_probe(struct i2c_client *client, const struct i2c_device_id *id)
+#endif
 {
 	struct oplus_p9418_ic	*chip;
 	int rc = 0;

@@ -34,7 +34,7 @@
                 },
                 {
                     "range": "0-*",
-                    "type": "out",
+                    "type": "in",
                     "desc": {
                         "zh": "要设置的电流，单位mA"
                     }
@@ -303,7 +303,7 @@
                 },
                 {
                     "range": "0-*",
-                    "type": "out",
+                    "type": "in",
                     "desc": {
                         "zh": "要设置的电流，单位mA"
                     }

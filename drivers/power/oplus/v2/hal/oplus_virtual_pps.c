@@ -19,9 +19,11 @@
 #include <linux/delay.h>
 #include <linux/regmap.h>
 #include <linux/list.h>
+#ifndef CONFIG_DISABLE_OPLUS_FUNCTION
 #include <soc/oplus/system/boot_mode.h>
 #include <soc/oplus/device_info.h>
 #include <soc/oplus/system/oplus_project.h>
+#endif
 #include <oplus_chg_module.h>
 #include <oplus_chg_ic.h>
 #include <oplus_chg_pps.h>
@@ -445,116 +447,6 @@ static void *oplus_chg_pps_get_func(struct oplus_chg_ic_dev *ic_dev, enum oplus_
 	return func;
 }
 
-#ifdef CONFIG_OPLUS_CHG_IC_DEBUG
-static int oplus_chg_pps_set_func_data(struct oplus_chg_ic_dev *ic_dev,
-				      enum oplus_chg_ic_func func_id,
-				      const void *buf, size_t buf_len)
-{
-	int rc = 0;
-
-	if (!ic_dev->online && (func_id != OPLUS_IC_FUNC_INIT) &&
-	    (func_id != OPLUS_IC_FUNC_EXIT))
-		return -EINVAL;
-
-	switch (func_id) {
-	case OPLUS_IC_FUNC_INIT:
-		if (!oplus_chg_ic_debug_data_check(buf, buf_len))
-			return -EINVAL;
-		rc = oplus_chg_pps_init(ic_dev);
-		break;
-	case OPLUS_IC_FUNC_EXIT:
-		if (!oplus_chg_ic_debug_data_check(buf, buf_len))
-			return -EINVAL;
-		rc = oplus_chg_pps_exit(ic_dev);
-		break;
-	case OPLUS_IC_FUNC_REG_DUMP:
-		if (!oplus_chg_ic_debug_data_check(buf, buf_len))
-			return -EINVAL;
-		rc = oplus_chg_pps_reg_dump(ic_dev);
-		break;
-	case OPLUS_IC_FUNC_PPS_PDO_SET:
-		if (!oplus_chg_ic_debug_data_check(buf, buf_len))
-			return -EINVAL;
-		rc = oplus_chg_pps_pdo_set(ic_dev,
-			oplus_chg_ic_get_item_data(buf, 0),
-			oplus_chg_ic_get_item_data(buf, 1));
-		break;
-	case OPLUS_IC_FUNC_FIXED_PDO_SET:
-		if (!oplus_chg_ic_debug_data_check(buf, buf_len))
-			return -EINVAL;
-		rc = oplus_chg_fixed_pdo_set(ic_dev,
-			oplus_chg_ic_get_item_data(buf, 0),
-			oplus_chg_ic_get_item_data(buf, 1));
-		break;
-	case OPLUS_IC_FUNC_PPS_HARD_RESET:
-		if (!oplus_chg_ic_debug_data_check(buf, buf_len))
-			return -EINVAL;
-		rc = oplus_chg_pps_hard_reset(ic_dev);
-		break;
-	case OPLUS_IC_FUNC_PPS_EXIT:
-		if (!oplus_chg_ic_debug_data_check(buf, buf_len))
-			return -EINVAL;
-		rc = oplus_chg_pps_exit(ic_dev);
-		break;
-	case OPLUS_IC_FUNC_PPS_CONFIG_WD:
-		if (!oplus_chg_ic_debug_data_check(buf, buf_len))
-			return -EINVAL;
-		rc = oplus_chg_pps_config_wd(ic_dev, oplus_chg_ic_get_item_data(buf, 0));
-		break;
-	default:
-		chg_err("this func(=%d) is not supported to set\n", func_id);
-		return -ENOTSUPP;
-		break;
-	}
-
-	return rc;
-}
-
-static ssize_t oplus_chg_pps_get_func_data(struct oplus_chg_ic_dev *ic_dev,
-					   enum oplus_chg_ic_func func_id,
-					   void *buf)
-{
-	ssize_t rc = 0;
-	int len;
-	char *tmp_buf;
-
-	if (!ic_dev->online && (func_id != OPLUS_IC_FUNC_INIT) &&
-	    (func_id != OPLUS_IC_FUNC_EXIT))
-		return -EINVAL;
-
-	switch (func_id) {
-	case OPLUS_IC_FUNC_SMT_TEST:
-		tmp_buf = (char *)get_zeroed_page(GFP_KERNEL);
-		if (!tmp_buf) {
-			rc = -ENOMEM;
-			break;
-		}
-		rc = oplus_chg_pps_smt_test(ic_dev, tmp_buf, PAGE_SIZE);
-		if (rc < 0) {
-			free_page((unsigned long)tmp_buf);
-			break;
-		}
-		len = oplus_chg_ic_debug_str_data_init(buf, rc);
-		memcpy(oplus_chg_ic_get_item_data_addr(buf, 0), tmp_buf, rc);
-		free_page((unsigned long)tmp_buf);
-		rc = len;
-		break;
-	default:
-		chg_err("this func(=%d) is not supported to get\n", func_id);
-		return -ENOTSUPP;
-		break;
-	}
-
-	return rc;
-}
-
-enum oplus_chg_ic_func oplus_pps_overwrite_funcs[] = {
-	OPLUS_IC_FUNC_PPS_PDO_SET,
-	OPLUS_IC_FUNC_PPS_CONFIG_WD,
-};
-
-#endif /* CONFIG_OPLUS_CHG_IC_DEBUG */
-
 struct oplus_chg_ic_virq oplus_pps_virq_table[] = {
 	{ .virq_id = OPLUS_IC_VIRQ_ERR },
 	{ .virq_id = OPLUS_IC_VIRQ_ONLINE },
@@ -590,12 +482,6 @@ static int oplus_virtual_pps_probe(struct platform_device *pdev)
 		goto reg_ic_err;
 	}
 	oplus_chg_pps_init(chip->ic_dev);
-#ifdef CONFIG_OPLUS_CHG_IC_DEBUG
-	chip->ic_dev->debug.get_func_data = oplus_chg_pps_get_func_data;
-	chip->ic_dev->debug.set_func_data = oplus_chg_pps_set_func_data;
-	chip->ic_dev->debug.overwrite_funcs = oplus_pps_overwrite_funcs;
-	chip->ic_dev->debug.func_num = ARRAY_SIZE(oplus_pps_overwrite_funcs);
-#endif
 
 	rc = oplus_vpps_child_init(chip);
 	if (rc < 0) {

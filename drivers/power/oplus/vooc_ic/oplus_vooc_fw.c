@@ -16,6 +16,7 @@
 #include <linux/workqueue.h>
 #include <linux/kobject.h>
 #include <linux/platform_device.h>
+#include <linux/pinctrl/consumer.h>
 #include <asm/atomic.h>
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 10, 0))
 #include <linux/xlog.h>

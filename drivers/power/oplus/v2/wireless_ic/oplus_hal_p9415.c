@@ -1016,7 +1016,7 @@ static int p9415_set_tx_enable(struct oplus_chg_ic_dev *dev, bool en)
 	return rc;
 }
 
-static int p9415_set_tx_start(struct oplus_chg_ic_dev *dev)
+static int p9415_set_tx_start(struct oplus_chg_ic_dev *dev, bool start)
 {
 	return 0;
 }
@@ -1053,12 +1053,12 @@ static int p9415_get_tx_status(struct oplus_chg_ic_dev *dev, u8 *status)
 	return rc;
 }
 
-static int p9415_get_tx_err(struct oplus_chg_ic_dev *dev, u8 *err)
+static int p9415_get_tx_err(struct oplus_chg_ic_dev *dev, u32 *err)
 {
 	struct oplus_p9415 *chip;
 	int rc;
 	char temp = 0;
-	u8 trx_err = 0;
+	u32 trx_err = 0;
 
 	if (dev == NULL) {
 		chg_err("oplus_chg_ic_dev is NULL\n");
@@ -1216,10 +1216,10 @@ static u8 p9415_calculate_checksum(const u8 *data, int len)
 	return temp;
 }
 
-static int p9415_send_match_q(struct oplus_chg_ic_dev *dev, u8 data)
+static int p9415_send_match_q(struct oplus_chg_ic_dev *dev, u8 data[])
 {
 	struct oplus_p9415 *chip;
-	u8 buf[4] = { 0x38, 0x48, 0x00, data };
+	u8 buf[4] = {0x38, 0x48, data[0], data[1]};
 	u8 checksum;
 
 	if (dev == NULL) {
@@ -1240,7 +1240,7 @@ static int p9415_send_match_q(struct oplus_chg_ic_dev *dev, u8 data)
 	return 0;
 }
 
-static int p9415_set_fod_parm(struct oplus_chg_ic_dev *dev, u8 data[], int len)
+static int p9415_set_fod_parm(struct oplus_chg_ic_dev *dev, u8 data[], int len, int mode, int magcvr)
 {
 	struct oplus_p9415 *chip;
 	int rc;
@@ -1249,6 +1249,10 @@ static int p9415_set_fod_parm(struct oplus_chg_ic_dev *dev, u8 data[], int len)
 	if (dev == NULL) {
 		chg_err("oplus_chg_ic_dev is NULL\n");
 		return -ENODEV;
+	}
+	if (mode != FOD_FAST_MODE && mode != FOD_DISABLE_MODE) {
+		chg_info("mode: %d not support, return.\n", mode);
+		return -EINVAL;
 	}
 	chip = oplus_chg_ic_get_drvdata(dev);
 
@@ -1281,7 +1285,7 @@ static int p9415_set_fod_parm(struct oplus_chg_ic_dev *dev, u8 data[], int len)
 	return rc;
 }
 
-static int p9415_send_msg(struct oplus_chg_ic_dev *dev, unsigned char msg[], int len)
+static int p9415_send_msg(struct oplus_chg_ic_dev *dev, unsigned char msg[], int len, int raw_data)
 {
 	struct oplus_p9415 *chip;
 	char write_data[2] = { 0, 0 };
@@ -1310,7 +1314,13 @@ static int p9415_send_msg(struct oplus_chg_ic_dev *dev, unsigned char msg[], int
 		p9415_write_data(chip, 0x004E, write_data, 2);
 	}
 
-	if ((msg[0] != WLS_CMD_GET_TX_ID) && (msg[0] != WLS_CMD_GET_TX_PWR)) {
+	if (raw_data) {
+		p9415_write_byte(chip, 0x0050, msg[0]);
+		p9415_write_byte(chip, 0x0051, msg[1]);
+		p9415_write_byte(chip, 0x0052, msg[2]);
+		p9415_write_byte(chip, 0x0053, msg[3]);
+		p9415_write_byte(chip, 0x0054, msg[4]);
+	} else if ((msg[0] != WLS_CMD_GET_TX_ID) && (msg[0] != WLS_CMD_GET_TX_PWR)) {
 		p9415_write_byte(chip, 0x0050, 0x48);
 		p9415_write_byte(chip, 0x0051, msg[0]);
 		p9415_write_byte(chip, 0x0052, msg[1]);

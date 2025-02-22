@@ -224,7 +224,11 @@ static void tps6128xd_hw_init(struct tps6128xd_dev_info *tps_dev)
 		buf[0], buf[1], buf[2], buf[3]);
 }
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0))
+static int tps6128xd_driver_probe(struct i2c_client *client)
+#else
 static int tps6128xd_driver_probe(struct i2c_client *client, const struct i2c_device_id *id)
+#endif
 {
 	struct device *dev = &client->dev;
 	struct tps6128xd_dev_info *tps_dev = NULL;

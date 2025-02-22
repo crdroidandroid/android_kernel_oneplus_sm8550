@@ -8,8 +8,10 @@
 #include <linux/time.h>
 #include <linux/list.h>
 #ifndef CONFIG_OPLUS_CHARGER_MTK
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 6, 0))
 #include <linux/usb/typec.h>
 #include <linux/usb/usbpd.h>
+#endif
 #endif
 #include <linux/random.h>
 #include <linux/device.h>
@@ -66,6 +68,7 @@
 #define UFCS_TBATT_OV_CNT 1
 #define UFCS_DISCONNECT_IOUT_MIN 300
 #define UFCS_DISCONNECT_IOUT_CNT 3
+#define UFCS_ENALBE_CHECK_CNTS 3
 #define UFCS_BTB_DIFF_OV_CNT 5
 
 #define UFCS_FULL_COUNTS_HW 3
@@ -711,6 +714,7 @@ struct oplus_ufcs_chip {
 	int ufcs_status;
 	int ufcs_stop_status;
 	int ufcs_support_type;
+	int ufcs_boot_delay_ms;
 	int ufcs_fastchg_type;
 	int ufcs_exit_pth;
 	bool ufcs_bcc_support;
@@ -798,6 +802,9 @@ struct oplus_ufcs_operations {
 	int (*ufcs_get_cp_master_ibus)(void);
 	int (*ufcs_get_cp_master_vac)(void);
 	int (*ufcs_get_cp_master_vout)(void);
+	int (*ufcs_get_cp_master_vbat)(void);
+
+	int (*ufcs_event_handle)(void);
 };
 
 #ifndef OPLUS_UFCS_ENCRYPTION_H
@@ -879,5 +886,7 @@ bool oplus_ufcs_get_last_charging_status(void);
 int oplus_ufcs_get_last_protocol_status(void);
 int oplus_ufcs_get_last_power(void);
 void oplus_ufcs_clear_last_charging_status(void);
+int oplus_ufcs_event_handle(void);
+int oplus_ufcs_adapter_id_to_power(void);
 
 #endif /*_OPLUS_UFCS_H_*/

@@ -7,6 +7,7 @@
 #define _OPTIGA_BATT_DEF_H_
 
 /* battery core limited volatge in mV */
+#define BAT_CORE_LIMITED_VOL_4500 4500
 #define BAT_CORE_LIMITED_VOL_4480 4480
 #define BAT_CORE_LIMITED_VOL_4450 4450
 #define BAT_CORE_LIMITED_VOL_4400 4400
@@ -24,6 +25,8 @@
 #define NVT 0x4
 #define GUANYU_M 0x5 /* GUANYU module */
 #define ATL_INDIA 0x6
+#define NVT_INDIA 0x7
+#define NVT_INDONESIA 0x8
 #define UNKNOWN_MODULE_VENDOR 0xFF
 
 /* battery core vendor */

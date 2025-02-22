@@ -609,7 +609,11 @@ static int nu2112a_slave_charger_choose(struct oplus_voocphy_manager *chip)
 	}
 }
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0))
+static int nu2112a_slave_charger_probe(struct i2c_client *client)
+#else
 static int nu2112a_slave_charger_probe(struct i2c_client *client, const struct i2c_device_id *id)
+#endif
 {
 	struct oplus_voocphy_manager *chip;
 	int ret;

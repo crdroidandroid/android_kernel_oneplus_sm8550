@@ -15,7 +15,7 @@
 #include <linux/proc_fs.h>
 
 #include <trace/events/sched.h>
-#include<linux/ktime.h>
+#include <linux/ktime.h>
 #include <linux/pm_qos.h>
 #include <linux/version.h>
 #include <linux/time.h>
@@ -34,12 +34,67 @@
 #include "../oplus_voocphy.h"
 #include "oplus_hl7138.h"
 
+#include <oplus_mms.h>
+#include <oplus_mms_gauge.h>
+#include <oplus_impedance_check.h>
+#include <oplus_chg_monitor.h>
+
+#include <oplus_mms_gauge.h>
+#include <oplus_impedance_check.h>
+#include <oplus_chg_monitor.h>
+#include "../voocphy/oplus_voocphy.h"
 
 static struct oplus_voocphy_manager *oplus_voocphy_mg = NULL;
+
 static struct mutex i2c_rw_lock;
+
+struct hl7138_device {
+	struct device *dev;
+	struct i2c_client *client;
+	struct regmap *regmap;
+	struct oplus_voocphy_manager *voocphy;
+	struct ufcs_dev *ufcs;
+
+	struct oplus_chg_ic_dev *cp_ic;
+	struct oplus_impedance_node *input_imp_node;
+	struct oplus_impedance_node *output_imp_node;
+
+	struct oplus_mms *err_topic;
+
+	struct mutex i2c_rw_lock;
+	struct mutex chip_lock;
+	atomic_t suspended;
+	atomic_t i2c_err_count;
+	struct wakeup_source *chip_ws;
+
+	int ovp_reg;
+	int ocp_reg;
+
+	bool ufcs_enable;
+
+	enum oplus_cp_work_mode cp_work_mode;
+
+	bool rested;
+	bool error_reported;
+	int high_curr_setting;
+
+	bool use_ufcs_phy;
+	bool use_vooc_phy;
+	bool vac_support;
+
+	unsigned int cp_vbus;
+	unsigned int cp_vsys;
+	unsigned int cp_ichg;
+	unsigned int master_cp_ichg;
+	unsigned int cp_vbat;
+
+};
 
 #define DEFUALT_VBUS_LOW 100
 #define DEFUALT_VBUS_HIGH 200
+
+#define I2C_ERR_NUM 10
+#define MAIN_I2C_ERROR (1 << 0)
 
 #define VIN_OVP_HL7138_FLAG_MASK	BIT(7)
 #define VIN_UVLO_HL7138_FLAG_MASK	BIT(6)
@@ -402,7 +457,6 @@ static int hl7138_set_chg_enable(struct oplus_voocphy_manager *chip, bool enable
 static int hl7138_get_cp_ichg(struct oplus_voocphy_manager *chip)
 {
 	u8 data_block[HL7138_REG_NUM_2] = {0};
-	int cp_ichg = 0;
 	u8 cp_enable = 0;
 
 	hl7138_get_chg_enable(chip, &cp_enable);
@@ -417,8 +471,9 @@ static int hl7138_get_cp_ichg(struct oplus_voocphy_manager *chip)
 	} else {
 		chip->cp_ichg = ((data_block[0] << HL7138_REG_ADC_BIT_OFFSET_4) | data_block[1]) * HL7138_VOOC_IBUS_FACTOR;	/* Iin_lbs=2.15mA@BP; */
 	}
+	chg_info("chip->cp_ichg = %d\n", chip->cp_ichg);
 
-	return cp_ichg;
+	return chip->cp_ichg;
 }
 
 int hl7138_get_cp_vbat(struct oplus_voocphy_manager *chip)
@@ -571,16 +626,20 @@ void hl7138_send_handshake_seq(struct oplus_voocphy_manager *chip)
 int hl7138_reset_voocphy(struct oplus_voocphy_manager *chip)
 {
 	u8 data;
+	u8 reg_data;
 
 	/*aviod exit fastchg vbus ovp drop out*/
 	hl7138_write_byte(chip->client, HL7138_REG_14, 0x08);
 
 	/* hwic config with plugout */
-	hl7138_write_byte(chip->client, HL7138_REG_11, 0xDC);	/* JL:Dis VBAT,IBAT reg; */
-	hl7138_write_byte(chip->client, HL7138_REG_08, 0x38);	/* JL:vbat_ovp=4.65V;00->08;(4.65-0.09)/10=54; */
+	reg_data = chip->reg_ctrl_1;
+	hl7138_write_byte(chip->client, HL7138_REG_11, reg_data);	/* JL:Dis VBAT,IBAT reg; */
+	reg_data = chip->ovp_reg;
+	hl7138_write_byte(chip->client, HL7138_REG_08, reg_data);	/* JL:vbat_ovp=4.65V;00->08;(4.65-0.09)/10=54; */
 	hl7138_write_byte(chip->client, HL7138_REG_0B, 0x88);	/* JL:VBUS_OVP=12V;4+val*lsb; */
 	/* hl7138_write_byte(chip->client, HL7138_REG_0C, 0x0F);		//JL:vbus_ovp=10V;04->0c;10.5/5.25V; */
-	hl7138_write_byte(chip->client, HL7138_REG_0E, 0x32);	/* JL:UCP_deb=5ms;IBUS_OCP=3.6A;05->0e;3.5A_max; */
+	reg_data = chip->ocp_reg;
+	hl7138_write_byte(chip->client, HL7138_REG_0E, reg_data);	/* JL:UCP_deb=5ms;IBUS_OCP=3.6A;05->0e;3.5A_max; */
 	hl7138_write_byte(chip->client, HL7138_REG_40, 0x00);	/* JL:Dis_ADC;11->40; */
 	hl7138_write_byte(chip->client, HL7138_REG_02, 0xE0);	/* JL:mask all INT_FLAG */
 	hl7138_write_byte(chip->client, HL7138_REG_10, 0xEC);	/* JL:Dis IIN_REG; */
@@ -631,12 +690,17 @@ int hl7138_reactive_voocphy(struct oplus_voocphy_manager *chip)
 
 static int hl7138_init_device(struct oplus_voocphy_manager *chip)
 {
+	u8 reg_data;
+
 	hl7138_write_byte(chip->client, HL7138_REG_40, 0x00);	/* ADC_CTRL:disable,JL:11-40; */
 	hl7138_write_byte(chip->client, HL7138_REG_0B, 0x88);	/* VBUS_OVP=12V,JL:02->0B; */
 	/* hl7138_write_byte(chip->client, HL7138_REG_0C, 0x0F);		//VBUS_OVP:10.2 2:1 or 1:1V,JL:04-0C; */
-	hl7138_write_byte(chip->client, HL7138_REG_11, 0xDC);	/* ovp:90mV */
-	hl7138_write_byte(chip->client, HL7138_REG_08, 0x38);	/* VBAT_OVP:4.56	4.56+0.09*/
-	hl7138_write_byte(chip->client, HL7138_REG_0E, 0x32);	/* IBUS_OCP:3.5A      ocp:100mA */
+	reg_data = chip->reg_ctrl_1;
+	hl7138_write_byte(chip->client, HL7138_REG_11, reg_data);	/* ovp:90mV */
+	reg_data = chip->ovp_reg;
+	hl7138_write_byte(chip->client, HL7138_REG_08, reg_data);	/* VBAT_OVP:4.56	4.56+0.09*/
+	reg_data = chip->ocp_reg;
+	hl7138_write_byte(chip->client, HL7138_REG_0E, reg_data);	/* IBUS_OCP:3.5A      ocp:100mA */
 	/* hl7138_write_byte(chip->client, HL7138_REG_0A, 0x2E);		//IBAT_OCP:max;JL:01-0A;0X2E=6.6A,MAX; */
 	hl7138_write_byte(chip->client, HL7138_REG_37, 0x00);	/* VOOC_CTRL:disable;JL:2B->37; */
 
@@ -747,6 +811,7 @@ static int hl7138_turnon_sys_clk(struct oplus_voocphy_manager *chip)
 	} while (retry <= 3);
 
 	/* combined operation, let sys_clk return auto mode, current restore to uA level */
+	hl7138_write_byte(chip->client, HL7138_REG_02, 0xF0);
 	hl7138_write_byte(chip->client, HL7138_REG_40, 0x0D);	/* force enable adc read average with 4 samples data */
 	hl7138_write_byte(chip->client, HL7138_REG_14, 0xC8);	/* soft reset register and disable watchdog */
 	mdelay(2);
@@ -828,10 +893,10 @@ static int hl7138_5v2a_hw_setting(struct oplus_voocphy_manager *chip)
 
 static int hl7138_pdqc_hw_setting(struct oplus_voocphy_manager *chip)
 {
-	hl7138_write_byte(chip->client, HL7138_REG_08, 0x2E);	/* VBAT_OVP:4.45V */
+	hl7138_write_byte(chip->client, HL7138_REG_08, 0x3C);	/* VBAT_OVP:4.6V */
 	hl7138_write_byte(chip->client, HL7138_REG_0B, 0x88);	/* VBUS_OVP:12V */
 	hl7138_write_byte(chip->client, HL7138_REG_0C, 0x0F);	/* VIN_OVP:11.7V */
-	hl7138_write_byte(chip->client, HL7138_REG_0E, 0xAF);	/* IBUS_OCP:3.6A */
+	hl7138_write_byte(chip->client, HL7138_REG_0E, 0xB2);	/* IBUS_OCP disable */
 	hl7138_write_byte(chip->client, HL7138_REG_14, 0x08);	/* WD:DIS */
 	hl7138_write_byte(chip->client, HL7138_REG_15, 0x00);	/* enter cp mode */
 	hl7138_write_byte(chip->client, HL7138_REG_40, 0x00);	/* ADC_CTRL:disable */
@@ -976,38 +1041,6 @@ static struct of_device_id hl7138_charger_match_table[] = {
 	},
 	{},
 };
-
-static int hl7138_parse_dt(struct oplus_voocphy_manager *chip)
-{
-	int rc;
-	struct device_node * node = NULL;
-
-	if (!chip) {
-		chg_debug("chip null\n");
-		return -1;
-	}
-
-	/* Parsing gpio switch gpio47*/
-	node = chip->dev->of_node;
-
-	rc = of_property_read_u32(node, "oplus_spec,voocphy_vbus_low",
-	                          &chip->voocphy_vbus_low);
-	if (rc) {
-		chip->voocphy_vbus_low = DEFUALT_VBUS_LOW;
-	}
-	chg_err("voocphy_vbus_high is %d\n", chip->voocphy_vbus_low);
-
-	rc = of_property_read_u32(node, "oplus_spec,voocphy_vbus_high",
-	                          &chip->voocphy_vbus_high);
-	if (rc) {
-		chip->voocphy_vbus_high = DEFUALT_VBUS_HIGH;
-	}
-	chg_err("voocphy_vbus_high is %d\n", chip->voocphy_vbus_high);
-
-	chip->high_curr_setting = of_property_read_bool(node, "oplus_spec,high_curr_setting");
-
-	return 0;
-}
 
 static int hl7138_get_chip_id(struct oplus_voocphy_manager *chip)
 {
@@ -1162,51 +1195,778 @@ static int hl7138_irq_register(struct oplus_voocphy_manager *voocphy)
 	return 0;
 }
 
+static enum oplus_cp_work_mode g_cp_support_work_mode[] = {
+	CP_WORK_MODE_BYPASS,
+	CP_WORK_MODE_2_TO_1,
+};
+
+static bool hl7138_check_work_mode_support(enum oplus_cp_work_mode mode)
+{
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(g_cp_support_work_mode); i++) {
+		if (g_cp_support_work_mode[i] == mode)
+			return true;
+	}
+	return false;
+}
+
+static int hl7138_cp_init(struct oplus_chg_ic_dev *ic_dev)
+{
+	if (ic_dev == NULL) {
+		chg_err("oplus_chg_ic_dev is NULL");
+		return -ENODEV;
+	}
+	ic_dev->online = true;
+	oplus_chg_ic_virq_trigger(ic_dev, OPLUS_IC_VIRQ_ONLINE);
+
+	return 0;
+}
+
+static int hl7138_cp_exit(struct oplus_chg_ic_dev *ic_dev)
+{
+	if (ic_dev == NULL) {
+		chg_err("oplus_chg_ic_dev is NULL");
+		return -ENODEV;
+	}
+	ic_dev->online = false;
+	oplus_chg_ic_virq_trigger(ic_dev, OPLUS_IC_VIRQ_OFFLINE);
+
+	return 0;
+}
+
+static int hl7138_cp_reg_dump(struct oplus_chg_ic_dev *ic_dev)
+{
+	struct hl7138_device *chip;
+
+	if (ic_dev == NULL) {
+		chg_err("oplus_chg_ic_dev is NULL");
+		return -ENODEV;
+	}
+	chip = oplus_chg_ic_get_priv_data(ic_dev);
+
+//	hl7138_voocphy_dump_reg_in_err_issue(chip->voocphy);
+	return 0;
+}
+
+static int hl7138_cp_smt_test(struct oplus_chg_ic_dev *ic_dev, char buf[], int len)
+{
+	return 0;
+}
+
+
+static int hl7138_cp_enable(struct oplus_chg_ic_dev *ic_dev, bool en)
+{
+	struct hl7138_device *chip;
+	int ret = 0;
+
+	if (ic_dev == NULL) {
+		chg_err("oplus_chg_ic_dev is NULL");
+		return -ENODEV;
+	}
+	chip = oplus_chg_ic_get_priv_data(ic_dev);
+
+	if (en)
+		ret = hl7138_write_byte(chip->client, HL7138_REG_14, 0x02); /* WD:1000ms */
+	else
+		ret = hl7138_write_byte(chip->client, HL7138_REG_14, 0x08); /* dsiable wdt */
+
+	if (ret < 0) {
+		chg_err("failed to set hl7138_cp_enable (%d)(%d)\n", en, ret);
+		return ret;
+	}
+	return 0;
+}
+
+static int hl7138_cp_hw_init(struct oplus_chg_ic_dev *ic_dev)
+{
+	struct hl7138_device *chip;
+
+	if (ic_dev == NULL) {
+		chg_err("oplus_chg_ic_dev is NULL");
+		return -ENODEV;
+	}
+	chip = oplus_chg_ic_get_priv_data(ic_dev);
+
+	if (chip->rested)
+		return 0;
+
+	hl7138_hardware_init(chip->voocphy);
+	return 0;
+}
+
+static int hl7138_cp_set_work_mode(struct oplus_chg_ic_dev *ic_dev, enum oplus_cp_work_mode mode)
+{
+	struct hl7138_device *chip;
+	int rc;
+
+	if (ic_dev == NULL) {
+		chg_err("oplus_chg_ic_dev is NULL");
+		return -ENODEV;
+	}
+	chip = oplus_chg_ic_get_priv_data(ic_dev);
+
+	if (!hl7138_check_work_mode_support(mode)) {
+		chg_err("not supported work mode, mode=%d\n", mode);
+		return -EINVAL;
+	}
+
+	if (mode == CP_WORK_MODE_BYPASS)
+		rc = hl7138_vooc_hw_setting(chip->voocphy);
+	else
+		rc = hl7138_svooc_hw_setting(chip->voocphy);
+
+	if (rc < 0)
+		chg_err("set work mode to %d error\n", mode);
+
+	return rc;
+}
+
+static int hl7138_cp_get_work_mode(struct oplus_chg_ic_dev *ic_dev, enum oplus_cp_work_mode *mode)
+{
+	struct oplus_voocphy_manager *chip;
+	u8 data;
+	int rc;
+
+	if (ic_dev == NULL) {
+		chg_err("oplus_chg_ic_dev is NULL");
+		return -ENODEV;
+	}
+	chip = oplus_chg_ic_get_priv_data(ic_dev);
+
+	rc = hl7138_read_byte(chip->client, HL7138_REG_14, &data);
+	if (rc < 0) {
+		chg_err("read hl7138_REG_14 error, rc=%d\n", rc);
+		return rc;
+	}
+
+	if (data & BIT(7))
+		*mode = CP_WORK_MODE_BYPASS;
+	else
+		*mode = CP_WORK_MODE_2_TO_1;
+
+	return 0;
+}
+
+static int hl7138_cp_check_work_mode_support(struct oplus_chg_ic_dev *ic_dev, enum oplus_cp_work_mode mode)
+{
+	if (ic_dev == NULL) {
+		chg_err("oplus_chg_ic_dev is NULL");
+		return -ENODEV;
+	}
+
+	return hl7138_check_work_mode_support(mode);
+}
+
+static int hl7138_cp_set_iin(struct oplus_chg_ic_dev *ic_dev, int iin)
+{
+	return 0;
+}
+
+static int hl7138_get_cp_vbus(struct hl7138_device *chip)
+{
+	if (chip == NULL || chip->voocphy == NULL) {
+		chg_err("chip is NULL");
+		return -ENODEV;
+	}
+
+	hl7138_update_data(chip->voocphy);
+
+	return chip->voocphy->cp_vbus;
+}
+
+static int hl7138_cp_get_vin(struct oplus_chg_ic_dev *ic_dev, int *vin)
+{
+	struct hl7138_device *chip;
+	int rc;
+
+	if (ic_dev == NULL) {
+		chg_err("oplus_chg_ic_dev is NULL");
+		return -ENODEV;
+	}
+	chip = oplus_chg_ic_get_priv_data(ic_dev);
+
+	rc = hl7138_get_cp_vbus(chip);
+	if (rc < 0) {
+		chg_err("can't get cp vin, rc=%d\n", rc);
+		return rc;
+	}
+	*vin = rc;
+
+	return 0;
+}
+
+static int hl7138_cp_get_iin(struct oplus_chg_ic_dev *ic_dev, int *iin)
+{
+	struct hl7138_device *chip;
+	int rc;
+
+	if (ic_dev == NULL) {
+		chg_err("oplus_chg_ic_dev is NULL");
+		return -ENODEV;
+	}
+	chip = oplus_chg_ic_get_priv_data(ic_dev);
+	rc = hl7138_get_cp_ichg(chip->voocphy);
+	if (rc < 0) {
+		chg_err("can't get cp iin, rc=%d\n", rc);
+		return rc;
+	}
+	*iin = rc;
+
+	return 0;
+}
+
+static int hl7138_cp_get_vout(struct oplus_chg_ic_dev *ic_dev, int *vout)
+{
+	struct hl7138_device *chip;
+	int rc;
+
+	if (ic_dev == NULL) {
+		chg_err("oplus_chg_ic_dev is NULL");
+		return -ENODEV;
+	}
+	chip = oplus_chg_ic_get_priv_data(ic_dev);
+
+	rc = hl7138_get_cp_vbat(chip->voocphy);
+	if (rc < 0) {
+		chg_err("can't get cp vout, rc=%d\n", rc);
+		return rc;
+	}
+	*vout = rc;
+
+	return 0;
+}
+
+static int hl7138_cp_get_iout(struct oplus_chg_ic_dev *ic_dev, int *iout)
+{
+	struct hl7138_device *chip;
+	int iin;
+	bool working;
+	enum oplus_cp_work_mode work_mode;
+	int rc;
+
+	if (ic_dev == NULL) {
+		chg_err("oplus_chg_ic_dev is NULL");
+		return -ENODEV;
+	}
+	chip = oplus_chg_ic_get_priv_data(ic_dev);
+
+	/*
+	 * There is an exception in the iout adc of sc8537a, which is obtained
+	 * indirectly through iin
+	 */
+	rc = oplus_chg_ic_func(ic_dev, OPLUS_IC_FUNC_CP_GET_WORK_STATUS, &working);
+	if (rc < 0)
+		return rc;
+	if (!working) {
+		*iout = 0;
+		return 0;
+	}
+	rc = oplus_chg_ic_func(ic_dev, OPLUS_IC_FUNC_CP_GET_IIN, &iin);
+	if (rc < 0)
+		return rc;
+	rc = oplus_chg_ic_func(ic_dev, OPLUS_IC_FUNC_CP_GET_WORK_MODE, &work_mode);
+	if (rc < 0)
+		return rc;
+	switch (work_mode) {
+	case CP_WORK_MODE_BYPASS:
+		*iout = iin;
+		break;
+	case CP_WORK_MODE_2_TO_1:
+		*iout = iin * 2;
+		break;
+	default:
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+static int hl7138_cp_get_vac(struct oplus_chg_ic_dev *ic_dev, int *vac)
+{
+	struct hl7138_device *chip;
+	u8 data_block[2] = { 0 };
+	int rc;
+
+	if (ic_dev == NULL) {
+		chg_err("oplus_chg_ic_dev is NULL");
+		return -ENODEV;
+	}
+	chip = oplus_chg_ic_get_priv_data(ic_dev);
+	if (!chip->vac_support)
+		return -ENOTSUPP;
+
+	rc = i2c_smbus_read_i2c_block_data(chip->client, HL7138_REG_42, 2, data_block);
+	if (rc < 0) {
+		//hl7138_i2c_error(chip->voocphy, true, true);
+		chg_err("hl7138 read vac error, rc=%d\n", rc);
+		return rc;
+	} else {
+		//hl7138_i2c_error(chip->voocphy, false, true);
+	}
+
+//	*vac = (((data_block[0] & hl7138_VAC_POL_H_MASK) << 8) | data_block[1]) * hl7138_VAC_ADC_LSB;
+
+	return 0;
+}
+
+static int hl7138_cp_set_work_start(struct oplus_chg_ic_dev *ic_dev, bool start)
+{
+	struct hl7138_device *chip;
+	int rc;
+
+	if (ic_dev == NULL) {
+		chg_err("oplus_chg_ic_dev is NULL");
+		return -ENODEV;
+	}
+	chip = oplus_chg_ic_get_priv_data(ic_dev);
+
+	chg_info("%s work %s\n", chip->dev->of_node->name, start ? "start" : "stop");
+
+	rc = hl7138_set_chg_enable(chip->voocphy, start);
+	if (rc < 0)
+		return rc;
+	oplus_imp_node_set_active(chip->input_imp_node, start);
+	oplus_imp_node_set_active(chip->output_imp_node, start);
+
+	return 0;
+}
+
+static int hl7138_cp_get_work_status(struct oplus_chg_ic_dev *ic_dev, bool *start)
+{
+	struct hl7138_device *chip;
+	u8 data;
+	int rc;
+
+	if (ic_dev == NULL) {
+		chg_err("oplus_chg_ic_dev is NULL");
+		return -ENODEV;
+	}
+	chip = oplus_chg_ic_get_priv_data(ic_dev);
+
+	rc = hl7138_read_byte(chip->client, HL7138_REG_12, &data);
+	if (rc < 0) {
+		chg_err("read hl7138_REG_07 error, rc=%d\n", rc);
+		return rc;
+	}
+
+	*start = data & BIT(7);
+
+	return 0;
+}
+
+static int hl7138_cp_adc_enable(struct oplus_chg_ic_dev *ic_dev, bool en)
+{
+	struct hl7138_device *chip;
+
+	if (ic_dev == NULL) {
+		chg_err("oplus_chg_ic_dev is NULL");
+		return -ENODEV;
+	}
+	chip = oplus_chg_ic_get_priv_data(ic_dev);
+
+	return hl7138_set_adc_enable(chip->voocphy, en);
+
+	return 0;
+}
+
+static void *hl7138_cp_get_func(struct oplus_chg_ic_dev *ic_dev, enum oplus_chg_ic_func func_id)
+{
+	void *func = NULL;
+
+	if (!ic_dev->online && (func_id != OPLUS_IC_FUNC_INIT) &&
+	    (func_id != OPLUS_IC_FUNC_EXIT)) {
+		chg_err("%s is offline\n", ic_dev->name);
+		return NULL;
+	}
+
+	switch (func_id) {
+	case OPLUS_IC_FUNC_INIT:
+		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_INIT, hl7138_cp_init);
+		break;
+	case OPLUS_IC_FUNC_EXIT:
+		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_EXIT, hl7138_cp_exit);
+		break;
+	case OPLUS_IC_FUNC_REG_DUMP:
+		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_REG_DUMP, hl7138_cp_reg_dump);
+		break;
+	case OPLUS_IC_FUNC_SMT_TEST:
+		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_SMT_TEST, hl7138_cp_smt_test);
+		break;
+	case OPLUS_IC_FUNC_CP_ENABLE:
+		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_CP_ENABLE, hl7138_cp_enable);
+		break;
+	case OPLUS_IC_FUNC_CP_HW_INTI:
+		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_CP_HW_INTI, hl7138_cp_hw_init);
+		break;
+	case OPLUS_IC_FUNC_CP_SET_WORK_MODE:
+		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_CP_SET_WORK_MODE, hl7138_cp_set_work_mode);
+		break;
+	case OPLUS_IC_FUNC_CP_GET_WORK_MODE:
+		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_CP_GET_WORK_MODE, hl7138_cp_get_work_mode);
+		break;
+	case OPLUS_IC_FUNC_CP_CHECK_WORK_MODE_SUPPORT:
+		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_CP_CHECK_WORK_MODE_SUPPORT,
+			hl7138_cp_check_work_mode_support);
+		break;
+	case OPLUS_IC_FUNC_CP_SET_IIN:
+		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_CP_SET_IIN, hl7138_cp_set_iin);
+		break;
+	case OPLUS_IC_FUNC_CP_GET_VIN:
+		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_CP_GET_VIN, hl7138_cp_get_vin);
+		break;
+	case OPLUS_IC_FUNC_CP_GET_IIN:
+		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_CP_GET_IIN, hl7138_cp_get_iin);
+		break;
+	case OPLUS_IC_FUNC_CP_GET_VOUT:
+		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_CP_GET_VOUT, hl7138_cp_get_vout);
+		break;
+	case OPLUS_IC_FUNC_CP_GET_IOUT:
+		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_CP_GET_IOUT, hl7138_cp_get_iout);
+		break;
+	case OPLUS_IC_FUNC_CP_GET_VAC:
+		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_CP_GET_VAC, hl7138_cp_get_vac);
+		break;
+	case OPLUS_IC_FUNC_CP_SET_WORK_START:
+		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_CP_SET_WORK_START, hl7138_cp_set_work_start);
+		break;
+	case OPLUS_IC_FUNC_CP_GET_WORK_STATUS:
+		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_CP_GET_WORK_STATUS, hl7138_cp_get_work_status);
+		break;
+	case OPLUS_IC_FUNC_CP_SET_ADC_ENABLE:
+		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_CP_SET_ADC_ENABLE, hl7138_cp_adc_enable);
+		break;
+	default:
+		chg_err("this func(=%d) is not supported\n", func_id);
+		func = NULL;
+		break;
+	}
+
+	return func;
+}
+
+struct oplus_chg_ic_virq hl7138_cp_virq_table[] = {
+	{ .virq_id = OPLUS_IC_VIRQ_ERR },
+	{ .virq_id = OPLUS_IC_VIRQ_ONLINE },
+	{ .virq_id = OPLUS_IC_VIRQ_OFFLINE },
+};
+
+static int hl7138_get_input_node_impedance(void *data)
+{
+	struct hl7138_device *chip;
+	int vac, vin, iin;
+	int r_mohm;
+	int rc;
+
+	if (data == NULL)
+		return -EINVAL;
+	chip = data;
+
+	rc = oplus_chg_ic_func(chip->cp_ic, OPLUS_IC_FUNC_CP_GET_VIN, &vin);
+	if (rc < 0) {
+		chg_err("can't read cp vin, rc=%d\n", rc);
+		return rc;
+	}
+	rc = oplus_chg_ic_func(chip->cp_ic, OPLUS_IC_FUNC_CP_GET_IIN, &iin);
+	if (rc < 0) {
+		chg_err("can't read cp iin, rc=%d\n", rc);
+		return rc;
+	}
+	rc = oplus_chg_ic_func(chip->cp_ic, OPLUS_IC_FUNC_CP_GET_VAC, &vac);
+	if (rc < 0 && rc != -ENOTSUPP) {
+		chg_err("can't read cp vac, rc=%d\n", rc);
+		return rc;
+	} else if (rc == -ENOTSUPP) {
+		/* If the current IC does not support it, try to get it from the parent IC */
+		rc = oplus_chg_ic_func(chip->cp_ic->parent, OPLUS_IC_FUNC_CP_GET_VAC, &vac);
+		if (rc < 0) {
+			chg_err("can't read parent cp vac, rc=%d\n", rc);
+			return rc;
+		}
+	}
+
+	r_mohm = (vac - vin) * 1000 / iin;
+	if (r_mohm < 0) {
+		chg_err("input_node: r_mohm=%d\n", r_mohm);
+		r_mohm = 0;
+	}
+
+	return r_mohm;
+}
+
+static int hl7138_get_output_node_impedance(void *data)
+{
+	struct hl7138_device *chip;
+	struct oplus_mms *gauge_topic;
+	union mms_msg_data mms_data = { 0 };
+	int vout, iout, vbat;
+	int r_mohm;
+	int rc;
+
+	if (data == NULL)
+		return -EINVAL;
+	chip = data;
+
+	rc = oplus_chg_ic_func(chip->cp_ic, OPLUS_IC_FUNC_CP_GET_VOUT, &vout);
+	if (rc < 0) {
+		chg_err("can't read cp vout, rc=%d\n", rc);
+		return rc;
+	}
+	rc = oplus_chg_ic_func(chip->cp_ic, OPLUS_IC_FUNC_CP_GET_IOUT, &iout);
+	if (rc < 0) {
+		chg_err("can't read cp iout, rc=%d\n", rc);
+		return rc;
+	}
+
+	gauge_topic = oplus_mms_get_by_name("gauge");
+	if (gauge_topic == NULL) {
+		chg_err("gauge topic not found\n");
+		return -ENODEV;
+	}
+	rc = oplus_mms_get_item_data(gauge_topic, GAUGE_ITEM_VOL_MAX, &mms_data, false);
+	if (rc < 0) {
+		chg_err("can't get vbat, rc=%d\n", rc);
+		return rc;
+	}
+	vbat = mms_data.intval;
+
+	r_mohm = (vout - vbat * oplus_gauge_get_batt_num()) * 1000 / iout;
+	if (r_mohm < 0) {
+		chg_err("output_node: r_mohm=%d\n", r_mohm);
+		r_mohm = 0;
+	}
+
+	return r_mohm;
+}
+
+static int hl7138_init_imp_node(struct hl7138_device *chip, struct device_node *of_node)
+{
+	struct device_node *imp_node;
+	struct device_node *child;
+	const char *name;
+	int rc;
+
+	imp_node = of_get_child_by_name(of_node, "oplus,impedance_node");
+	if (imp_node == NULL)
+		return 0;
+
+	for_each_child_of_node(imp_node, child) {
+		rc = of_property_read_string(child, "node_name", &name);
+		if (rc < 0) {
+			chg_err("can't read %s node_name, rc=%d\n", child->name, rc);
+			continue;
+		}
+		if (!strcmp(name, "cp_input")) {
+			chip->input_imp_node =
+				oplus_imp_node_register(child, chip->dev, chip, hl7138_get_input_node_impedance);
+			if (IS_ERR_OR_NULL(chip->input_imp_node)) {
+				chg_err("%s register error, rc=%ld\n", child->name, PTR_ERR(chip->input_imp_node));
+				chip->input_imp_node = NULL;
+				continue;
+			}
+		} else if (!strcmp(name, "cp_output")) {
+			chip->output_imp_node =
+				oplus_imp_node_register(child, chip->dev, chip, hl7138_get_output_node_impedance);
+			if (IS_ERR_OR_NULL(chip->output_imp_node)) {
+				chg_err("%s register error, rc=%ld\n", child->name, PTR_ERR(chip->output_imp_node));
+				chip->output_imp_node = NULL;
+				continue;
+			}
+		} else {
+			chg_err("unknown node_name: %s\n", name);
+		}
+	}
+
+	return 0;
+}
+
+static int hl7138_ic_register(struct hl7138_device *chip)
+{
+	enum oplus_chg_ic_type ic_type;
+	int ic_index;
+	struct device_node *child;
+	struct oplus_chg_ic_dev *ic_dev = NULL;
+	struct oplus_chg_ic_cfg ic_cfg;
+	int rc;
+
+	for_each_child_of_node(chip->dev->of_node, child) {
+		rc = of_property_read_u32(child, "oplus,ic_type", &ic_type);
+		if (rc < 0)
+			continue;
+		rc = of_property_read_u32(child, "oplus,ic_index", &ic_index);
+		if (rc < 0)
+			continue;
+		ic_cfg.name = child->name;
+		ic_cfg.index = ic_index;
+		ic_cfg.type = ic_type;
+		ic_cfg.priv_data = chip;
+		ic_cfg.of_node = child;
+		switch (ic_type) {
+		case OPLUS_CHG_IC_CP:
+			(void)hl7138_init_imp_node(chip, child);
+			snprintf(ic_cfg.manu_name, OPLUS_CHG_IC_MANU_NAME_MAX - 1, "cp-hl7138:%d", ic_index);
+			snprintf(ic_cfg.fw_id, OPLUS_CHG_IC_FW_ID_MAX - 1, "0x00");
+			ic_cfg.get_func = hl7138_cp_get_func;
+			ic_cfg.virq_data = hl7138_cp_virq_table;
+			ic_cfg.virq_num = ARRAY_SIZE(hl7138_cp_virq_table);
+			break;
+		default:
+			chg_err("not support ic_type(=%d)\n", ic_type);
+			continue;
+		}
+		ic_dev = devm_oplus_chg_ic_register(chip->dev, &ic_cfg);
+		if (!ic_dev) {
+			rc = -ENODEV;
+			chg_err("register %s error\n", child->name);
+			continue;
+		}
+		chg_info("register %s\n", child->name);
+
+		switch (ic_dev->type) {
+		case OPLUS_CHG_IC_CP:
+			chip->cp_work_mode = CP_WORK_MODE_UNKNOWN;
+			chip->cp_ic = ic_dev;
+			break;
+		default:
+			chg_err("not support ic_type(=%d)\n", ic_dev->type);
+			continue;
+		}
+
+		of_platform_populate(child, NULL, NULL, chip->dev);
+	}
+
+	return 0;
+}
+
+static int hl7138_parse_dt(struct oplus_voocphy_manager *chip)
+{
+	int rc;
+	struct device_node * node = NULL;
+
+	if (!chip) {
+		chg_debug("chip null\n");
+		return -1;
+	}
+
+	/* Parsing gpio switch gpio47*/
+	node = chip->dev->of_node;
+
+	rc = of_property_read_u32(node, "oplus_spec,voocphy_vbus_low",
+	                          &chip->voocphy_vbus_low);
+	if (rc) {
+		chip->voocphy_vbus_low = DEFUALT_VBUS_LOW;
+	}
+	chg_err("voocphy_vbus_high is %d\n", chip->voocphy_vbus_low);
+
+	rc = of_property_read_u32(node, "oplus_spec,voocphy_vbus_high",
+	                          &chip->voocphy_vbus_high);
+	if (rc) {
+		chip->voocphy_vbus_high = DEFUALT_VBUS_HIGH;
+	}
+	chg_err("voocphy_vbus_high is %d\n", chip->voocphy_vbus_high);
+
+	chip->high_curr_setting = of_property_read_bool(node, "oplus_spec,high_curr_setting");
+
+	rc = of_property_read_u32(node, "ovp_reg", &chip->ovp_reg);
+	if (rc)
+		chip->ovp_reg = 0x3C;
+	chg_err("ovp_reg=0x%2x\n", chip->ovp_reg);
+
+	rc = of_property_read_u32(node, "reg_ctrl_1", &chip->reg_ctrl_1);
+	if (rc)
+		chip->reg_ctrl_1 = 0xFC;
+	chg_err("reg_ctrl_1=0x%2x\n", chip->reg_ctrl_1);
+
+	rc = of_property_read_u32(node, "ocp_reg", &chip->ocp_reg);
+	if (rc)
+		chip->ocp_reg = 0x32;
+	chg_err("ocp_reg=0x%2x\n", chip->ocp_reg);
+
+	return 0;
+}
+
 static int hl7138_charger_probe(struct i2c_client *client,
 					const struct i2c_device_id *id)
 {
-	struct oplus_voocphy_manager *chip;
+	struct hl7138_device *chip;
+	struct oplus_voocphy_manager *voocphy;
 	int ret;
 
 	chg_err("hl7138_charger_probe enter!\n");
-	chip = devm_kzalloc(&client->dev, sizeof(*chip), GFP_KERNEL);
+	chip = devm_kzalloc(&client->dev, sizeof(struct hl7138_device), GFP_KERNEL);
 	if (!chip) {
 		dev_err(&client->dev, "Couldn't allocate memory\n");
 		return -ENOMEM;
 	}
 
+	voocphy = devm_kzalloc(&client->dev, sizeof(struct oplus_voocphy_manager), GFP_KERNEL);
+	if (voocphy == NULL) {
+		chg_err("alloc voocphy buf error\n");
+		ret = -ENOMEM;
+		goto hl7138_probe_err;
+	}
+
 	chip->dev = &client->dev;
 	chip->client = client;
 	mutex_init(&i2c_rw_lock);
+	voocphy->client = client;
+	voocphy->dev = &client->dev;
+	voocphy->priv_data = chip;
+	chip->voocphy = voocphy;
+	mutex_init(&chip->i2c_rw_lock);
+	mutex_init(&chip->chip_lock);
 
-	i2c_set_clientdata(client, chip);
+	i2c_set_clientdata(client, voocphy);
 
-	ret = hl7138_charger_choose(chip);
-	if (ret <= 0)
-		return ret;
+	ret = hl7138_charger_choose(voocphy);
+	if (ret <= 0) {
+		chg_err("failed to charger choose, ret = %d", ret);
+		goto init_err;
+	}
 
 	hl7138_create_device_node(&(client->dev));
-	chip->ops = &oplus_hl7138_ops;
-	ret = oplus_register_voocphy(chip);
+	chip->voocphy->ops = &oplus_hl7138_ops;
+	ret = oplus_register_voocphy(chip->voocphy);
 	if (ret < 0) {
 		chg_err("failed to register voocphy, ret = %d", ret);
 		goto hl7138_probe_err;
-		return ret;
 	}
-	ret = hl7138_irq_register(chip);
+	ret = hl7138_irq_register(voocphy);
 	if (ret < 0) {
 		chg_err("irq register error, rc=%d\n", ret);
 		goto hl7138_probe_err;
 	}
-	oplus_voocphy_mg = chip;
-	hl7138_parse_dt(chip);
+	oplus_voocphy_mg = voocphy;
+	ret = hl7138_parse_dt(voocphy);
+	if (ret < 0)
+		goto parse_dt_err;
 
 	/* turn on system clk for BA version only */
-	if (hl7138_check_hw_ba_version(chip))
-		hl7138_turnon_sys_clk(chip);
+	if (hl7138_check_hw_ba_version(voocphy))
+		hl7138_turnon_sys_clk(voocphy);
+
+	ret = hl7138_ic_register(chip);
+	if (ret < 0) {
+		chg_err("cp ic register error\n");
+		goto cp_reg_err;
+	}
+
+	hl7138_cp_init(chip->cp_ic);
+	hl7138_hardware_init(chip->voocphy);
 
 	chg_err("hl7138_charger_probe succesfull\n");
 	return 0;
+
+cp_reg_err:
+	if (chip->input_imp_node != NULL)
+		oplus_imp_node_unregister(chip->dev, chip->input_imp_node);
+	if (chip->output_imp_node != NULL)
+		oplus_imp_node_unregister(chip->dev, chip->output_imp_node);
+
+init_err:
+parse_dt_err:
+	devm_kfree(&client->dev, voocphy);
+	devm_kfree(&client->dev, chip);
 
 hl7138_probe_err:
 	chg_err("hl7138_charger_probe failed\n");

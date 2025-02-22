@@ -3678,8 +3678,11 @@ bool hal_fg_init(struct i2c_client *client)
 	return true;
 }
 
-static int sm_fg_probe(struct i2c_client *client,
-							const struct i2c_device_id *id)
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0))
+static int sm_fg_probe(struct i2c_client *client)
+#else
+static int sm_fg_probe(struct i2c_client *client, const struct i2c_device_id *id)
+#endif
 {
 	int ret = 0;
 	struct sm_fg_chip *sm;

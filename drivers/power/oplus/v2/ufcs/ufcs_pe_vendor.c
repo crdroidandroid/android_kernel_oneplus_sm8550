@@ -33,7 +33,7 @@ retry:
 		ufcs_err("send oplus get emark info msg error, rc=%d\n", rc);
 		goto out;
 	}
-	start_sender_response_timer(class);
+	start_emark_response_timer(class);
 
 re_recv:
 	event = ufcs_get_next_event(class);
@@ -53,12 +53,12 @@ re_recv:
 			ufcs_free_event(class, &event);
 			goto re_recv;
 		}
-		stop_sender_response_timer(class);
 		rc = ufcs_check_refuse_msg(class, msg, UFCS_VENDOR_MSG, 0);
 		if (rc >= 0) {
 			ufcs_free_event(class, &event);
 			goto re_recv;
 		}
+		stop_emark_response_timer(class);
 		if (rc == -EAGAIN) {
 			if (soft_reset)
 				goto out;
@@ -79,11 +79,11 @@ re_recv:
 			ufcs_free_event(class, &event);
 			goto re_recv;
 		}
-		stop_sender_response_timer(class);
+		stop_emark_response_timer(class);
 		class->emark_info = msg->vendor_msg.vnd_msg.data_msg.emark_info.data;
 		break;
 	case UFCS_EVENT_RECV_SOFT_RESET:
-		stop_sender_response_timer(class);
+		stop_emark_response_timer(class);
 		class->state.curr = PE_STATE_SOFT_RESET;
 		return -EPROTO;
 	default:
@@ -97,7 +97,7 @@ re_recv:
 	}
 
 out:
-	stop_sender_response_timer(class);
+	stop_emark_response_timer(class);
 	ufcs_free_event(class, &event);
 	return rc;
 }
@@ -136,12 +136,12 @@ re_recv:
 			ufcs_free_event(class, &event);
 			goto re_recv;
 		}
-		stop_sender_response_timer(class);
 		rc = ufcs_check_refuse_msg(class, msg, UFCS_VENDOR_MSG, 0);
 		if (rc >= 0) {
 			ufcs_free_event(class, &event);
 			goto re_recv;
 		}
+		stop_sender_response_timer(class);
 		if (rc == -EAGAIN) {
 			if (soft_reset)
 				goto out;

@@ -37,6 +37,7 @@
 #include <trace/events/sched.h>
 #include <linux/ktime.h>
 #include <uapi/linux/sched/types.h>
+#include <linux/pinctrl/consumer.h>
 
 #ifndef CONFIG_DISABLE_OPLUS_FUNCTION
 #include <soc/oplus/system/oplus_project.h>
@@ -52,7 +53,7 @@
 #include <oplus_impedance_check.h>
 #include <oplus_chg_monitor.h>
 
-#if IS_ENABLED(CONFIG_OPLUS_CHG_DEBUG_KIT)
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_CHG_DEBUG_KIT)
 #include <debug-kit.h>
 #endif
 
@@ -67,7 +68,7 @@ struct oplus_sc2201 {
 	struct mutex pinctrl_lock;
 	struct oplus_mms *err_topic;
 	struct mms_subscribe *err_subs;
-#if IS_ENABLED(CONFIG_OPLUS_CHG_DEBUG_KIT)
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_CHG_DEBUG_KIT)
 	struct oplus_device_bus *odb;
 #endif
 
@@ -162,7 +163,7 @@ static void sc2201_i2c_err_clr(struct oplus_sc2201 *chip)
 
 static int sc2201_read_byte(struct oplus_sc2201 *chip, u16 addr, u8 *data)
 {
-#if IS_ENABLED(CONFIG_OPLUS_CHG_DEBUG_KIT)
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_CHG_DEBUG_KIT)
 	unsigned int val;
 #else
 	u8 addr_buf[2] = { addr & 0xff, addr >> 8 };
@@ -170,7 +171,7 @@ static int sc2201_read_byte(struct oplus_sc2201 *chip, u16 addr, u8 *data)
 	int rc = 0;
 
 	mutex_lock(&chip->i2c_rw_lock);
-#if IS_ENABLED(CONFIG_OPLUS_CHG_DEBUG_KIT)
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_CHG_DEBUG_KIT)
 	rc = oplus_dev_bus_read(chip->odb, addr, &val);
 	if (rc < 0) {
 		chg_err("read 0x%04x error, rc = %d \n", addr, rc);
@@ -204,13 +205,13 @@ error:
 
 static int sc2201_read_data(struct oplus_sc2201 *chip, u16 addr, u8 *buf, int len)
 {
-#if !IS_ENABLED(CONFIG_OPLUS_CHG_DEBUG_KIT)
+#if !IS_ENABLED(CONFIG_OPLUS_FEATURE_CHG_DEBUG_KIT)
 	u8 addr_buf[2] = { addr & 0xff, addr >> 8 };
 #endif
 	int rc = 0;
 
 	mutex_lock(&chip->i2c_rw_lock);
-#if IS_ENABLED(CONFIG_OPLUS_CHG_DEBUG_KIT)
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_CHG_DEBUG_KIT)
 	rc = oplus_dev_bus_bulk_read(chip->odb, addr, buf, len);
 	if (rc < 0) {
 		chg_err("read 0x%04x error, rc=%d\n", addr, rc);
@@ -243,13 +244,13 @@ error:
 
 static int sc2201_write_byte(struct oplus_sc2201 *chip, u16 addr, u8 data)
 {
-#if !IS_ENABLED(CONFIG_OPLUS_CHG_DEBUG_KIT)
+#if !IS_ENABLED(CONFIG_OPLUS_FEATURE_CHG_DEBUG_KIT)
 	u8 buf[3] = { addr & 0xff, addr >> 8, data };
 #endif
 	int rc = 0;
 
 	mutex_lock(&chip->i2c_rw_lock);
-#if IS_ENABLED(CONFIG_OPLUS_CHG_DEBUG_KIT)
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_CHG_DEBUG_KIT)
 	rc = oplus_dev_bus_write(chip->odb, addr, data);
 	if (rc < 0) {
 		chg_err("write 0x%04x error, rc = %d \n", addr, rc);
@@ -276,7 +277,7 @@ error:
 static int sc2201_write_data(struct oplus_sc2201 *chip, u16 addr, u16 length, u8 *data)
 {
 	int rc = 0;
-#if !IS_ENABLED(CONFIG_OPLUS_CHG_DEBUG_KIT)
+#if !IS_ENABLED(CONFIG_OPLUS_FEATURE_CHG_DEBUG_KIT)
 	u8 *buf;
 
 	buf = kzalloc(length + 2, GFP_KERNEL);
@@ -291,7 +292,7 @@ static int sc2201_write_data(struct oplus_sc2201 *chip, u16 addr, u16 length, u8
 #endif
 
 	mutex_lock(&chip->i2c_rw_lock);
-#if IS_ENABLED(CONFIG_OPLUS_CHG_DEBUG_KIT)
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_CHG_DEBUG_KIT)
 	rc = oplus_dev_bus_bulk_write(chip->odb, addr, data, length);
 	if (rc < 0) {
 		chg_err("write 0x%04x error, ret = %d \n", addr, rc);
@@ -307,7 +308,7 @@ static int sc2201_write_data(struct oplus_sc2201 *chip, u16 addr, u16 length, u8
 	}
 #endif
 	mutex_unlock(&chip->i2c_rw_lock);
-#if !IS_ENABLED(CONFIG_OPLUS_CHG_DEBUG_KIT)
+#if !IS_ENABLED(CONFIG_OPLUS_FEATURE_CHG_DEBUG_KIT)
 	kfree(buf);
 #endif
 	sc2201_i2c_err_clr(chip);
@@ -315,7 +316,7 @@ static int sc2201_write_data(struct oplus_sc2201 *chip, u16 addr, u16 length, u8
 
 error:
 	mutex_unlock(&chip->i2c_rw_lock);
-#if !IS_ENABLED(CONFIG_OPLUS_CHG_DEBUG_KIT)
+#if !IS_ENABLED(CONFIG_OPLUS_FEATURE_CHG_DEBUG_KIT)
 	kfree(buf);
 #endif
 	sc2201_push_i2c_err(chip, false, addr, rc);
@@ -905,7 +906,7 @@ static void sc2201_regdump_work(struct work_struct *work)
 }
 
 static void sc2201_err_subs_callback(struct mms_subscribe *subs,
-				     enum mms_msg_type type, u32 id)
+				     enum mms_msg_type type, u32 id, bool sync)
 {
 	struct oplus_sc2201 *chip = subs->priv_data;
 
@@ -973,7 +974,11 @@ static struct ufcs_config sc2201_ufcs_config = {
 	.ic_vendor_id = SC2201_VENDOR_ID,
 };
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0))
+static int sc2201_driver_probe(struct i2c_client *client)
+#else
 static int sc2201_driver_probe(struct i2c_client *client, const struct i2c_device_id *id)
+#endif
 {
 	struct oplus_sc2201 *chip_ic;
 
@@ -991,14 +996,14 @@ static int sc2201_driver_probe(struct i2c_client *client, const struct i2c_devic
 		goto regmap_init_err;
 	}
 
-#if IS_ENABLED(CONFIG_OPLUS_CHG_DEBUG_KIT)
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_CHG_DEBUG_KIT)
 	chip_ic->odb = devm_oplus_device_bus_register(&client->dev, &sc2201_regmap_config, "ufcs-sc2201");
 	if (IS_ERR_OR_NULL(chip_ic->odb)) {
 		chg_err("register odb error\n");
 		rc = -EFAULT;
 		goto regmap_init_err;
 	}
-#endif /* CONFIG_OPLUS_CHG_DEBUG_KIT */
+#endif /* CONFIG_OPLUS_FEATURE_CHG_DEBUG_KIT */
 
 	chip_ic->dev = &client->dev;
 	chip_ic->client = client;
@@ -1094,7 +1099,7 @@ static int sc2201_driver_remove(struct i2c_client *client)
 	disable_irq(chip->ufcs_int_irq);
 	if (!gpio_is_valid(chip->ufcs_int_gpio))
 		gpio_free(chip->ufcs_int_gpio);
-#if IS_ENABLED(CONFIG_OPLUS_CHG_DEBUG_KIT)
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_CHG_DEBUG_KIT)
 	devm_oplus_device_bus_unregister(chip->odb);
 #endif
 	devm_kfree(&client->dev, chip);
@@ -1114,7 +1119,7 @@ static void sc2201_driver_remove(struct i2c_client *client)
 	disable_irq(chip->ufcs_int_irq);
 	if (!gpio_is_valid(chip->ufcs_int_gpio))
 		gpio_free(chip->ufcs_int_gpio);
-#if IS_ENABLED(CONFIG_OPLUS_CHG_DEBUG_KIT)
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_CHG_DEBUG_KIT)
 	devm_oplus_device_bus_unregister(chip->odb);
 #endif
 	devm_kfree(&client->dev, chip);

@@ -54,12 +54,12 @@ re_recv:
 			ufcs_free_event(class, &event);
 			goto re_recv;
 		}
-		stop_sender_response_timer(class);
 		rc = ufcs_check_refuse_msg(class, msg, UFCS_CTRL_MSG, CTRL_MSG_START_CABLE_DETECT);
 		if (rc >= 0) {
 			ufcs_free_event(class, &event);
 			goto re_recv;
 		}
+		stop_sender_response_timer(class);
 		if (rc == -EAGAIN) {
 			if (soft_reset)
 				goto out;
@@ -131,12 +131,12 @@ re_recv:
 			ufcs_free_event(class, &event);
 			goto re_recv;
 		}
-		stop_sender_response_timer(class);
 		rc = ufcs_check_refuse_msg(class, msg, UFCS_CTRL_MSG, CTRL_MSG_GET_CABLE_INFO);
 		if (rc >= 0) {
 			ufcs_free_event(class, &event);
 			goto re_recv;
 		}
+		stop_sender_response_timer(class);
 		if (rc == -EAGAIN) {
 			if (soft_reset)
 				goto out;
@@ -234,12 +234,12 @@ re_recv:
 			ufcs_free_event(class, &event);
 			goto re_recv;
 		}
-		stop_sender_response_timer(class);
 		rc = ufcs_check_refuse_msg(class, msg, UFCS_CTRL_MSG, CTRL_MSG_DETECT_CABLE_INFO);
 		if (rc >= 0) {
 			ufcs_free_event(class, &event);
 			goto re_recv;
 		}
+		stop_sender_response_timer(class);
 		if (rc == -EAGAIN) {
 			if (soft_reset)
 				goto out;

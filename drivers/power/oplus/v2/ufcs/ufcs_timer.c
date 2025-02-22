@@ -54,6 +54,33 @@ static enum hrtimer_restart sender_response_timeout(struct hrtimer *timer)
 	return HRTIMER_NORESTART;
 }
 
+static enum hrtimer_restart sender_emark_timeout(struct hrtimer *timer)
+{
+	struct ufcs_class *class = container_of(timer, struct ufcs_class, timer[EMARK_MSG_TIMER]);
+	struct ufcs_event *event;
+	int rc;
+
+	ufcs_err("emark timeout\n");
+	event = class->timeout_event[EMARK_MSG_TIMER];
+	class->timeout_event[EMARK_MSG_TIMER] = NULL;
+	if (event == NULL) {
+		ufcs_err("event buf is NULL\n");
+		return HRTIMER_NORESTART;
+	}
+
+	event->data = NULL;
+	event->msg = NULL;
+	event->type = UFCS_EVENT_TIMEOUT;
+	INIT_LIST_HEAD(&event->list);
+	rc = ufcs_push_event(class, event);
+	if (rc < 0) {
+		ufcs_err("push timeout event error, rc=%d\n", rc);
+		devm_kfree(&class->ufcs->dev, event);
+	}
+
+	return HRTIMER_NORESTART;
+}
+
 static enum hrtimer_restart power_supply_timeout(struct hrtimer *timer)
 {
 	struct ufcs_class *class = container_of(timer, struct ufcs_class, timer[POWER_SUPPLY_TIMER]);
@@ -254,6 +281,7 @@ int ufcs_timer_init(struct ufcs_class *class)
 	class->timer[MSG_TRANS_DELAY_TIMER].function = msg_trans_delay_timeout;
 	class->timer[HANDSHAKE_TIMER].function = handshake_timeout;
 	class->timer[WAIT_MSG_TIMER].function = wait_msg_timeout;
+	class->timer[EMARK_MSG_TIMER].function = sender_emark_timeout;
 
 	return 0;
 }
@@ -314,6 +342,39 @@ void stop_sender_response_timer(struct ufcs_class *class)
 	if (class->timeout_event[SENDER_RESPONSE_TIMER] != NULL) {
 		devm_kfree(&class->ufcs->dev, class->timeout_event[SENDER_RESPONSE_TIMER]);
 		class->timeout_event[SENDER_RESPONSE_TIMER] = NULL;
+	}
+}
+void start_emark_response_timer(struct ufcs_class *class)
+{
+	if (class == NULL) {
+		ufcs_err("ufcs class is NULL\n");
+		return;
+	}
+
+	if (class->timeout_event[EMARK_MSG_TIMER] == NULL) {
+		class->timeout_event[EMARK_MSG_TIMER] =
+			devm_kzalloc(&class->ufcs->dev, sizeof(struct ufcs_event), GFP_KERNEL);
+		if (class->timeout_event[EMARK_MSG_TIMER] == NULL) {
+			ufcs_err("alloc event buf error\n");
+			return;
+		}
+	}
+
+	hrtimer_start(&class->timer[EMARK_MSG_TIMER],
+		ms_to_ktime(T_EMARK_MSG_TIMEOUT_MS), HRTIMER_MODE_REL);
+}
+
+void stop_emark_response_timer(struct ufcs_class *class)
+{
+	if (class == NULL) {
+		ufcs_err("ufcs class is NULL\n");
+		return;
+	}
+
+	hrtimer_cancel(&class->timer[EMARK_MSG_TIMER]);
+	if (class->timeout_event[EMARK_MSG_TIMER] != NULL) {
+		devm_kfree(&class->ufcs->dev, class->timeout_event[EMARK_MSG_TIMER]);
+		class->timeout_event[EMARK_MSG_TIMER] = NULL;
 	}
 }
 

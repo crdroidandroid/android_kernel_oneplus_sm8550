@@ -16,6 +16,7 @@
 #include <linux/workqueue.h>
 #include <linux/kobject.h>
 #include <linux/platform_device.h>
+#include <linux/pinctrl/consumer.h>
 #include <asm/atomic.h>
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 10, 0))
 #include <linux/xlog.h>
@@ -703,7 +704,7 @@ static ssize_t proc_charge_pump_reg_write(struct file *file, const char __user *
     }
 
     if (!sscanf(buffer, "0x%x:0x%x", &addr, &val)) {
-        chg_err("invalid content: '%s', length = %u\n", buffer, count);
+        chg_err("invalid content: '%s', length = %zu\n", buffer, count);
         return -EFAULT;
     }
     chg_err("addr:0x%02x, val:0x%02x.\n", addr, val);
@@ -779,7 +780,11 @@ static int init_charge_pump_proc(struct chip_charge_pump *da)
     return ret;
 }
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0))
+static int charge_pump_driver_probe(struct i2c_client *client)
+#else
 static int charge_pump_driver_probe(struct i2c_client *client, const struct i2c_device_id *id)
+#endif
 {
     struct chip_charge_pump *divider_ic;
 
@@ -846,10 +851,16 @@ static int charge_pump_suspend(struct i2c_client *client, pm_message_t mesg)
 
 static struct i2c_driver charge_pump_i2c_driver;
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0))
+void charge_pump_driver_remove(struct i2c_client *client)
+#else
 static int charge_pump_driver_remove(struct i2c_client *client)
+#endif
 {
     chg_debug("enter.\n");
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 3, 0))
     return 0;
+#endif
 }
 
 static void charge_pump_shutdown(struct i2c_client *client)

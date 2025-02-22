@@ -16,6 +16,7 @@
 #include <linux/input.h>
 #include <linux/workqueue.h>
 #include <linux/kobject.h>
+#include <linux/pinctrl/consumer.h>
 #include <linux/platform_device.h>
 #include <asm/atomic.h>
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 10, 0))
@@ -2676,6 +2677,8 @@ static int oplus_get_boot_reason(void)
 {
 	return (int)get_boot_reason();
 }
+extern void mt_usb_connect_v1(void);
+extern void mt_usb_disconnect_v1(void);
 #endif
 
 struct oplus_chg_operations  mp2650_chg_ops = {
@@ -2716,12 +2719,15 @@ struct oplus_chg_operations  mp2650_chg_ops = {
     .get_rtc_soc = get_rtc_spare_oplus_fg_value,
     .set_rtc_soc = set_rtc_spare_oplus_fg_value,
     .set_power_off = oplus_mt_power_off,
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 19, 0)) && defined(CONFIG_EXTCON_MTK_USB)
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 19, 0))
+	.usb_connect = mt_usb_connect,
+	.usb_disconnect = mt_usb_disconnect,
+#elif (LINUX_VERSION_CODE == KERNEL_VERSION(4, 19, 0)) && (defined(CONFIG_EXTCON_MTK_USB) || IS_MODULE(CONFIG_EXTCON_MTK_USB))
 	.usb_connect = mt_usb_connect_v1,
 	.usb_disconnect = mt_usb_disconnect_v1,
 #else
-	.usb_connect = mt_usb_connect,
-	.usb_disconnect = mt_usb_disconnect,
+	.usb_connect = NULL,
+	.usb_disconnect = NULL,
 #endif
     .get_charger_current = mp2650_get_ibus_current,
     .check_pdphy_ready = oplus_check_pdphy_ready,
@@ -3415,7 +3421,11 @@ static int mp2650_chg_track_init(struct chip_mp2650 *chip)
 	return rc;
 }
 
-static int mp2650_driver_probe(struct i2c_client *client, const struct i2c_device_id *id) 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0))
+static int mp2650_driver_probe(struct i2c_client *client)
+#else
+static int mp2650_driver_probe(struct i2c_client *client, const struct i2c_device_id *id)
+#endif
 {
 	int ret = 0;
 	struct chip_mp2650 *chg_ic;
@@ -3466,14 +3476,20 @@ static int mp2650_driver_probe(struct i2c_client *client, const struct i2c_devic
 
 static struct i2c_driver mp2650_i2c_driver;
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0))
+static void mp2650_driver_remove(struct i2c_client *client)
+#else
 static int mp2650_driver_remove(struct i2c_client *client)
+#endif
 {
 
     int ret=0;
 
     //ret = i2c_del_driver(&mp2650_i2c_driver);
     chg_debug( "  ret = %d\n", ret);
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0))
     return 0;
+#endif
 }
 
 static unsigned long suspend_tm_sec = 0;

@@ -30,6 +30,19 @@ static int fingerprint_ldo_disable(unsigned int ldo_num, unsigned int mv)
 }
 #endif
 
+#if defined(CONFIG_FP_SUPPLY_MODE_LDO_DIO8018)
+#include "dio8018.h"
+#else
+static int DIO8018_cam_ldo_set_voltage(unsigned int ldo_num, int mv)
+{
+    return 0;
+}
+static int DIO8018_cam_ldo_disable(unsigned int ldo_num)
+{
+    return 0;
+}
+#endif
+
 static DEFINE_MUTEX(g_power_lock);
 
 static int vreg_setup(struct fp_dev *fp_dev, fp_power_info_t *pwr_info, bool enable) {
@@ -242,7 +255,11 @@ int fp_parse_pwr_list(struct fp_dev *fp_dev) {
                 pr_err("set uff_pwr %u output %d \n", child_node_index,
                     pwr_list[child_node_index].poweron_level);
                 break;
+            case FP_POWER_MODE_AUTO:
+                pr_info("[%s] auto power mode, no need parse\n", __func__);
+                break;
             case FP_POWER_MODE_WL2868C:
+            case FP_POWER_MODE_DIO8018:
                 ret = of_property_read_u32(np, LDO_CONFIG_NODE, &fp_dev->ldo_voltage);
                 if (ret) {
                     pr_err("failed to request %s, ret = %d\n", LDO_CONFIG_NODE, ret);
@@ -370,6 +387,7 @@ int fp_parse_dts(struct fp_dev *fp_dev) {
     int                 rc_intr3  = -1;
     struct device *     dev = &fp_dev->pdev->dev;
     struct device_node *np  = dev->of_node;
+    fp_parse_optical_irq_disable_flag(fp_dev);
 
 #if defined(MTK_PLATFORM)
     fp_dev->pinctrl = NULL;
@@ -438,19 +456,20 @@ int fp_parse_dts(struct fp_dev *fp_dev) {
         goto err_reset;
     }
     gpio_direction_output(fp_dev->reset_gpio, 0);
+    if (0 == fp_dev->optical_irq_disable_flag) {
+        fp_dev->irq_gpio = of_get_named_gpio(np, "uff,gpio_irq", 0);
+        if (fp_dev->irq_gpio < 0) {
+            pr_err("falied to get irq gpio!\n");
+            return fp_dev->irq_gpio;
+        }
 
-    fp_dev->irq_gpio = of_get_named_gpio(np, "uff,gpio_irq", 0);
-    if (fp_dev->irq_gpio < 0) {
-        pr_err("falied to get irq gpio!\n");
-        return fp_dev->irq_gpio;
+        rc = devm_gpio_request(dev, fp_dev->irq_gpio, "uff_irq");
+        if (rc) {
+            pr_err("failed to request irq gpio, rc = %d\n", rc);
+            goto err_irq;
+        }
+        gpio_direction_input(fp_dev->irq_gpio);
     }
-
-    rc = devm_gpio_request(dev, fp_dev->irq_gpio, "uff_irq");
-    if (rc) {
-        pr_err("failed to request irq gpio, rc = %d\n", rc);
-        goto err_irq;
-    }
-    gpio_direction_input(fp_dev->irq_gpio);
 
     rc = fp_parse_pwr_list(fp_dev);
     if (rc) {
@@ -460,7 +479,6 @@ int fp_parse_dts(struct fp_dev *fp_dev) {
     pr_err("end fp_parse_dts !\n");
 
     fp_parse_notify_tpinfo_flag(fp_dev);
-    fp_parse_optical_irq_disable_flag(fp_dev);
 
     pr_err("end fp_parse_dts !\n");
 
@@ -482,9 +500,11 @@ err_intr3:
 
 void fp_cleanup_device(struct fp_dev *fp_dev) {
     pr_info("[info] %s\n", __func__);
-    if (gpio_is_valid(fp_dev->irq_gpio)) {
-        gpio_free(fp_dev->irq_gpio);
-        pr_info("remove irq_gpio success\n");
+    if (fp_dev->optical_irq_disable_flag == 0) {
+        if (gpio_is_valid(fp_dev->irq_gpio)) {
+            gpio_free(fp_dev->irq_gpio);
+            pr_info("remove irq_gpio success\n");
+        }
     }
     if (gpio_is_valid(fp_dev->reset_gpio)) {
         gpio_free(fp_dev->reset_gpio);
@@ -516,6 +536,11 @@ int fp_power_on(struct fp_dev *fp_dev) {
             case FP_POWER_MODE_WL2868C:
                 rc = fingerprint_ldo_enable(fp_dev->ldo_num, fp_dev->ldo_voltage);
                 pr_info("---- power on wl2868c ldo ----\n");
+                pr_info("ldo-num: %u ldo_voltage: %u\n", fp_dev->ldo_num, fp_dev->ldo_voltage);
+                break;
+            case FP_POWER_MODE_DIO8018:
+                rc = DIO8018_cam_ldo_set_voltage(fp_dev->ldo_num, fp_dev->ldo_voltage);
+                pr_info("---- power on DIO8018 ldo ----\n");
                 pr_info("ldo-num: %u ldo_voltage: %u\n", fp_dev->ldo_num, fp_dev->ldo_voltage);
                 break;
             case FP_POWER_MODE_NOT_SET:
@@ -563,6 +588,11 @@ int fp_power_off(struct fp_dev *fp_dev) {
             case FP_POWER_MODE_WL2868C:
                 rc = fingerprint_ldo_disable(fp_dev->ldo_num, 0);
                 pr_info("---- power off wl2868c ldo ----\n");
+                pr_info("ldo_num: %u\n", fp_dev->ldo_num);
+                break;
+            case FP_POWER_MODE_DIO8018:
+                rc = DIO8018_cam_ldo_disable(fp_dev->ldo_num);
+                pr_info("---- power off DIO8018 ldo ----\n");
                 pr_info("ldo_num: %u\n", fp_dev->ldo_num);
                 break;
             case FP_POWER_MODE_NOT_SET:

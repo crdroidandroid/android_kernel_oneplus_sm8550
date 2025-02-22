@@ -1058,7 +1058,7 @@ static void oplus_chg_dual_chan_track_work(struct work_struct *work)
 
 
 static void oplus_dual_chan_common_subs_callback(struct mms_subscribe *subs,
-	enum mms_msg_type type, u32 id)
+	enum mms_msg_type type, u32 id, bool sync)
 {
 	struct oplus_dual_chan_chip *chip = subs->priv_data;
 	union mms_msg_data data = { 0 };
@@ -1100,7 +1100,7 @@ static void oplus_dual_chan_subscribe_common_topic(struct oplus_mms *topic,
 }
 
 static void oplus_dual_chan_vooc_subs_callback(struct mms_subscribe *subs,
-	enum mms_msg_type type, u32 id)
+	enum mms_msg_type type, u32 id, bool sync)
 {
 	struct oplus_dual_chan_chip *chip = subs->priv_data;
 	union mms_msg_data data = { 0 };

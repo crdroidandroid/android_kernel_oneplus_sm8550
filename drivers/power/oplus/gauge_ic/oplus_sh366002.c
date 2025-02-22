@@ -29,7 +29,9 @@
 #include <linux/uaccess.h>
 #include <linux/workqueue.h>
 #include <asm/div64.h>
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0))
 #include <stdbool.h>
+#endif
 
 #include "oplus_bq27541.h"
 #include "oplus_sh366002.h"
@@ -444,16 +446,16 @@ static s32 fg_read_sbs_word(struct chip_bq27541 *chip, u32 reg, u16 *val)
 	s32 ret = -1;
 
 	if ((reg & CMDMASK_CNTL_R) == CMDMASK_CNTL_R) {
-		mutex_lock(&chip->bq28z610_alt_manufacturer_access);
+		mutex_lock(&chip->gauge_alt_manufacturer_access);
 		ret = __fg_write_word(chip, CMD_CNTL, (u16)reg);
 		if (ret < 0) {
-			mutex_unlock(&chip->bq28z610_alt_manufacturer_access);
+			mutex_unlock(&chip->gauge_alt_manufacturer_access);
 			return ret;
 		}
 
 		mdelay(CMD_SBS_DELAY);
 		ret = __fg_read_word(chip, CMD_CNTL, val);
-		mutex_unlock(&chip->bq28z610_alt_manufacturer_access);
+		mutex_unlock(&chip->gauge_alt_manufacturer_access);
 	} else {
 		ret = __fg_read_word(chip, (u8)reg, val);
 	}
@@ -535,7 +537,7 @@ static int fg_read_block(struct chip_bq27541 *chip, u32 reg, u8 startIndex, u8 l
 	if (startIndex + length >= DF_PAGE_LEN)
 		length = DF_PAGE_LEN - startIndex;
 
-	/* mutex_lock(&chip->bq28z610_alt_manufacturer_access); */
+	/* mutex_lock(&chip->gauge_alt_manufacturer_access); */
 	if ((reg & CMDMASK_CNTL_R) == CMDMASK_CNTL_R) {
 		ret = __fg_write_word(chip, CMD_CNTL, (u16)reg);
 		if (ret < 0) {
@@ -654,7 +656,7 @@ static int fg_read_block(struct chip_bq27541 *chip, u32 reg, u8 startIndex, u8 l
 	}
 
 fg_read_block_end:
-	/* mutex_unlock(&chip->bq28z610_alt_manufacturer_access); */
+	/* mutex_unlock(&chip->gauge_alt_manufacturer_access); */
 
 	return ret;
 }
@@ -719,7 +721,7 @@ static __maybe_unused int fg_write_block(struct chip_bq27541 *chip, u32 reg, u8 
 	if (i > 0)
 		memset(write_buffer, 0, i);
 
-	mutex_lock(&chip->bq28z610_alt_manufacturer_access);
+	mutex_lock(&chip->gauge_alt_manufacturer_access);
 	if ((reg & CMDMASK_MANUBLOCK_R) == CMDMASK_MANUBLOCK_R) {
 		ret = __fg_write_byte(chip, CMD_DFSTART, 0x01);
 		if (ret < 0) {
@@ -753,7 +755,7 @@ static __maybe_unused int fg_write_block(struct chip_bq27541 *chip, u32 reg, u8 
 		ret = __fg_write_buffer(chip, (u8)reg, length, val);
 	}
 fg_write_block_end:
-	mutex_unlock(&chip->bq28z610_alt_manufacturer_access);
+	mutex_unlock(&chip->gauge_alt_manufacturer_access);
 
 	return ret;
 }
@@ -774,7 +776,7 @@ static __maybe_unused int fg_read_dataflash(struct chip_bq27541 *chip, s32 addre
 	if (length <= 0)
 		return -1;
 
-	mutex_lock(&chip->bq28z610_alt_manufacturer_access);
+	mutex_lock(&chip->gauge_alt_manufacturer_access);
 
 	while (length > 0) {
 		pageLen = DF_PAGE_LEN - (address % DF_PAGE_LEN);
@@ -859,7 +861,7 @@ static __maybe_unused int fg_read_dataflash(struct chip_bq27541 *chip, s32 addre
 	}
 
 fg_read_dataflash_end:
-	mutex_unlock(&chip->bq28z610_alt_manufacturer_access);
+	mutex_unlock(&chip->gauge_alt_manufacturer_access);
 	return ret;
 }
 
@@ -880,7 +882,7 @@ static __maybe_unused int fg_write_dataflash(struct chip_bq27541 *chip, s32 addr
 	if (length <= 0)
 		return -1;
 
-	mutex_lock(&chip->bq28z610_alt_manufacturer_access);
+	mutex_lock(&chip->gauge_alt_manufacturer_access);
 
 	while (length > 0) {
 		pageLen = DF_PAGE_LEN - (address % DF_PAGE_LEN);
@@ -975,7 +977,7 @@ static __maybe_unused int fg_write_dataflash(struct chip_bq27541 *chip, s32 addr
 	}
 
 fg_write_dataflash_end:
-	mutex_unlock(&chip->bq28z610_alt_manufacturer_access);
+	mutex_unlock(&chip->gauge_alt_manufacturer_access);
 	return ret;
 }
 
@@ -2189,7 +2191,8 @@ static s32 fg_gauge_get_default_cell_model(struct chip_bq27541 *chip, char *prof
 	}
 
 	memset(str, 0, STRLEN * sizeof(u8));
-	for (i = 0, j = 0; i < CELL_MODEL_COUNT; i++) {
+	j = 0;
+	for (i = 0; i < CELL_MODEL_COUNT; i++) {
 		pBuf[i] = kzBuf[i];
 		j += sprintf(&str[j], "%u, ", pBuf[i]);
 	}
@@ -2215,7 +2218,8 @@ static s32 fg_gauge_get_default_cell_model(struct chip_bq27541 *chip, char *prof
 		ratio = 1000;
 
 	memset(str, 0, STRLEN);
-	for (i = 0, j = 0; i < CELL_MODEL_COUNT; i++) {
+	j = 0;
+	for (i = 0; i < CELL_MODEL_COUNT; i++) {
 		temp16 = pBuf[i] * ratio / MODELRATIO_BASE;
 
 		if (temp16 > MAX_MODEL)
@@ -2257,15 +2261,16 @@ s32 fg_gauge_check_cell_model(struct chip_bq27541 *chip, char *profile_name) /* 
 	}
 	temp16 = (u16)ret;
 
-	mutex_lock(&chip->bq28z610_alt_manufacturer_access);
+	mutex_lock(&chip->gauge_alt_manufacturer_access);
 	ret = fg_read_ram_block(chip, CMD_CELLMODEL, 0, BYTE_COUNT_CELL_MODEL, buf);
-	mutex_unlock(&chip->bq28z610_alt_manufacturer_access);
+	mutex_unlock(&chip->gauge_alt_manufacturer_access);
 	if (ret < 0) {
 		pr_err("fail! cannot read cell-model! ret=%d\r\n", ret);
 		goto fg_gauge_check_cell_model_end;
 	}
 
-	for (i = 0, j = 0; i < 15; i++) {
+	j = 0;
+	for (i = 0; i < 15; i++) {
 		model[i] = (u8)(buf[2 * i] ^ 0x5A) + 0x100 * (u8)(buf[2 * i + 1] ^ 0x43);
 		if (model[i] == 0)
 			return -1;
@@ -2317,7 +2322,8 @@ s32 fg_gauge_check_cell_model(struct chip_bq27541 *chip, char *profile_name) /* 
 		}
 	}
 
-	for (i = SLIGHT_STARTGRID, k = 0; i <= SLIGHT_ENDGRID - SLIGHT_GAP + 1; i++) {
+	k = 0;
+	for (i = SLIGHT_STARTGRID; i <= SLIGHT_ENDGRID - SLIGHT_GAP + 1; i++) {
 		maxValue = 0;
 		minValue = 0x7FFFFFFF;
 		for (j = i; j < i + SLIGHT_GAP; j++) {
@@ -2335,7 +2341,8 @@ s32 fg_gauge_check_cell_model(struct chip_bq27541 *chip, char *profile_name) /* 
 		pr_err("model slight singular! cnt=%u\r\n", k);
 	}
 
-	for (i = EXTREME_STARTGRID_0, k = 0; i <= EXTREME_ENDGRID_0 - EXTREME_GAP_0 + 1; i++) {
+	k = 0;
+	for (i = EXTREME_STARTGRID_0; i <= EXTREME_ENDGRID_0 - EXTREME_GAP_0 + 1; i++) {
 		maxValue = 0;
 		minValue = 0x7FFFFFFF;
 		for (j = i; j < i + EXTREME_GAP_0; j++) {
@@ -2353,7 +2360,8 @@ s32 fg_gauge_check_cell_model(struct chip_bq27541 *chip, char *profile_name) /* 
 		pr_err("model extreme singular! cnt=%u\r\n", k);
 	}
 
-	for (i = EXTREME_STARTGRID_1, k = 0; i <= EXTREME_ENDGRID_1 - EXTREME_GAP_1 + 1; i++) {
+	k = 0;
+	for (i = EXTREME_STARTGRID_1; i <= EXTREME_ENDGRID_1 - EXTREME_GAP_1 + 1; i++) {
 		maxValue = 0;
 		minValue = 0x7FFFFFFF;
 		for (j = i; j < i + EXTREME_GAP_1; j++) {
@@ -2422,7 +2430,8 @@ s32 fg_gauge_restore_cell_model(struct chip_bq27541 *chip, char *profile_name)
 	buf_write[INDEX_XCELLMODEL] = 0xE7;
 	buf_write[INDEX_XCELLMODEL + 1] = 0xE6;
 
-	for (i = 0, j = 2; i < CELL_MODEL_COUNT; i++, j += 2) {
+	j = 2;
+	for (i = 0; i < CELL_MODEL_COUNT; i++) {
 		byteH = (u8)(0x18 ^ j ^ (pBuf[i] >> 8));
 		byteL = (u8)(0x18 ^ (j + 1) ^ pBuf[i]);
 
@@ -2430,6 +2439,8 @@ s32 fg_gauge_restore_cell_model(struct chip_bq27541 *chip, char *profile_name)
 		buf_write[INDEX_CELLMODEL + j + 1] = byteL;
 		buf_write[INDEX_XCELLMODEL + j] = byteH;
 		buf_write[INDEX_XCELLMODEL + j + 1] = byteL;
+
+		j += 2;
 	}
 
 	ret = fg_write_dataflash(chip, ADDR_CELLMODEL, LENGTH_CELLMODEL, buf_write);
@@ -2443,16 +2454,17 @@ s32 fg_gauge_restore_cell_model(struct chip_bq27541 *chip, char *profile_name)
 	msleep(CMD_E2ROM_DELAY);
 	oplus_vooc_set_allow_reading(true);
 
-	mutex_lock(&chip->bq28z610_alt_manufacturer_access);
+	mutex_lock(&chip->gauge_alt_manufacturer_access);
 	ret = fg_read_ram_block(chip, CMD_CELLMODEL, 0, BYTE_COUNT_CELL_MODEL, buf_read);
-	mutex_unlock(&chip->bq28z610_alt_manufacturer_access);
+	mutex_unlock(&chip->gauge_alt_manufacturer_access);
 	if (ret < 0) {
 		pr_err("fail! cannot read cell-model, ret=%d\r\n", ret);
 		goto fg_gauge_restore_cell_model_end;
 	}
 
 	ret = 0;
-	for (i = 0, j = 0; i < CELL_MODEL_COUNT; i++) {
+	j = 0;
+	for (i = 0; i < CELL_MODEL_COUNT; i++) {
 		temp16 = 0x100 * (u8)(buf_read[2 * i + 1] ^ 0x43) + (u8)(buf_read[2 * i] ^ 0x5A);
 		if (pBuf[i] != temp16)
 			ret = -1;

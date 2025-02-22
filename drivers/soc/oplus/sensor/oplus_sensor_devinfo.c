@@ -231,6 +231,11 @@ static void parse_proximity_sensor_dts(struct sensor_hw* hw, struct device_node 
 	if (!rc) {
 		hw->feature.feature[3] = value;
 	}
+	rc = of_property_read_u32(ch_node, "alsps_off_to_idle_ms", &value);
+
+	if (!rc) {
+		hw->feature.feature[4] = value;
+	}
 
 	for (di = 0; di < ARRAY_SIZE(param); di++) {
 		rc = of_property_read_u32(ch_node, param[di], &value);
@@ -257,8 +262,8 @@ static void parse_proximity_sensor_dts(struct sensor_hw* hw, struct device_node 
 		pr_info("parse alsps sensor reg failed\n");
 	}
 
-	SENSOR_DEVINFO_DEBUG("ps-type:%d ps_saturation:%d is_need_close_pd:%d\n",
-		hw->feature.feature[0], hw->feature.feature[1], hw->feature.feature[2]);
+	SENSOR_DEVINFO_DEBUG("ps-type:%d ps_saturation:%d is_need_close_pd:%d alsps_off_to_idle_ms:%d\n",
+		hw->feature.feature[0], hw->feature.feature[1], hw->feature.feature[2], hw->feature.feature[4]);
 }
 
 static void parse_light_sensor_dts(struct sensor_hw* hw, struct device_node *ch_node)
@@ -277,7 +282,8 @@ static void parse_light_sensor_dts(struct sensor_hw* hw, struct device_node *ch_
 		"normalization_value",
 		"use_lb_algo",
 		"para-matrix",
-		"als_ratio_type"
+		"als_ratio_type",
+		"sup_remote_proc"
 	};
 
 	char *light_para[] = {
@@ -303,8 +309,10 @@ static void parse_light_sensor_dts(struct sensor_hw* hw, struct device_node *ch_
 		"ir_coef_val_1",
 		"ir_coef_val_2",
 		"ir_coef_val_3",
-		"ir_coef_val_4"
+		"ir_coef_val_4",
 		/*lb para end*/
+		"polling_use_majority",
+                "als_polling_timer"
 	};
 
 	for (di = 0; di < ARRAY_SIZE(als_feature); di++) {
@@ -422,17 +430,21 @@ static void parse_down_sar_sensor_dts(struct sensor_hw* hw, struct device_node *
 
 }
 
-static void parse_cct_sensor_dts(struct sensor_hw *hw, struct device_node *ch_node)
+static int parse_cct_sensor_dts(struct sensor_hw *hw, struct device_node *ch_node)
 {
 	int value = 0;
 	int rc = 0;
 	int di = 0;
+	int als_supt_cmdline_di = 0;
+	struct sns_display_info *dsi_info = NULL;
 	char *feature[] = {
 		"decoupled-driver",
 		"publish-sensors",
 		"is-ch-dri",
 		"timer-size",
-		"fac-cali-sensor"
+		"fac-cali-sensor",
+		"first-source",
+		"second-source"
 	};
 
 	char *para[] = {
@@ -449,17 +461,31 @@ static void parse_cct_sensor_dts(struct sensor_hw *hw, struct device_node *ch_no
 	};
 
 	hw->feature.feature[0] = 1;/*default use decoupled driver oplus_cct */
-
-	for (di = 0; di < ARRAY_SIZE(feature); di++) {
-		rc = of_property_read_u32(ch_node, feature[di], &value);
-
-		if (!rc) {
-			hw->feature.feature[di] = value;
-		}
-
-		SENSOR_DEVINFO_DEBUG("cct_feature[%d] : %d\n", di, hw->feature.feature[di]);
+	hw->feature.feature[5] = 0;
+	dsi_info = kzalloc(sizeof(struct sns_display_info), GFP_KERNEL);
+	if (dsi_info == NULL) {
+		rc = -ENOMEM;
+		printk("[SNS] %s:kzalloc fail %d\n", __func__, rc);
+		return rc;
 	}
 
+	for (di = 0; di < ARRAY_SIZE(feature); di++) {
+		if (strstr(feature[di], "first-source") || strstr(feature[di], "second-source")) {
+			rc = of_property_read_string(ch_node, feature[di], (const char **)&dsi_info->als_supt_cmdline[als_supt_cmdline_di]);
+			if(!rc && strstr(sns_dsi_display_primary, dsi_info->als_supt_cmdline[als_supt_cmdline_di])) {
+				hw->feature.feature[5] = als_supt_cmdline_di;
+				SENSOR_DEVINFO_DEBUG("[SNS] %d panel source: %s\n", di, dsi_info->als_supt_cmdline[als_supt_cmdline_di]);
+			}
+			als_supt_cmdline_di++;
+			SENSOR_DEVINFO_DEBUG("[SNS] cct panel_idx: %d\n", hw->feature.feature[5]);
+		} else {
+			rc = of_property_read_u32(ch_node, feature[di], &value);
+			if (!rc) {
+				hw->feature.feature[di] = value;
+			}
+			SENSOR_DEVINFO_DEBUG("cct_feature[%d] : %d\n", di, hw->feature.feature[di]);
+		}
+	}
 	for (di = 0; di < ARRAY_SIZE(para); di++) {
 		rc = of_property_read_u32(ch_node, para[di], &value);
 
@@ -469,6 +495,9 @@ static void parse_cct_sensor_dts(struct sensor_hw *hw, struct device_node *ch_no
 
 		SENSOR_DEVINFO_DEBUG("cct_parameter[%d] : %d\n", di, hw->feature.parameter[di]);
 	}
+	kfree(dsi_info);
+	dsi_info = NULL;
+	return rc;
 }
 
 static void parse_cct_rear_sensor_dts(struct sensor_hw *hw, struct device_node *ch_node)
@@ -1551,9 +1580,15 @@ module_param_string(dsi_display0, sns_dsi_display_primary, MAX_CMDLINE_PARAM_LEN
 MODULE_PARM_DESC(dsi_display0,
 	"oplus_sensor.dsi_display0=<display node> for primary dsi display node name");
 
+MODULE_PARM_DESC(dsi_display0,
+	"oplus_sensor_deviceinfo.dsi_display0=<display node> for primary dsi display node name");
+
 module_param_string(dsi_display1, sns_dsi_display_secondary, MAX_CMDLINE_PARAM_LEN, 0600);
 MODULE_PARM_DESC(dsi_display1,
 	"oplus_sensor.dsi_display1=<display node> for secondary dsi display node name");
+
+MODULE_PARM_DESC(dsi_display1,
+	"oplus_sensor_deviceinfo.dsi_display1=<display node> for secondary dsi display node name");
 
 MODULE_DESCRIPTION("sensor devinfo");
 MODULE_LICENSE("GPL");

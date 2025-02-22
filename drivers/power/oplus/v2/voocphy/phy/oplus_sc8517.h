@@ -51,6 +51,8 @@
 
 #define FUNCTION_DISABLE_REG    0x13
 
+#define DEVICE_ID_REG             0x14
+
 #define OTG_REG                 0x15
 #define OTG_ENABLE              0x3
 #define OTG_DISABLE             0

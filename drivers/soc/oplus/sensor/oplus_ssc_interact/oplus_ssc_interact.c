@@ -336,6 +336,71 @@ static const struct file_operations under_mdevice_fops = {
 	.release = ssc_interactive_release,
 };
 
+#if IS_ENABLED(CONFIG_OPLUS_SENSOR_USE_SCREENSHOT_INFO)
+static void ssc_interactive_set_screenshot_info_fifo(struct screenshot_info *ss_info)
+{
+	struct fifo_frame fifo_fm;
+	struct ssc_interactive *ssc_cxt = g_ssc_cxt;
+	int ret = 0;
+	if (ss_info->index % 50 == 0) {
+		pr_info("type=%u, ts=[%lld,%lld,%d,%d]\n", LCM_SCREENSHOT_INFO_TYPE,
+			ss_info->start_ts, ss_info->end_ts, ss_info->index, ss_info->info_type);
+	}
+	memset(&fifo_fm, 0, sizeof(struct fifo_frame));
+	fifo_fm.type = LCM_SCREENSHOT_INFO_TYPE;
+	fifo_fm.ss_info.start_ts = ss_info->start_ts;
+	fifo_fm.ss_info.end_ts = ss_info->end_ts;
+	fifo_fm.ss_info.index  = ss_info->index;
+	fifo_fm.ss_info.info_type = ss_info->info_type;
+	ret = kfifo_in_spinlocked(&ssc_cxt->fifo, &fifo_fm, 1, &ssc_cxt->fifo_lock);
+	if(ret != 1) {
+		pr_err("kfifo is full\n");
+	}
+	wake_up_interruptible(&ssc_cxt->wq);
+}
+
+static ssize_t screenshot_info_device_read(struct file *file, char __user *buf, size_t count, loff_t *ppos)
+{
+	pr_err("%s\n", __func__);
+	return 0;
+}
+
+static ssize_t screenshot_info_device_write(struct file *file, const char __user * buf,
+                size_t count, loff_t * ppos)
+{
+	struct screenshot_info ss_info = {0, 0, 0, 0};
+	char tmp[256] = {0};
+	struct ssc_interactive *ssc_cxt = g_ssc_cxt;
+
+	if (copy_from_user(tmp, buf, count)) {
+		pr_err("screenshot_info_device_write: Failed to copy data from user\n");
+		return -EFAULT;
+	}
+
+	/* pr_err("screenshot_info_device_write: %s\n", tmp); */
+
+	sscanf(tmp, "%lld,%lld,%d,%d", &ss_info.start_ts, &ss_info.end_ts, &ss_info.index, &ss_info.info_type);
+
+	spin_lock(&ssc_cxt->rw_lock);
+	ssc_cxt->ss_info.start_ts = ss_info.start_ts;
+	ssc_cxt->ss_info.end_ts = ss_info.end_ts;
+	ssc_cxt->ss_info.index = ss_info.index;
+	ssc_cxt->ss_info.info_type = ss_info.info_type;
+	spin_unlock(&ssc_cxt->rw_lock);
+
+	ssc_interactive_set_screenshot_info_fifo(&ssc_cxt->ss_info);
+
+	return count;
+}
+
+static const struct file_operations screenshot_info_device_fops = {
+	.owner   = THIS_MODULE,
+	.read    = screenshot_info_device_read,
+	.write   = screenshot_info_device_write,
+	.llseek  = generic_file_llseek,
+};
+#endif /* CONFIG_OPLUS_SENSOR_USE_SCREENSHOT_INFO */
+
 static ssize_t brightness_store(struct device *dev,
         struct device_attribute *attr, const char *buf,
         size_t count)
@@ -467,6 +532,11 @@ static void lcdinfo_callback(enum panel_event_notifier_tag panel_tag,
 		}
 		break;
 	case DRM_PANEL_EVENT_PWM_TURBO:
+#if IS_ENABLED(CONFIG_OPLUS_SENSOR_USE_SCREENSHOT_INFO)
+		if (g_ssc_cxt->receive_screenshot_info) {
+			break;
+		}
+#endif
 		if (g_ssc_cxt->need_lb_algo) {
 			ssc_interactive_set_pwm_turbo_mode(notification->notif_data.data);
 		}
@@ -762,6 +832,16 @@ static int __init ssc_interactive_init(void)
 			pr_err("not sup report_blank_mode!");
 		}
 
+#if IS_ENABLED(CONFIG_OPLUS_SENSOR_USE_SCREENSHOT_INFO)
+		if (of_property_read_bool(node, "receive_screenshot_info")) {
+			ssc_cxt->receive_screenshot_info = true;
+			pr_err("sup receive_screenshot_info!");
+		} else {
+			ssc_cxt->receive_screenshot_info = false;
+			pr_err("not sup receive_screenshot_info!");
+		}
+#endif /* CONFIG_OPLUS_SENSOR_USE_SCREENSHOT_INFO */
+
 		err = of_property_read_u32(node, "sup-hbm-mode", &hbm_mode);
 		if (!err) {
 			ssc_cxt->sup_hbm_mode = hbm_mode;
@@ -821,6 +901,21 @@ static int __init ssc_interactive_init(void)
 		goto register_mdevice_failed;
 	}
 
+#if IS_ENABLED(CONFIG_OPLUS_SENSOR_USE_SCREENSHOT_INFO)
+	memset(&ssc_cxt->screenshot_info_dev, 0 , sizeof(struct miscdevice));
+	ssc_cxt->screenshot_info_dev.minor = MISC_DYNAMIC_MINOR;
+	ssc_cxt->screenshot_info_dev.name = "ssc_screenshot_info";
+	ssc_cxt->screenshot_info_dev.fops = &screenshot_info_device_fops;
+
+	if (ssc_cxt->receive_screenshot_info) {
+		if (misc_register(&ssc_cxt->screenshot_info_dev) != 0) {
+			pr_err("misc_register  screenshot_info failed\n");
+			err = -ENODEV;
+			goto register_screenshot_info_device_failed;
+		}
+	}
+#endif /* CONFIG_OPLUS_SENSOR_USE_SCREENSHOT_INFO */
+
 	if (ssc_cxt->need_lb_algo || ssc_cxt->sup_power_fb) {
 #if IS_ENABLED(CONFIG_OPLUS_SENSOR_DRM_PANEL_NOTIFY)
 		ssc_cxt->notify_work_retry = 10;
@@ -845,6 +940,12 @@ static int __init ssc_interactive_init(void)
 	return 0;
 sysfs_create_failed:
 	misc_deregister(&ssc_cxt->mdev);
+#if IS_ENABLED(CONFIG_OPLUS_SENSOR_USE_SCREENSHOT_INFO)
+register_screenshot_info_device_failed:
+	if (ssc_cxt->receive_screenshot_info) {
+		misc_deregister(&ssc_cxt->screenshot_info_dev);
+	}
+#endif /* CONFIG_OPLUS_SENSOR_USE_SCREENSHOT_INFO */
 register_mdevice_failed:
 	kfifo_free(&ssc_cxt->fifo);
 alloc_fifo_failed:

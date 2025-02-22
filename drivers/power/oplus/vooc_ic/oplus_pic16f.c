@@ -486,7 +486,11 @@ static void register_vooc_devinfo(void)
 #endif
 }
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0))
+static int pic16f_driver_probe(struct i2c_client *client)
+#else
 static int pic16f_driver_probe(struct i2c_client *client, const struct i2c_device_id *id)
+#endif
 {
 	struct oplus_vooc_chip *chip = NULL;
 

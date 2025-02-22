@@ -13,17 +13,21 @@ static void oplus_comm_update_temp_region_config(
 	int32_t buf[TEMP_REGION_MAX - 1];
 	int i, rc;
 	int index = 0;
+	size_t buf_size = sizeof(buf) - (TEMP_REGION_MAX - spec->temp_region_max) * sizeof(int32_t);
 
 	data_head = oplus_cfg_find_param_by_name(param_head, "oplus_spec,batt-them-thr");
 	if (data_head == NULL)
 		return;
-	rc = oplus_cfg_get_data(data_head, (u8 *)buf, sizeof(buf));
+	rc = oplus_cfg_get_data(data_head, (u8 *)buf, buf_size);
 	if (rc < 0) {
 		chg_err("get oplus_spec,batt-them-thr data error, rc=%d\n", rc);
 		return;
 	}
 	for (i = 0; i < ARRAY_SIZE(buf); i++) {
-		spec->batt_temp_thr[i] = le32_to_cpu(buf[i]);
+		spec->batt_temp_thr[i] = le32_to_cpu(buf[oplus_comm_temp_region_map(i)]);
+		if ((i == TEMP_REGION_NORMAL_HIGH - 1) && oplus_get_chg_spec_version() < OPLUS_CHG_SPEC_VER_V3P7)
+			spec->batt_temp_thr[i] = 350;
+
 		if (g_log_buf) {
 			index += snprintf(g_log_buf + index, LOG_BUF_SIZE - index - 1, "%s%d",
 				(i == 0) ? "" : ", ", spec->batt_temp_thr[i]);
@@ -60,16 +64,17 @@ static void oplus_comm_update_fv_config(
 	int32_t buf[TEMP_REGION_MAX];
 	int i, rc;
 	int index = 0;
+	size_t buf_size = sizeof(buf) - (TEMP_REGION_MAX - spec->temp_region_max) * sizeof(int32_t);
 
 	data_head = oplus_cfg_find_param_by_name(param_head, "oplus_spec,fv-mv");
 	while (data_head != NULL) {
-		rc = oplus_cfg_get_data(data_head, (u8 *)buf, sizeof(buf));
+		rc = oplus_cfg_get_data(data_head, (u8 *)buf, buf_size);
 		if (rc < 0) {
 			chg_err("get oplus_spec,fv-mv data error, rc=%d\n", rc);
 			break;
 		}
 		for (i = 0; i < ARRAY_SIZE(buf); i++) {
-			spec->fv_mv[i] = le32_to_cpu(buf[i]);
+			spec->fv_mv[i] = le32_to_cpu(buf[oplus_comm_temp_region_map(i)]);
 			if (g_log_buf) {
 				index += snprintf(g_log_buf + index, LOG_BUF_SIZE - index - 1, "%s%d",
 					(i == 0) ? "" : ", ", spec->fv_mv[i]);
@@ -83,14 +88,14 @@ static void oplus_comm_update_fv_config(
 
 	data_head = oplus_cfg_find_param_by_name(param_head, "oplus_spec,sw-fv-mv");
 	while (data_head != NULL) {
-		rc = oplus_cfg_get_data(data_head, (u8 *)buf, sizeof(buf));
+		rc = oplus_cfg_get_data(data_head, (u8 *)buf, buf_size);
 		if (rc < 0) {
 			chg_err("get oplus_spec,sw-fv-mv data error, rc=%d\n", rc);
 			break;
 		}
 		index = 0;
 		for (i = 0; i < ARRAY_SIZE(buf); i++) {
-			spec->sw_fv_mv[i] = le32_to_cpu(buf[i]);
+			spec->sw_fv_mv[i] = le32_to_cpu(buf[oplus_comm_temp_region_map(i)]);
 			if (g_log_buf) {
 				index += snprintf(g_log_buf + index, LOG_BUF_SIZE - index - 1, "%s%d",
 					(i == 0) ? "" : ", ", spec->sw_fv_mv[i]);
@@ -104,14 +109,14 @@ static void oplus_comm_update_fv_config(
 
 	data_head = oplus_cfg_find_param_by_name(param_head, "oplus_spec,hw-fv-inc-mv");
 	while (data_head != NULL) {
-		rc = oplus_cfg_get_data(data_head, (u8 *)buf, sizeof(buf));
+		rc = oplus_cfg_get_data(data_head, (u8 *)buf, buf_size);
 		if (rc < 0) {
 			chg_err("get oplus_spec,hw-fv-inc-mv data error, rc=%d\n", rc);
 			break;
 		}
 		index = 0;
 		for (i = 0; i < ARRAY_SIZE(buf); i++) {
-			spec->hw_fv_inc_mv[i] = le32_to_cpu(buf[i]);
+			spec->hw_fv_inc_mv[i] = le32_to_cpu(buf[oplus_comm_temp_region_map(i)]);
 			if (g_log_buf) {
 				index += snprintf(g_log_buf + index, LOG_BUF_SIZE - index - 1, "%s%d",
 					(i == 0) ? "" : ", ", spec->hw_fv_inc_mv[i]);
@@ -125,14 +130,14 @@ static void oplus_comm_update_fv_config(
 
 	data_head = oplus_cfg_find_param_by_name(param_head, "oplus_spec,sw-over-fv-mv");
 	while (data_head != NULL) {
-		rc = oplus_cfg_get_data(data_head, (u8 *)buf, sizeof(buf));
+		rc = oplus_cfg_get_data(data_head, (u8 *)buf, buf_size);
 		if (rc < 0) {
 			chg_err("get oplus_spec,sw-over-fv-mv data error, rc=%d\n", rc);
 			break;
 		}
 		index = 0;
 		for (i = 0; i < ARRAY_SIZE(buf); i++) {
-			spec->sw_over_fv_mv[i] = le32_to_cpu(buf[i]);
+			spec->sw_over_fv_mv[i] = le32_to_cpu(buf[oplus_comm_temp_region_map(i)]);
 			if (g_log_buf) {
 				index += snprintf(g_log_buf + index, LOG_BUF_SIZE - index - 1, "%s%d",
 					(i == 0) ? "" : ", ", spec->sw_over_fv_mv[i]);
@@ -212,16 +217,17 @@ static void oplus_comm_update_rechg_config(
 	int32_t buf[TEMP_REGION_MAX];
 	int i, rc;
 	int index = 0;
+	size_t buf_size = sizeof(buf) - (TEMP_REGION_MAX - spec->temp_region_max) * sizeof(int32_t);
 
 	data_head = oplus_cfg_find_param_by_name(param_head, "oplus_spec,wired-vbatdet-mv");
 	while (data_head != NULL) {
-		rc = oplus_cfg_get_data(data_head, (u8 *)buf, sizeof(buf));
+		rc = oplus_cfg_get_data(data_head, (u8 *)buf, buf_size);
 		if (rc < 0) {
 			chg_err("get oplus_spec,wired-vbatdet-mv data error, rc=%d\n", rc);
 			break;
 		}
 		for (i = 0; i < ARRAY_SIZE(buf); i++) {
-			spec->wired_vbatdet_mv[i] = le32_to_cpu(buf[i]);
+			spec->wired_vbatdet_mv[i] = le32_to_cpu(buf[oplus_comm_temp_region_map(i)]);
 			if (g_log_buf) {
 				index += snprintf(g_log_buf + index, LOG_BUF_SIZE - index - 1, "%s%d",
 					(i == 0) ? "" : ", ", spec->wired_vbatdet_mv[i]);
@@ -235,14 +241,14 @@ static void oplus_comm_update_rechg_config(
 
 	data_head = oplus_cfg_find_param_by_name(param_head, "oplus_spec,wls-vbatdet-mv");
 	while (data_head != NULL) {
-		rc = oplus_cfg_get_data(data_head, (u8 *)buf, sizeof(buf));
+		rc = oplus_cfg_get_data(data_head, (u8 *)buf, buf_size);
 		if (rc < 0) {
 			chg_err("get oplus_spec,wls-vbatdet-mv data error, rc=%d\n", rc);
 			break;
 		}
 		index = 0;
 		for (i = 0; i < ARRAY_SIZE(buf); i++) {
-			spec->wls_vbatdet_mv[i] = le32_to_cpu(buf[i]);
+			spec->wls_vbatdet_mv[i] = le32_to_cpu(buf[oplus_comm_temp_region_map(i)]);
 			if (g_log_buf) {
 				index += snprintf(g_log_buf + index, LOG_BUF_SIZE - index - 1, "%s%d",
 					(i == 0) ? "" : ", ", spec->wls_vbatdet_mv[i]);
@@ -271,42 +277,64 @@ static void oplus_comm_update_misc_config(
 	struct oplus_param_head *param_head, struct oplus_comm_spec_config *spec)
 {
 	struct oplus_cfg_data_head *data_head;
-	int32_t buf;
-	int rc;
+	int32_t buf[TEMP_REGION_MAX];
+	int i, rc;
+	int index = 0;
+	size_t buf_size = sizeof(buf) - (TEMP_REGION_MAX - spec->temp_region_max) * sizeof(int32_t);
 
 	data_head = oplus_cfg_find_param_by_name(param_head, "oplus_spec,fcc-gear-thr-mv");
 	while (data_head != NULL) {
-		rc = oplus_cfg_get_data(data_head, (u8 *)&buf, sizeof(buf));
+		rc = oplus_cfg_get_data(data_head, (u8 *)buf, sizeof(buf[0]));
 		if (rc < 0) {
 			chg_err("get oplus_spec,fcc-gear-thr-mv data error, rc=%d\n", rc);
 			break;
 		}
-		spec->fcc_gear_thr_mv = le32_to_cpu(buf);
+		spec->fcc_gear_thr_mv = le32_to_cpu(buf[0]);
 		chg_info("[TEST]:fcc_gear_thr_mv = %d\n", spec->fcc_gear_thr_mv);
 		break;
 	}
 
 	data_head = oplus_cfg_find_param_by_name(param_head, "oplus_spec,vbatt-ov-thr-mv");
 	while (data_head != NULL) {
-		rc = oplus_cfg_get_data(data_head, (u8 *)&buf, sizeof(buf));
+		rc = oplus_cfg_get_data(data_head, (u8 *)buf, sizeof(buf[0]));
 		if (rc < 0) {
 			chg_err("get oplus_spec,vbatt-ov-thr-mv data error, rc=%d\n", rc);
 			break;
 		}
-		spec->vbatt_ov_thr_mv = le32_to_cpu(buf);
+		spec->vbatt_ov_thr_mv = le32_to_cpu(buf[0]);
 		chg_info("[TEST]:vbatt_ov_thr_mv = %d\n", spec->vbatt_ov_thr_mv);
 		break;
 	}
 
 	data_head = oplus_cfg_find_param_by_name(param_head, "oplus_spec,max_chg_time_sec");
 	while (data_head != NULL) {
-		rc = oplus_cfg_get_data(data_head, (u8 *)&buf, sizeof(buf));
+		rc = oplus_cfg_get_data(data_head, (u8 *)buf, sizeof(buf[0]));
 		if (rc < 0) {
 			chg_err("get oplus_spec,max_chg_time_sec data error, rc=%d\n", rc);
 			break;
 		}
-		spec->max_chg_time_sec = le32_to_cpu(buf);
+		spec->max_chg_time_sec = le32_to_cpu(buf[0]);
 		chg_info("[TEST]:max_chg_time_sec = %d\n", spec->max_chg_time_sec);
+		break;
+	}
+
+	data_head = oplus_cfg_find_param_by_name(param_head, "oplus_spec,fcc-gear-shake-mv");
+	while (data_head != NULL) {
+		rc = oplus_cfg_get_data(data_head, (u8 *)buf, buf_size);
+		if (rc < 0) {
+			chg_err("get oplus_spec,fcc-gear-shake-mv data error, rc=%d\n", rc);
+			break;
+		}
+		for (i = 0; i < ARRAY_SIZE(buf); i++) {
+			spec->fcc_gear_shake_mv[i] = le32_to_cpu(buf[oplus_comm_temp_region_map(i)]);
+			if (g_log_buf) {
+				index += snprintf(g_log_buf + index, LOG_BUF_SIZE - index - 1, "%s%d",
+					(i == 0) ? "" : ", ", spec->fcc_gear_shake_mv[i]);
+				g_log_buf[index] = 0;
+			}
+		}
+		if (g_log_buf)
+			chg_info("[TEST]:fcc_gear_shake_mv = { %s }\n", g_log_buf);
 		break;
 	}
 }
@@ -365,6 +393,10 @@ static void oplus_comm_update_ffc_config(
 			chg_err("Too much configuration data, data_len=%ld\n", data_len / sizeof(buf[0]));
 			break;
 		}
+		if ((data_len % sizeof(buf[0])) != 0) {
+			chg_err("configuration data format error\n");
+			break;
+		}
 		rc = oplus_cfg_get_data(data_head, (u8 *)buf, data_len);
 		if (rc < 0) {
 			chg_err("get oplus_spec,wired-ffc-fv-mv data error, rc=%d\n", rc);
@@ -393,6 +425,10 @@ static void oplus_comm_update_ffc_config(
 			chg_err("Too much configuration data\n");
 			break;
 		}
+		if ((data_len % sizeof(buf[0])) != 0) {
+			chg_err("configuration data format error\n");
+			break;
+		}
 		rc = oplus_cfg_get_data(data_head, (u8 *)buf, data_len);
 		if (rc < 0) {
 			chg_err("get oplus_spec,wired-ffc-fv-cutoff-mv data error, rc=%d\n", rc);
@@ -401,7 +437,7 @@ static void oplus_comm_update_ffc_config(
 		log_index = 0;
 		for (i = 0; i < FFC_CHG_STEP_MAX; i++) {
 			for (j = 0; j < (FFC_TEMP_REGION_MAX - 2); j++) {
-				index = i * (FFC_TEMP_REGION_MAX - 2) + j;
+				index = i * (spec->ffc_temp_region_max - 2) + oplus_comm_ffc_temp_region_map(j);
 				if (index >= (data_len / sizeof(buf[0])))
 					buf[index] = 0;
 				spec->wired_ffc_fv_cutoff_mv[i][j] = le32_to_cpu(buf[index]);
@@ -426,6 +462,10 @@ static void oplus_comm_update_ffc_config(
 			chg_err("Too much configuration data\n");
 			break;
 		}
+		if ((data_len % sizeof(buf[0])) != 0) {
+			chg_err("configuration data format error\n");
+			break;
+		}
 		rc = oplus_cfg_get_data(data_head, (u8 *)buf, data_len);
 		if (rc < 0) {
 			chg_err("get oplus_spec,wired-ffc-fcc-ma data error, rc=%d\n", rc);
@@ -434,7 +474,7 @@ static void oplus_comm_update_ffc_config(
 		log_index = 0;
 		for (i = 0; i < FFC_CHG_STEP_MAX; i++) {
 			for (j = 0; j < (FFC_TEMP_REGION_MAX - 2); j++) {
-				index = i * (FFC_TEMP_REGION_MAX - 2) + j;
+				index = i * (spec->ffc_temp_region_max - 2) + oplus_comm_ffc_temp_region_map(j);
 				if (index >= (data_len / sizeof(buf[0])))
 					buf[index] = 0;
 				spec->wired_ffc_fcc_ma[i][j] = le32_to_cpu(buf[index]);
@@ -459,6 +499,10 @@ static void oplus_comm_update_ffc_config(
 			chg_err("Too much configuration data\n");
 			break;
 		}
+		if ((data_len % sizeof(buf[0])) != 0) {
+			chg_err("configuration data format error\n");
+			break;
+		}
 		rc = oplus_cfg_get_data(data_head, (u8 *)buf, data_len);
 		if (rc < 0) {
 			chg_err("get oplus_spec,wired-ffc-fcc-cutoff-ma data error, rc=%d\n", rc);
@@ -467,7 +511,7 @@ static void oplus_comm_update_ffc_config(
 		log_index = 0;
 		for (i = 0; i < FFC_CHG_STEP_MAX; i++) {
 			for (j = 0; j < (FFC_TEMP_REGION_MAX - 2); j++) {
-				index = i * (FFC_TEMP_REGION_MAX - 2) + j;
+				index = i * (spec->ffc_temp_region_max - 2) + oplus_comm_ffc_temp_region_map(j);
 				if (index >= (data_len / sizeof(buf[0])))
 					buf[index] = 0;
 				spec->wired_ffc_fcc_cutoff_ma[i][j] = le32_to_cpu(buf[index]);
@@ -504,6 +548,10 @@ static void oplus_comm_update_ffc_config(
 			chg_err("Too much configuration data\n");
 			break;
 		}
+		if ((data_len % sizeof(buf[0])) != 0) {
+			chg_err("configuration data format error\n");
+			break;
+		}
 		rc = oplus_cfg_get_data(data_head, (u8 *)buf, data_len);
 		if (rc < 0) {
 			chg_err("get oplus_spec,wired-aging-ffc-offset-mv data error, rc=%d\n", rc);
@@ -535,6 +583,10 @@ static void oplus_comm_update_ffc_config(
 		data_len = oplus_cfg_get_data_size(data_head);
 		if (data_len / sizeof(buf[0]) > AGAIN_FFC_CYCLY_THR_COUNT) {
 			chg_err("Too much configuration data\n");
+			break;
+		}
+		if ((data_len % sizeof(buf[0])) != 0) {
+			chg_err("configuration data format error\n");
 			break;
 		}
 		rc = oplus_cfg_get_data(data_head, (u8 *)buf, data_len);
@@ -578,6 +630,10 @@ static void oplus_comm_update_ffc_config(
 			chg_err("Too much configuration data\n");
 			break;
 		}
+		if ((data_len % sizeof(buf[0])) != 0) {
+			chg_err("configuration data format error\n");
+			break;
+		}
 		rc = oplus_cfg_get_data(data_head, (u8 *)buf, data_len);
 		if (rc < 0) {
 			chg_err("get oplus_spec,wls-ffc-fv-mv data error, rc=%d\n", rc);
@@ -602,8 +658,12 @@ static void oplus_comm_update_ffc_config(
 	data_head = oplus_cfg_find_param_by_name(param_head, "oplus_spec,wls-ffc-fv-cutoff-mv");
 	while (data_head != NULL) {
 		data_len = oplus_cfg_get_data_size(data_head);
-		if (data_len / sizeof(buf[0]) > FFC_CHG_STEP_MAX) {
+		if (data_len / sizeof(buf[0]) > FFC_BUF_MAX) {
 			chg_err("Too much configuration data\n");
+			break;
+		}
+		if ((data_len % sizeof(buf[0])) != 0) {
+			chg_err("configuration data format error\n");
 			break;
 		}
 		rc = oplus_cfg_get_data(data_head, (u8 *)buf, data_len);
@@ -613,13 +673,16 @@ static void oplus_comm_update_ffc_config(
 		}
 		log_index = 0;
 		for (i = 0; i < FFC_CHG_STEP_MAX; i++) {
-			if (i >= (data_len / sizeof(buf[0])))
-				buf[i] = 0;
-			spec->wls_ffc_fv_cutoff_mv[i] = le32_to_cpu(buf[i]);
-			if (g_log_buf) {
-				log_index += snprintf(g_log_buf + log_index, LOG_BUF_SIZE - log_index - 1, "%s%d",
-					(i == 0) ? "" : ", ", spec->wls_ffc_fv_cutoff_mv[i]);
-				g_log_buf[log_index] = 0;
+			for (j = 0; j < (FFC_TEMP_REGION_MAX - 2); j++) {
+				index = i * (spec->ffc_temp_region_max - 2) + oplus_comm_ffc_temp_region_map(j);
+				if (index >= (data_len / sizeof(buf[0])))
+					buf[index] = 0;
+				spec->wls_ffc_fv_cutoff_mv[i][j] = le32_to_cpu(buf[index]);
+				if (g_log_buf) {
+					log_index += snprintf(g_log_buf + log_index, LOG_BUF_SIZE - log_index - 1, "%s%d",
+						((i == 0) && (j == 0)) ? "" : ", ", spec->wls_ffc_fv_cutoff_mv[i][j]);
+					g_log_buf[log_index] = 0;
+				}
 			}
 		}
 		if (g_log_buf)
@@ -634,6 +697,10 @@ static void oplus_comm_update_ffc_config(
 			chg_err("Too much configuration data\n");
 			break;
 		}
+		if ((data_len % sizeof(buf[0])) != 0) {
+			chg_err("configuration data format error\n");
+			break;
+		}
 		rc = oplus_cfg_get_data(data_head, (u8 *)buf, data_len);
 		if (rc < 0) {
 			chg_err("get oplus_spec,wls-ffc-icl-ma data error, rc=%d\n", rc);
@@ -642,7 +709,7 @@ static void oplus_comm_update_ffc_config(
 		log_index = 0;
 		for (i = 0; i < FFC_CHG_STEP_MAX; i++) {
 			for (j = 0; j < (FFC_TEMP_REGION_MAX - 2); j++) {
-				index = i * (FFC_TEMP_REGION_MAX - 2) + j;
+				index = i * (spec->ffc_temp_region_max - 2) + oplus_comm_ffc_temp_region_map(j);
 				if (index >= (data_len / sizeof(buf[0])))
 					buf[index] = 0;
 				spec->wls_ffc_icl_ma[i][j] = le32_to_cpu(buf[index]);
@@ -667,6 +734,10 @@ static void oplus_comm_update_ffc_config(
 			chg_err("Too much configuration data\n");
 			break;
 		}
+		if ((data_len % sizeof(buf[0])) != 0) {
+			chg_err("configuration data format error\n");
+			break;
+		}
 		rc = oplus_cfg_get_data(data_head, (u8 *)buf, data_len);
 		if (rc < 0) {
 			chg_err("get oplus_spec,wls-ffc-fcc-ma data error, rc=%d\n", rc);
@@ -675,7 +746,7 @@ static void oplus_comm_update_ffc_config(
 		log_index = 0;
 		for (i = 0; i < FFC_CHG_STEP_MAX; i++) {
 			for (j = 0; j < (FFC_TEMP_REGION_MAX - 2); j++) {
-				index = i * (FFC_TEMP_REGION_MAX - 2) + j;
+				index = i * (spec->ffc_temp_region_max - 2) + oplus_comm_ffc_temp_region_map(j);
 				if (index >= (data_len / sizeof(buf[0])))
 					buf[index] = 0;
 				spec->wls_ffc_fcc_ma[i][j] = le32_to_cpu(buf[index]);
@@ -700,6 +771,10 @@ static void oplus_comm_update_ffc_config(
 			chg_err("Too much configuration data\n");
 			break;
 		}
+		if ((data_len % sizeof(buf[0])) != 0) {
+			chg_err("configuration data format error\n");
+			break;
+		}
 		rc = oplus_cfg_get_data(data_head, (u8 *)buf, data_len);
 		if (rc < 0) {
 			chg_err("get oplus_spec,wls-ffc-fcc-cutoff-ma data error, rc=%d\n", rc);
@@ -708,7 +783,7 @@ static void oplus_comm_update_ffc_config(
 		log_index = 0;
 		for (i = 0; i < FFC_CHG_STEP_MAX; i++) {
 			for (j = 0; j < (FFC_TEMP_REGION_MAX - 2); j++) {
-				index = i * (FFC_TEMP_REGION_MAX - 2) + j;
+				index = i * (spec->ffc_temp_region_max - 2) + oplus_comm_ffc_temp_region_map(j);
 				if (index >= (data_len / sizeof(buf[0])))
 					buf[index] = 0;
 				spec->wls_ffc_fcc_cutoff_ma[i][j] = le32_to_cpu(buf[index]);

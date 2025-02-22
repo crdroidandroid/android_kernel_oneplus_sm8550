@@ -2288,7 +2288,7 @@ static int oplus_ufcs_protocol_check_adapter_error(void)
 	unsigned long error_type = find_first_bit(&error_msg, ERROR_INFO_NUM);
 
 	int len = g_protocol->rcv_msg.len;
-	ufcs_info(" error_msg = %04x, len = %d to phone.\n", error_msg, len);
+	ufcs_info(" error_msg = %04lx, len = %d to phone.\n", error_msg, len);
 
 	if (len != ERROR_INFO_LEN) {
 		ufcs_err("len = %d", len);
@@ -2477,7 +2477,7 @@ static void oplus_ufcs_protocol_reply_adapter(struct work_struct *work)
 		rc = oplus_ufcs_protocol_reply_data_msg(msg_command);
 	else {
 		rc = oplus_ufcs_protocol_send_refuse(REASON_CMD_NOT_DETECT);
-		ufcs_err("adapter sending wrong msg\n", msg_type, msg_command);
+		ufcs_err("adapter sending wrong msg[0x%x, 0x%02x]\n", msg_type, msg_command);
 	}
 	if (rc < 0)
 		ufcs_err("reply to adapter failed!\n");
@@ -2868,6 +2868,32 @@ static int oplus_ufcs_protocol_master_get_vout(void)
 	return vout;
 }
 
+static int oplus_ufcs_protocol_master_get_vbat(void)
+{
+	int vout = 0;
+	struct oplus_ufcs_protocol *chip = g_protocol;
+
+	if (!chip || !chip->ops || !chip->ops->ufcs_ic_get_master_vbat) {
+		return vout;
+	}
+	vout = chip->ops->ufcs_ic_get_master_vbat();
+
+	return vout;
+}
+
+static int oplus_ufcs_protocol_master_event_handle(void)
+{
+	int ret = 0;
+	struct oplus_ufcs_protocol *chip = g_protocol;
+
+	if (!chip || !chip->ops || !chip->ops->ufcs_ic_event_handle)
+		return ret;
+
+	ret = chip->ops->ufcs_ic_event_handle();
+
+	return ret;
+}
+
 struct oplus_ufcs_operations oplus_ufcs_protocol_ops = {
 	.ufcs_get_btb_temp_status = oplus_ufcs_protocol_get_btb_temp_status,
 	.ufcs_get_mos_temp_status = oplus_ufcs_protocol_get_mos_temp_status,
@@ -2902,10 +2928,12 @@ struct oplus_ufcs_operations oplus_ufcs_protocol_ops = {
 	.ufcs_get_cp_master_ibus = oplus_ufcs_protocol_master_get_ibus,
 	.ufcs_get_cp_master_vac = oplus_ufcs_protocol_master_get_vac,
 	.ufcs_get_cp_master_vout = oplus_ufcs_protocol_master_get_vout,
+	.ufcs_get_cp_master_vbat = oplus_ufcs_protocol_master_get_vbat,
 	.ufcs_get_mos0_switch = oplus_ufcs_protocol_get_mos0_switch,
 	.ufcs_set_mos0_switch = oplus_ufcs_protocol_set_mos0_switch,
 	.ufcs_get_mos1_switch = oplus_ufcs_protocol_get_mos1_switch,
 	.ufcs_set_mos1_switch = oplus_ufcs_protocol_set_mos1_switch,
+	.ufcs_event_handle = oplus_ufcs_protocol_master_event_handle,
 };
 
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 10, 0))

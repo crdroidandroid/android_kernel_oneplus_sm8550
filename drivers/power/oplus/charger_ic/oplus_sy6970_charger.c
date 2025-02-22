@@ -36,7 +36,6 @@
 #include <linux/time.h>
 
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 19, 0))
-#include <soc/oplus/oplus_project.h>
 #include <mt-plat/charger_class.h>
 #include <mt-plat/charger_type.h>
 #else
@@ -46,7 +45,6 @@
 #endif
 
 extern void set_charger_ic(int sel);
-extern unsigned int is_project(int project);
 extern void oplus_get_usbtemp_volt(struct oplus_chg_chip *chip);
 extern void oplus_set_typec_sinkonly(void);
 extern bool oplus_usbtemp_condition(void);
@@ -179,6 +177,13 @@ module_param(disable_PD, bool, 0644);
 module_param(current_percent, int, 0644);
 module_param(dumpreg_by_irq, bool, 0644);
 static struct bq2589x *g_bq;
+
+static const char g_bq2589x_regdata_on_reset[] = {
+	0x48, 0x06, 0x1d, 0x1a, 0x20,
+	0x13, 0x5e, 0x9d, 0x03, 0x44,
+	0x73, 0x5e, 0x00, 0x12, 0x6d,
+	0x71, 0x47, 0x98, 0x00, 0x08, 0x0c
+};
 
 void oplus_wake_up_usbtemp_thread(void);
 
@@ -1329,6 +1334,16 @@ bq2589x_show_registers(struct device *dev, struct device_attribute *attr,
 	return idx;
 }
 
+void bq2589x_reset_registers(struct bq2589x *bq, const char *buf, int count)
+{
+	int reg;
+
+	for(reg = BQ2589X_REG_00; reg <= count; reg++) {
+		if (reg != BQ2589X_REG_06)
+			bq2589x_write_byte(bq, (unsigned char)reg, buf[reg]);
+	}
+}
+
 static ssize_t
 bq2589x_store_registers(struct device *dev,
 			struct device_attribute *attr, const char *buf,
@@ -1990,10 +2005,8 @@ int oplus_bq2589x_set_ichg(int cur)
 	if (g_oplus_chip->mmi_chg == 0)
 		cur = 100;
 
-	if (!(is_project(0x216AF) || is_project(0x216B0) || is_project(0x216B1))){
-		if (chip->charger_type == POWER_SUPPLY_TYPE_USB || chip->charger_type == POWER_SUPPLY_TYPE_USB_CDP)
-			return ret;
-	}
+	if (chip->charger_type == POWER_SUPPLY_TYPE_USB || chip->charger_type == POWER_SUPPLY_TYPE_USB_CDP)
+		return ret;
 
 	if (chip->cool_down && (!(g_oplus_chip->led_on && g_oplus_chip->temperature > 420))) {
 		cur = cool_down_current_limit_normal[chip->cool_down - 1];
@@ -2612,11 +2625,7 @@ int oplus_bq2589x_chg_set_high_vbus(bool en)
 		if(en) {
 			if(!(g_bq->is_bq2589x)) {
 				bq2589x_enable_hvdcp(g_bq);
-				if (is_project(0x216AF) || is_project(0x216B0) || is_project(0x216B1)){
-					bq2589x_force_dpdm(g_bq);//even-c
-					pr_info("not dpdm [%s] \n",__func__);
-				} else
-					bq2589x_force_dpdm(g_bq);
+				bq2589x_force_dpdm(g_bq);
 			} else {
 				bq2589x_switch_to_hvdcp(g_bq, HVDCP_9V);
 			}
@@ -2624,11 +2633,7 @@ int oplus_bq2589x_chg_set_high_vbus(bool en)
 	  	} else {
 			if(!(g_bq->is_bq2589x)) {
 				bq2589x_disable_hvdcp(g_bq);
-				if (is_project(0x216AF) || is_project(0x216B0) || is_project(0x216B1)){
-					bq2589x_force_dpdm(g_bq);//even-c
-					pr_info("not dpdm [%s] \n",__func__);
-				} else
-					bq2589x_force_dpdm(g_bq);
+				bq2589x_force_dpdm(g_bq);
 		  } else {
 			bq2589x_switch_to_hvdcp(g_bq, HVDCP_5V);
 		  }
@@ -2820,10 +2825,8 @@ static void charging_current_setting_work(struct work_struct *work)
 	u32 temp_uA;
 	int ret = 0;
 
-	if (!(is_project(0x216AF) || is_project(0x216B0) || is_project(0x216B1))){
-		if (chip->charger_type == POWER_SUPPLY_TYPE_USB || chip->charger_type == POWER_SUPPLY_TYPE_USB_CDP)
-			return;
-	}
+	if (chip->charger_type == POWER_SUPPLY_TYPE_USB || chip->charger_type == POWER_SUPPLY_TYPE_USB_CDP)
+		return;
 
 	if(g_bq->chg_cur > BQ_CHARGER_CURRENT_MAX_MA) {
 		uA = BQ_CHARGER_CURRENT_MAX_MA * 1000;
@@ -2889,6 +2892,9 @@ static int bq2589x_charger_probe(struct i2c_client *client,
 		ret = -EINVAL;
 		goto err_parse_dt;
 	}
+
+	if (!bq->is_bq2589x)
+		bq2589x_reset_registers(bq, g_bq2589x_regdata_on_reset, BQ2589X_REG_14);
 
 	ret = bq2589x_init_device(bq);
 	if (ret) {

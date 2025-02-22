@@ -132,8 +132,10 @@ struct sensor_fb_conf g_fb_conf[] = {
 	{ALS_ORIGIN_DATA_TO_ZERO_ID, "device_als_to_zero", SENSOR_DEBUG_DEVICE_TYPE},
 	{ALS_CALI_DATA_ID, "device_als_cali_data", SENSOR_DEBUG_DEVICE_TYPE},
 	{ALS_CG_RPT_INFO_ID, "device_als_cg_rpt_info", SENSOR_DEBUG_DEVICE_TYPE},
+	/*Add for sip3625*/
 	{ALS_RECOVER_DEVICE_ID, "device_als_recover_device", SENSOR_DEBUG_DEVICE_TYPE},
 	{ALS_FIFO_RECOVER_DEVICE_ID, "device_als_fifo_recover_device", SENSOR_DEBUG_DEVICE_TYPE},
+	/*Add for sip3625*/
 
 
 	{ACCEL_INIT_FAIL_ID, "device_acc_init_fail", SENSOR_DEVICE_TYPE},
@@ -181,7 +183,8 @@ struct sensor_fb_conf g_fb_conf[] = {
 	{SAR_FIRST_REPORT_DELAY_COUNT_ID, "device_sar_rpt_delay", SENSOR_DEBUG_DEVICE_TYPE},
 	{SAR_ORIGIN_DATA_TO_ZERO_ID, "device_sar_to_zero", SENSOR_DEBUG_DEVICE_TYPE},
 	{SAR_CALI_DATA_ID, "device_sar_cali_data", SENSOR_DEBUG_DEVICE_TYPE},
-
+	{HALL_STATUS_ID, "device_hall_status", SENSOR_DEVICE_TYPE},
+	{HALL_TRIGGER_COUNT, "hall_trigger_count", SENSOR_DEVICE_TYPE},
 
 	{BAROMETER_I2C_ERR_ID, "device_barometer_i2c_err", SENSOR_DEVICE_TYPE},
 

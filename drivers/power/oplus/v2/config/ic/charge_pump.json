@@ -5,16 +5,73 @@
     "enum_list": [
         {
             "name": "oplus_cp_work_mode",
+            "desc":{
+                "zh": "虚拟IC框架CP工作模式类型"
+            },
             "list": [
-                "CP_WORK_MODE_UNKNOWN",
-                "CP_WORK_MODE_AUTO",
-                "CP_WORK_MODE_BYPASS",
-                "CP_WORK_MODE_2_TO_1",
-                "CP_WORK_MODE_3_TO_1",
-                "CP_WORK_MODE_4_TO_1",
-                "CP_WORK_MODE_1_TO_2",
-                "CP_WORK_MODE_1_TO_3",
-                "CP_WORK_MODE_1_TO_4"
+                {
+                    "lable": "CP_WORK_MODE_UNKNOWN",
+                    "desc": {
+                        "zh": "未知的工作模式"
+                    },
+                    "str": "unknown"
+                },
+                {
+                    "lable": "CP_WORK_MODE_AUTO",
+                    "desc": {
+                        "zh": "自动模式"
+                    },
+                    "str": "auto"
+                },
+                {
+                    "lable": "CP_WORK_MODE_BYPASS",
+                    "desc": {
+                        "zh": "bypass模式"
+                    },
+                    "str": "bypass"
+                },
+                {
+                    "lable": "CP_WORK_MODE_2_TO_1",
+                    "desc": {
+                        "zh": "2:1模式"
+                    },
+                    "str": "2:1"
+                },
+                {
+                    "lable": "CP_WORK_MODE_3_TO_1",
+                    "desc": {
+                        "zh": "3:1模式"
+                    },
+                    "str": "3:1"
+                },
+                {
+                    "lable": "CP_WORK_MODE_4_TO_1",
+                    "desc": {
+                        "zh": "4:1模式"
+                    },
+                    "str": "4:1"
+                },
+                {
+                    "lable": "CP_WORK_MODE_1_TO_2",
+                    "desc": {
+                        "zh": "1:2模式"
+                    },
+                    "str": "1:2"
+                },
+                {
+                    "lable": "CP_WORK_MODE_1_TO_3",
+                    "desc": {
+                        "zh": "1:3模式"
+                    },
+                    "str": "1:3"
+                },
+                {
+                    "lable": "CP_WORK_MODE_1_TO_4",
+                    "desc": {
+                        "zh": "1:4模式"
+                    },
+                    "str": "1:4"
+                }
             ]
         }
     ],
@@ -139,7 +196,7 @@
             "desc": {
                 "zh": "检查电荷泵是否支持某个工作模式"
             },
-            "auto_debug_code": false,
+            "auto_debug_code": true,
             "parameter_list": ["enum oplus_cp_work_mode"],
             "parameter_desc": [
                 {
@@ -453,8 +510,104 @@
                     }
                 }
             }
+        },
+        {
+            "lable": "OPLUS_IC_FUNC_CP_WATCHDOG_ENABLE",
+            "desc": {
+                "zh": "设置电荷泵watchdog开关及timeout时长"
+            },
+            "auto_debug_code": true,
+            "parameter_list": ["int"],
+            "parameter_desc": [
+                {
+                    "range": "0-*",
+                    "type": "in",
+                    "desc": {
+                        "zh": "电荷泵watchgdog timeout时长，单位毫秒"
+                    }
+                }
+            ],
+            "vict": {
+                "read": false,
+                "write": {
+                    "cmd": "vict -f {id} -S{val} vic-*",
+                    "desc": {
+                        "zh": "设置电荷泵watchdog timeout时长，由val决定，单位毫秒"
+                    }
+                },
+                 "overwrite": {
+                    "cmd": "vict -f {id} -O {val} vic-*",
+                    "desc": {
+                        "zh": "使用val覆盖传出的watchdog timeout时长，单位毫秒"
+                    }
+                }
+            }
+        },
+        {
+            "lable": "OPLUS_IC_FUNC_CP_GET_TEMP",
+            "desc": {
+                "zh": "获取CP温度"
+            },
+            "auto_debug_code": true,
+            "parameter_list": ["int *"],
+            "parameter_desc": [
+                {
+                    "range": "0-*",
+                    "type": "out",
+                    "desc": {
+                        "zh": "CP温度，单位摄氏度"
+                    }
+                }
+            ],
+            "vict": {
+                "read": {
+                    "cmd": "vict -f {id} -G vic-*",
+                    "desc": {
+                        "zh": "N/A"
+                    }
+                },
+                "write": false,
+                "overwrite": {
+                    "cmd": "vict -f {id} -O {val} vic-*",
+                    "desc": {
+                        "zh": "N/A"
+                    }
+                }
+            }
+        },
+        {
+            "lable": "OPLUS_IC_FUNC_CP_SET_UCP_DISABLE",
+            "desc": {
+                "zh": "关闭ucp"
+            },
+            "auto_debug_code": true,
+            "parameter_list": ["bool"],
+            "parameter_desc": [
+                {
+                    "range": "0-1",
+                    "type": "in",
+                    "desc": {
+                        "zh": "1:关闭, 0:开启"
+                    }
+                }
+            ],
+            "vict": {
+                "read": false,
+                "write": {
+                    "cmd": "vict -f {id} -S{val} vic-*",
+                    "desc": {
+                        "zh": "开关UCP"
+                    }
+                },
+                 "overwrite": {
+                    "cmd": "vict -f {id} -O {val} vic-*",
+                    "desc": {
+                        "zh": "使用val覆盖传入的开启状态"
+                    }
+                }
+            }
         }
     ],
 
-    "version": "V1.0:14:6b509689d64cf6ad13eeedef3418a85690fe7f3db66f45005a340f4f9d926526"
+    "version": "V2.1:17:5cfefedeabd4e3130fc656e8e49d971dc2bc20a2f5acb5038a83107d5461e310"
 }

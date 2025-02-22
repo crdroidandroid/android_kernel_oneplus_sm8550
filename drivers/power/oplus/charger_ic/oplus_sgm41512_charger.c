@@ -17,7 +17,7 @@
 #include <asm/atomic.h>
 #include <linux/module.h>
 #include <linux/of_gpio.h>
-
+#include "../oplus_chg_module.h"
 #include "../oplus_vooc.h"
 #include "../oplus_gauge.h"
 #include "oplus_sgm41512_charger.h"
@@ -44,8 +44,13 @@
 #include "../voocphy/oplus_voocphy.h"
 #include <linux/rtc.h>
 #include <linux/iio/consumer.h>
-#include <tcpm.h>
+#ifdef CONFIG_OPLUS_PD_EXT_SUPPORT
+#include "../pd_ext/inc/tcpci.h"
+#include "../pd_ext/inc/tcpm.h"
+#else
 #include <tcpci.h>
+#include <tcpm.h>
+#endif
 #endif
 #define CHARGER_NORMAL_TEMP_HIGH 370
 #define CHARGER_NORMAL_TEMP_HIGH_MINUS 350
@@ -97,6 +102,10 @@ static struct delayed_work sgm41512_irq_delay_work;
 static struct delayed_work sgm41512_bc_delay_work;
 static struct delayed_work sgm41512_threaded_irq_work;
 bool fg_sgm41512_irq_delay_work_running = false;
+
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0))
+extern bool oplus_chg_get_shortc_hw_gpio_status(void);
+#endif
 
 struct chip_sgm41512 {
 	struct i2c_client	*client;
@@ -1047,7 +1056,7 @@ int oplus_sgm41512_chg_get_charger_subtype(void)
 	return CHARGER_SUBTYPE_DEFAULT;
 }
 
-static int sgm41512_set_hiz_mode()
+static int sgm41512_set_hiz_mode(void)
 {
 	struct chip_sgm41512 *chip = charger_ic;
 	int rc = 0;
@@ -1065,7 +1074,7 @@ static int sgm41512_set_hiz_mode()
 	return rc;
 }
 
-static int sgm41512_exit_hiz_mode()
+static int sgm41512_exit_hiz_mode(void)
 {
 	struct chip_sgm41512 *chip = charger_ic;
 	int rc = 0;
@@ -2435,7 +2444,11 @@ static int pd_tcp_notifier_call(struct notifier_block *nb,
 }
 #endif
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0))
+static int sgm41512_driver_probe(struct i2c_client *client)
+#else
 static int sgm41512_driver_probe(struct i2c_client *client, const struct i2c_device_id *id)
+#endif
 {
 	int reg = 0, ret;
 	struct chip_sgm41512 *chip = NULL;
@@ -2541,10 +2554,17 @@ static int sgm41512_driver_probe(struct i2c_client *client, const struct i2c_dev
 
 static struct i2c_driver sgm41512_i2c_driver;
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0))
+static void sgm41512_driver_remove(struct i2c_client *client)
+{
+	return;
+}
+#else
 static int sgm41512_driver_remove(struct i2c_client *client)
 {
 	return 0;
 }
+#endif
 
 static unsigned long suspend_tm_sec = 0;
 
@@ -2719,7 +2739,9 @@ void sgm41512_driver_exit(void)
 {
 	i2c_del_driver(&sgm41512_i2c_driver);
 }
-
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0))
+oplus_chg_module_register(sgm41512_driver);
+#endif
 #else
 module_i2c_driver(sgm41512_i2c_driver);
 #endif

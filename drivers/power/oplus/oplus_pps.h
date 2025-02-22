@@ -20,6 +20,7 @@
 #include <oplus_cfg.h>
 #endif
 #define pps_err(fmt, ...) printk(KERN_ERR "[OPLUS_PPS][%s]" fmt, __func__, ##__VA_ARGS__)
+#define pps_info(fmt, ...) printk(KERN_INFO "[OPLUS_PPS][%s]" fmt, __func__, ##__VA_ARGS__)
 
 #define PPS_MANAGER_VERSION "1.3.0"
 /*pps curve*/
@@ -93,6 +94,7 @@
 #define PPS_IBAT_LOW_MIN 2000
 #define PPS_IBAT_LOW_CNT 4
 #define PPS_IBAT_HIGH_CNT 8
+#define PPS_IBAT_OVER_CNT 4
 
 #define PPS_POWER_SC_CNT 10
 #define PPS_POWER_BP_CNT 20
@@ -111,6 +113,7 @@
 #define PPS_ACTION_START_DIFF_VOLT_V1 300
 #define PPS_ACTION_START_DIFF_VOLT_V2 600
 #define PPS_ACTION_START_DIFF_VOLT_3RD 450
+#define PPS_ACTION_VOLT_CHANGE_DIFF_VOLT_3RD 100
 #define PPS_ACTION_CURR_MIN 1500
 
 #define PPS_ACTION_START_DELAY 300
@@ -128,19 +131,56 @@
 #define PPS_3RD_IBUS_OVER_DIFF 250
 #define PPS_3RD_DEFAULT_R 250
 #define PPS_3RD_IBUS_NEED_ADJUST_THLD 200
-#define PPS_3RD_IBUS_ADJUST_OK_THLD 100
+#define PPS_3RD_IBUS_ADJUST_OK_MIN_THLD 100
+#define PPS_3RD_IBUS_ADJUST_OK_MAX_THLD 200
+#define PPS_3RD_IBAT_OVER_DIFF 500
 #define PPS_3RD_VOLT_ADJUST_STEP 40
-#define PPS_3RD_ASK_VOLT_OVER_CNT 3
+#define PPS_3RD_ASK_VOLT_MIN_CNT 3
+#define PPS_3RD_ASK_VOLT_MAX_CNT 3
 #define PPS_3RD_ASK_VOLT_MAX 10500
 
 /*pps other*/
 #define PPS_DUMP_REG_CNT 10
 #define PD_PPS_STATUS_VOLT(pps_status) (((pps_status) >> 0) & 0xFFFF)
 #define PD_PPS_STATUS_CUR(pps_status) (((pps_status) >> 16) & 0xFF)
+#define PD_EVENT_NAME_LEN 60
+
+#define ADAPTER_CAP_MAX_COUNT 7
+struct pd_adapter_info {
+	unsigned int svid;
+	unsigned int pid;
+	unsigned int bcd;
+	uint8_t nr;
+	unsigned int min_mv[ADAPTER_CAP_MAX_COUNT];
+	unsigned int max_mv[ADAPTER_CAP_MAX_COUNT];
+	unsigned int ma[ADAPTER_CAP_MAX_COUNT];
+};
 
 enum { PPS_BYPASS_MODE = 1,
        PPS_SC_MODE,
        PPS_UNKNOWN_MODE = 100,
+};
+
+enum {
+	IBUS_MASTER_ALLOW_MAX = 0,
+	IBUS_SLAVE_DISABLE_HIGH,
+	IBUS_SLAVE_ENABLE_MIN,
+	IBUS_SLAVE_ENABLE_MAX ,
+	IBUS_CP_IBUS_DEVATION,
+};
+
+enum {
+	PPS_REQUEST_DEFAULT = 0,
+	PPS_REQUEST_MIN_VOLT,
+	PPS_REQUEST_MIN_VOLT_TO_PD,
+	PPS_REQUEST_MAX_VOLT,
+};
+
+static const char *const pps_request_err_name[] = {
+	"REQUEST_DEFAULT",
+	"REQUEST_MIN_VOLT",
+	"REQUEST_MIN_VOLT_TO_PD",
+	"REQUEST_MAX_VOLT",
 };
 
 enum {
@@ -175,6 +215,9 @@ enum {
 	PPS_TEMP_RANGE_NORMAL,
 };
 
+/* Notice: If need add new item which stay in pps status
+   This new item should define after OPLUS_PPS_STATUS_OPEN_MOS
+   and before OPLUS_PPS_STATUS_FFC */
 enum { OPLUS_PPS_STATUS_START = 0,
        OPLUS_PPS_STATUS_OPEN_MOS,
        OPLUS_PPS_STATUS_VOLT_CHANGE,
@@ -235,7 +278,7 @@ enum { PPS_SUPPORT_NOT = 0,
 };
 
 enum { OPLUS_PPS_POWER_CLR = 0,
-       OPLUS_PPS_POWER_THIRD = 0x1E,
+       OPLUS_PPS_POWER_THIRD = 0x21,
        OPLUS_PPS_POWER_V1 = 0x7D,
        OPLUS_PPS_POWER_V2 = 0x96,
        OPLUS_PPS_POWER_V3 = 0xF0,
@@ -307,8 +350,33 @@ typedef enum {
 	PPS_STOP_VOTER_CP_ERROR = (1 << 15),
 	PPS_STOP_VOTER_STARTUP_FAIL = (1 << 16),
 	PPS_STOP_VOTER_FLASH_LED = (1 << 17),
-	PPS_STOP_VOTER_OTHER_ABORMAL = (1 << 31),
+	PPS_STOP_VOTER_VOLT_ADJUST_FAIL = (1 << 18),
+	PPS_STOP_VOTER_OTHER_ABORMAL = (1 << 30),
 } PPS_STOP_VOTER;
+
+static const char *const pps_stop_voter_name[] = {
+	"PPS_STOP_VOTER_NONE",
+	"PPS_STOP_VOTER_FULL",
+	"PPS_STOP_VOTER_BTB_OVER",
+	"PPS_STOP_VOTER_TBATT_OVER",
+	"PPS_STOP_VOTER_RESISTENSE_OVER",
+	"PPS_STOP_VOTER_IBAT_OVER",
+	"PPS_STOP_VOTER_DISCONNECT_OVER",
+	"PPS_STOP_VOTER_CHOOSE_CURVE",
+	"PPS_STOP_VOTER_TIME_OVER",
+	"PPS_STOP_VOTER_PDO_ERROR",
+	"PPS_STOP_VOTER_TYPE_ERROR",
+	"PPS_STOP_VOTER_MMI_TEST",
+	"PPS_STOP_VOTER_USB_TEMP",
+	"PPS_STOP_VOTER_TDIE_OVER",
+	"PPS_STOP_VOTER_TFG_OVER",
+	"PPS_STOP_VOTER_VBATT_DIFF",
+	"PPS_STOP_VOTER_CP_ERROR",
+	"PPS_STOP_VOTER_STARTUP_FAIL",
+	"PPS_STOP_VOTER_FLASH_LED",
+	"PPS_STOP_VOTER_VOLT_ADJUST_FAIL",
+	"PPS_STOP_VOTER_OTHER_ABORMAL",
+};
 
 struct batt_curve {
 	unsigned int target_vbus;
@@ -392,6 +460,7 @@ struct pps_protection_counts {
 	int low_curr_full;
 	int ibat_low;
 	int ibat_high;
+	int ibat_over;
 	int btb_high;
 	int tbatt_over;
 	int tfg_over;
@@ -400,7 +469,8 @@ struct pps_protection_counts {
 	int tdie_over;
 	int tdie_exit;
 	int power_over;
-	int ask_vbus_over;
+	int ask_vbus_min;
+	int ask_vbus_max;
 };
 
 struct pps_switch_limit {
@@ -441,6 +511,10 @@ struct pps_charging_data {
 	int cp_slave_b_vac;
 	int cp_slave_b_vout;
 	int cp_slave_b_tdie;
+
+	int disable_sub_cp_count;
+	int slave_trouble_count;
+	int ibus_trouble_count;
 };
 
 /*pps current*/
@@ -484,6 +558,7 @@ struct oplus_pps_limits {
 	int pps_strategy_soc_num;
 
 	int pps_strategy_normal_current;
+	int pps_strategy_common_chg_current;
 	int pps_strategy_normal_bypass_limit_current;
 	int pps_strategy_batt_high_temp0;
 	int pps_strategy_batt_high_temp1;
@@ -623,12 +698,16 @@ struct oplus_pps_chip {
 
 	char chg_power_info[OPLUS_CHG_TRACK_CURX_INFO_LEN];
 	char err_reason[OPLUS_CHG_TRACK_DEVICE_ERR_NAME_LEN];
+	char cp_err_reason[OPLUS_CHG_TRACK_DEVICE_ERR_NAME_LEN];
 	struct mutex track_upload_lock;
 	struct mutex track_pps_err_lock;
 	u32 debug_force_pps_err;
+	u32 debug_force_pps_volt_err;
 	bool pps_err_uploading;
 	oplus_chg_track_trigger *pps_err_load_trigger;
 	struct delayed_work pps_err_load_trigger_work;
+	struct pd_adapter_info adapter_info;
+	char pd_event_name[PD_EVENT_NAME_LEN];
 };
 
 struct oplus_pps_operations {
@@ -656,6 +735,8 @@ struct oplus_pps_operations {
 	int (*pps_get_cp_master_vout)(void);
 	int (*pps_get_cp_master_tdie)(void);
 	int (*pps_get_cp_vbat)(void);
+	int (*pps_get_cp_master_info)(int type);
+	bool (*pps_cp_master_kick_dog)(void);
 
 	int (*pps_get_cp_slave_vbus)(void);
 	int (*pps_get_cp_slave_ibus)(void);
@@ -663,6 +744,13 @@ struct oplus_pps_operations {
 	int (*pps_get_cp_slave_vac)(void);
 	int (*pps_get_cp_slave_vout)(void);
 	int (*pps_get_cp_slave_tdie)(void);
+	bool (*pps_get_cp_slave_support)(void);
+	bool (*pps_get_cp_slave_enable)(void);
+	bool (*pps_get_cp_slave_status)(void);
+	int (*pps_cp_slave_hardware_init)(void);
+	int (*pps_cp_slave_cfg_mode_init)(int mode);
+	int (*pps_cp_slave_reset)(void);
+	bool (*pps_cp_slave_kick_dog)(void);
 
 	int (*pps_get_cp_slave_b_vbus)(void);
 	int (*pps_get_cp_slave_b_ibus)(void);
@@ -670,6 +758,8 @@ struct oplus_pps_operations {
 	int (*pps_get_cp_slave_b_vac)(void);
 	int (*pps_get_cp_slave_b_vout)(void);
 	int (*pps_get_cp_slave_b_tdie)(void);
+	int (*get_support_type)(void);
+	int (*track_check_wired_charging_break)(int value);
 };
 
 struct oplus_pps_chip *oplus_pps_get_pps_chip(void);
@@ -686,7 +776,9 @@ int oplus_pps_start(int authen);
 void oplus_pps_hardware_init(void);
 void oplus_pps_cp_reset(void);
 void oplus_pps_stop_disconnect(void);
+void oplus_pps_stop_cp_error(void);
 void oplus_pps_stop_usb_temp(void);
+void oplus_pps_stop_mmi(void);
 void oplus_pps_set_vbatt_diff(bool diff);
 int oplus_is_pps_charging(void);
 void oplus_pps_set_power(int pps_ability, int imax, int vmax);
@@ -747,4 +839,10 @@ bool oplus_pps_get_btb_temp_over(void);
 int oplus_pps_check_3rd_support(void);
 void oplus_pps_stop_flash_led(bool on);
 int oplus_pps_support_max_power(void);
+void oplus_pps_stop_volt_adjust_fail(void);
+bool oplus_pps_switch_to_pd(void);
+bool oplus_pps_get_adapter_voltage_status(void);
+int oplus_chg_track_pack_pps_adapter_info(u8 *pps_adapter_info, int lenth);
+bool oplus_support_pps(void);
+void oplus_pps_shutdown(void);
 #endif /*_OPLUS_PPS_H_*/

@@ -7,7 +7,7 @@ gki_support = yes
 endif
 
 subdir-ccflags-y += -I$(srctree)/$(src)
-subdir-ccflags-y += -Werror=parentheses
+subdir-ccflags-y += -Werror=parentheses -Wframe-larger-than=3042
 subdir-ccflags-y += -DOPLUS_CHG_KO_BUILD
 ccflags-$(CONFIG_OPLUS_DYNAMIC_CONFIG_CHARGER) += -I$(srctree)/drivers/power/oplus/config
 
@@ -30,10 +30,17 @@ subdir-ccflags-y += -I$(srctree)/drivers/misc/mediatek/include/mt-plat
 subdir-ccflags-y += -I$(srctree)/drivers/misc/mediatek/include
 subdir-ccflags-y += -I$(srctree)/drivers/misc/mediatek/usb20/
 subdir-ccflags-y += -I$(srctree)/drivers/power/supply
+else ifeq ($(CONFIG_OPLUS_CHARGER_MTK6769R),y)
+subdir-ccflags-y += -Werror -I$(srctree)/drivers/misc/mediatek/pmic/include
 endif
 
 ifeq ($(CONFIG_OPLUS_CHARGER_MTK6835T),y)
-subdir-ccflags-y += -I$(srctree)/drivers/misc/mediatek/typec/tcpc/inc
+ifndef CONFIG_OPLUS_PD_EXT_SUPPORT
+subdir-ccflags-y+= -I$(srctree)/drivers/misc/mediatek/typec/tcpc/inc
+else
+subdir-ccflags-y += -I$(srctree)/drivers/power/oplus/pd_ext/inc
+endif
+
 subdir-ccflags-y += -I$(srctree)/drivers/misc/mediatek/include
 subdir-ccflags-y += -I$(srctree)/drivers/misc/mediatek/include/mt-plat
 subdir-ccflags-y += -I$(srctree)/drivers/usb/mtu3
@@ -47,8 +54,42 @@ subdir-ccflags-y += -I$(srctree)/drivers/misc/mediatek/include/mt-plat
 subdir-ccflags-y += -I$(srctree)/drivers/misc/mediatek/include
 endif
 
+ifeq (y, $(filter y, $(CONFIG_OPLUS_CHARGER_MTK6877) $(CONFIG_OPLUS_CHARGER_MTK6833)))
+ccflags-y += -I$(srctree)/../kernel_device_modules-6.6/drivers/misc/mediatek/typec/tcpc/inc
+ccflags-y += -I$(srctree)/../kernel_device_modules-6.6/drivers/misc/mediatek/include
+ccflags-y += -I$(srctree)/../kernel_device_modules-6.6/drivers/misc/mediatek/include/mt-plat
+ccflags-y += -I$(srctree)/../kernel_device_modules-6.6/drivers/misc/mediatek/include/mt-plat/v1
+ccflags-y += -I$(srctree)/../kernel_device_modules-6.6/drivers/power/supply
+ccflags-y += -I$(srctree)/include
+endif
+
+ifeq ($(CONFIG_OPLUS_CHARGER_MTK6769R),y)
+ifndef CONFIG_OPLUS_PD_EXT_SUPPORT
+ccflags-y += -I$(srctree)/../kernel_device_modules-6.6/drivers/misc/mediatek/typec/tcpc/inc
+else
+ccflags-y += -I$(srctree)/drivers/power/oplus/pd_ext/inc
+endif
+ccflags-y += -I$(srctree)/../kernel_device_modules-6.6/drivers/misc/mediatek/include
+ccflags-y += -I$(srctree)/../kernel_device_modules-6.6/drivers/misc/mediatek/include/mt-plat
+ccflags-y += -I$(srctree)/../kernel_device_modules-6.6/drivers/misc/mediatek/include/mt-plat/v1
+ccflags-y += -I$(srctree)/../kernel_device_modules-6.6/drivers/power/supply
+ccflags-y += -I$(srctree)/include
+endif
+
 ifeq ($(CONFIG_OPLUS_CHARGER_MTK),y)
+ifndef CONFIG_OPLUS_PD_EXT_SUPPORT
 ccflags-y += -I$(srctree)/drivers/misc/mediatek/typec/tcpc/inc
+else
+ccflags-y += -I$(srctree)/drivers/power/oplus/pd_ext/inc
+endif
+endif
+
+ifeq ($(CONFIG_OPLUS_AUDIO_SWITCH_GLINK),y)
+ifndef CONFIG_OPLUS_PD_EXT_SUPPORT
+ccflags-y += -I$(srctree)/drivers/misc/mediatek/typec/tcpc/inc
+else
+ccflags-y += -I$(srctree)/drivers/power/oplus/pd_ext/inc
+endif
 oplus_chg-y += oplus_chg_audio_switch.o
 endif
 
@@ -66,10 +107,14 @@ oplus_chg-y += oplus_configfs.o
 oplus_chg-y += oplus_chg_ops_manager.o
 oplus_chg-y += oplus_region_check.o
 oplus_chg-y += oplus_pps_ops_manager.o
+oplus_chg-y += oplus_chg_audio_switch.o
 oplus_chg-y += adapter_ic/oplus_stm.o
 oplus_chg-y += charger_ic/oplus_short_ic.o
 oplus_chg-y += gauge_ic/oplus_bq27541.o
+oplus_chg-y += gauge_ic/oplus_bqfs.o
 oplus_chg-y += gauge_ic/oplus_sh366002.o
+oplus_chg-y += gauge_ic/oplus_nfg1000a.o
+oplus_chg-y += gauge_ic/oplus_cw2217b.o
 ifeq ($(CONFIG_OPLUS_SM6375R_CHARGER),y)
 oplus_chg-y += gauge_ic/oplus_sm5602.o
 endif
@@ -113,6 +158,7 @@ oplus_chg-y += ufcs/ufcs_ic/oplus_nu2112a_slave.o
 oplus_chg-y += oplus_ufcs.o
 oplus_chg-y += oplus_chg_exception.o
 oplus_chg-y += bob_ic/oplus_tps6128xd.o
+
 oplus_chg-$(CONFIG_OPLUS_DYNAMIC_CONFIG_CHARGER) += op_wlchg_v2/oplus_chg_wls_cfg.o
 
 oplus_chg-$(CONFIG_OPLUS_SM8350_CHARGER) += charger_ic/oplus_battery_sm8350.o charger_ic/oplus_da9313.o charger_ic/oplus_mp2650.o voocphy/oplus_adsp_voocphy.o voocphy/oplus_voocphy.o wireless_ic/oplus_p922x.o
@@ -166,7 +212,21 @@ oplus_chg-$(CONFIG_OPLUS_SM6375R_CHARGER) += \
 		charger_ic/oplus_mp2650.o \
 		charger_ic/rt_pd_manager.o \
 		charger_ic/oplus_usbtemp.o \
-		charger_ic/oplus_sc6607_charger.o
+		charger_ic/oplus_sc6607_charger.o \
+		ufcs/ufcs_ic/oplus_sc6607.o
+oplus_chg-$(CONFIG_OPLUS_SM6375_KRN6P1_CHARGER) += \
+		voocphy/oplus_voocphy.o \
+		charger_ic/oplus_sy6974b.o \
+		charger_ic/oplus_sgm7220.o \
+		charger_ic/oplus_sy6970.o \
+		charger_ic/oplus_sgm41511.o \
+		charger_ic/oplus_sgm41512.o \
+		charger_ic/oplus_discrete_charger.o \
+		charger_ic/oplus_mp2650.o \
+		charger_ic/rt_pd_manager.o \
+		charger_ic/oplus_usbtemp.o \
+		charger_ic/oplus_sc6607_charger.o \
+		ufcs/ufcs_ic/oplus_sc6607.o
 ifeq ($(OPLUS_VND_ENV_SEPARATE_CHG_MUSE),yes)
 ccflags-y += -DOPLUS_CHG_SEPARATE_MUSE
 oplus_chg-$(CONFIG_OPLUS_SM6115R_CHARGER) += \
@@ -188,7 +248,8 @@ oplus_chg-$(CONFIG_OPLUS_SM6115R_CHARGER) += \
 		charger_ic/oplus_mp2650.o \
 		charger_ic/rt_pd_manager.o \
 		charger_ic/oplus_usbtemp.o \
-		charger_ic/oplus_sc6607_charger.o
+		charger_ic/oplus_sc6607_charger.o \
+		ufcs/ufcs_ic/oplus_sc6607.o
 endif
 oplus_chg-$(CONFIG_OPLUS_CHARGER_MTK6983S) += \
 		charger_ic/oplus_mp2650.o \
@@ -239,14 +300,18 @@ oplus_chg-$(CONFIG_OPLUS_CHARGER_MTK6789S) += \
 		voocphy/oplus_voocphy.o \
 		charger_ic/oplus_battery_mtk6789S.o \
 		charger_ic/oplus_bq2589x_gki.o \
-		charger_ic/oplus_sgm41512.o
+		charger_ic/oplus_sgm41512.o \
+		charger_ic/oplus_sgm41542.o \
+		charger_ic/oplus_sc6607_charger.o
 oplus_chg-$(CONFIG_OPLUS_CHARGER_MTK6835T) += \
 		charger_ic/oplus_usbtemp.o \
 		voocphy/oplus_voocphy.o \
 		charger_ic/oplus_battery_mtk6835T.o \
 		charger_ic/oplus_bq2589x_gki.o \
 		charger_ic/oplus_sgm41542.o \
-		charger_ic/oplus_sy6974b.o
+		charger_ic/oplus_sy6974b.o \
+		charger_ic/oplus_sc6607_charger.o \
+		ufcs/ufcs_ic/oplus_sc6607.o
 oplus_chg-$(CONFIG_OPLUS_CHARGER_MTK6985S) += \
 		charger_ic/oplus_mp2650.o \
 		charger_ic/oplus_usbtemp.o \
@@ -261,6 +326,24 @@ oplus_chg-$(CONFIG_OPLUS_CHARGER_MTK6985S) += \
 		op_wlchg_v2/oplus_chg_wls.o \
 		voocphy/oplus_voocphy.o \
 		charger_ic/oplus_battery_mtk6985S.o
+oplus_chg-$(CONFIG_OPLUS_CHARGER_MTK6877) += \
+		voocphy/oplus_voocphy.o \
+		charger_ic/oplus_mp2650.o \
+		charger_ic/oplus_charge_pump.o \
+		charger_ic/oplus_battery_mtk6877V.o \
+		charger_ic/oplus_usbtemp.o
+oplus_chg-$(CONFIG_OPLUS_CHARGER_MTK6833) += \
+		voocphy/oplus_voocphy.o \
+		charger_ic/oplus_mp2650.o \
+		charger_ic/oplus_charge_pump.o \
+		charger_ic/oplus_battery_mtk6833V.o \
+		charger_ic/oplus_usbtemp.o
+oplus_chg-$(CONFIG_OPLUS_CHARGER_MTK6769R) += \
+		voocphy/oplus_voocphy.o \
+		charger_ic/oplus_sc6607_charger.o \
+		charger_ic/oplus_sgm41512_charger.o \
+		charger_ic/oplus_battery_mtk6769V.o \
+		charger_ic/oplus_usbtemp.o
 
 ccflags-y += -DOPLUS_CHG_REG_DUMP_ENABLE
 
@@ -298,6 +381,10 @@ endif
 ifeq ($(CONFIG_OPLUS_CHARGER_MTK6765S),y)
 subdir-ccflags-y += -I$(srctree)/drivers/misc/mediatek/include
 endif
+ifeq ($(CONFIG_OPLUS_CHARGER_MTK6769R),y)
+subdir-ccflags-y += -Werror -I$(srctree)/drivers/misc/mediatek/pmic/include
+endif
+
 ifneq ($(CONFIG_OPLUS_CHARGER_MTK),y)
 ifeq ($(BRAND_SHOW_FLAG),oneplus)
 obj-y      += op_wlchg/
@@ -316,10 +403,24 @@ obj-y	   += oplus_pps_ops_manager.o
 obj-y      += voocphy/
 
 ifeq ($(CONFIG_OPLUS_CHARGER_MTK),y)
-ccflags-y += -I$(srctree)/drivers/misc/mediatek/typec/tcpc/inc
+ifndef CONFIG_OPLUS_PD_EXT_SUPPORT
+ccflags-y += -I$(srctree)/drivers/misc/mediatek/typec/tcpc/inc/
+else
+ccflags-y += -I$(srctree)/drivers/power/oplus/pd_ext/inc/
+endif
+endif
+
+ifeq ($(CONFIG_OPLUS_AUDIO_SWITCH_GLINK),y)
+ifndef CONFIG_OPLUS_PD_EXT_SUPPORT
+ccflags-y += -I$(srctree)/drivers/misc/mediatek/typec/tcpc/inc/
+else
+ccflags-y += -I$(srctree)/drivers/power/oplus/pd_ext/inc/
+endif
 obj-y   += oplus_chg_audio_switch.o
 endif
+
 #obj-y   += oplus_voocphy.o
+obj-y   += oplus_chg_audio_switch.o
 obj-y	+= oplus_charger.o
 obj-y	+= oplus_battery_log.o
 obj-y	+= oplus_gauge.o

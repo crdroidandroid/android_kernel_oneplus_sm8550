@@ -12,6 +12,8 @@ ufcs_class-y += ufcs_pe_test.o
 ufcs_class-y += ufcs_sha256.o
 ufcs_class-y += ufcs_timer.o
 
+ufcs_class-$(CONFIG_OPLUS_UFCS_CLASS_DEBUG) += ufcs_debug.o
+
 ccflags-y += -I$(srctree)/$(src)/include
 ccflags-y += -I$(srctree)/$(src)/include/internal
 

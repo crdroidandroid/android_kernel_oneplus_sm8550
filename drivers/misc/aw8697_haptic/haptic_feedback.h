@@ -27,7 +27,7 @@
 //#ifdef CONFIG_OPLUS_CHARGER_MTK    /* mtk platform */
 #include <linux/device.h>
 #include <linux/version.h>
-#if (LINUX_VERSION_CODE > KERNEL_VERSION(5, 10, 0))
+#if (LINUX_VERSION_CODE > KERNEL_VERSION(5, 12, 0))
 #ifdef __KERNEL__
 #ifndef _STRUCT_TIMESPEC
 #define _STRUCT_TIMESPEC

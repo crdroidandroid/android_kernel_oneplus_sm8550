@@ -178,8 +178,8 @@ enum cable_dir_type {
 #if 0
 enum cc_modes_type {
 	MODE_DEFAULT = 0,
-	MODE_UFP,
-	MODE_DFP,
+	MODE_SINK,
+	MODE_SRC,
 	MODE_DRP
 };
 #endif
@@ -527,9 +527,9 @@ static ssize_t mode_select_store(struct device *dev,
 	if (ret != 0)
 		return -EINVAL;
 
-	if (mode == MODE_DFP)
+	if (mode == MODE_SRC)
 		value = SET_MODE_SELECT_SRC;
-	else if (mode == MODE_UFP)
+	else if (mode == MODE_SINK)
 		value = SET_MODE_SELECT_SNK;
 	else if (mode == MODE_DRP)
 		value = SET_MODE_SELECT_DRP;
@@ -906,7 +906,7 @@ static void oplus_typec_sink_removal(void)
 	g_oplus_chip->otg_online = false;
 	oplus_chg_wake_update_work();
 	if(!oplus_get_otg_switch_status()) {
-		oplus_sgm7220_set_mode(MODE_UFP);
+		oplus_sgm7220_set_mode(MODE_SINK);
 	}
 	pr_debug("wakeup [%s] done!!!\n", __func__);
 }
@@ -1099,7 +1099,7 @@ static void process_interrupt_register(struct sgm7220_info *info)
 	}
 	if (info->probe) {
 		if (info->type_c_param.attach_state != CABLE_STATE_AS_DFP) {
-			oplus_sgm7220_set_mode(MODE_UFP);
+			oplus_sgm7220_set_mode(MODE_SINK);
 			pr_debug("%s not found host devices and set to ufp mode]\n", __func__);
 		} else {
 			pr_debug("%s found host devices and keep drp mode]\n", __func__);
@@ -1325,9 +1325,9 @@ int oplus_sgm7220_set_mode(int mode)
 		return -EINVAL;
 	}
 
-	if (mode == MODE_DFP)
+	if (mode == MODE_SRC)
 		value = SET_MODE_SELECT_SRC;
-	else if (mode == MODE_UFP)
+	else if (mode == MODE_SINK)
 		value = SET_MODE_SELECT_SNK;
 	else if (mode == MODE_DRP)
 		value = SET_MODE_SELECT_DRP;
@@ -1540,7 +1540,11 @@ err_pinctrl:
 	return ret;
 }
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0))
+static void sgm7220_remove(struct i2c_client *client)
+#else
 static int sgm7220_remove(struct i2c_client *client)
+#endif
 {
 	struct sgm7220_info *info = i2c_get_clientdata(client);
 
@@ -1554,7 +1558,9 @@ static int sgm7220_remove(struct i2c_client *client)
 	i2c_set_clientdata(client, NULL);
 
 	kfree(info);
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0))
 	return 0;
+#endif
 }
 
 static const struct of_device_id sgm7220_dt_match[] = {
@@ -1566,9 +1572,8 @@ static const struct of_device_id sgm7220_dt_match[] = {
 MODULE_DEVICE_TABLE(of, sgm7220_dt_match);
 
 static const struct i2c_device_id sgm7220_id_table[] = {
-	{
-		.name = "sgm7220",
-	},
+	{"sgm7220", 0},
+	{},
 };
 
 static void sgm7220_shutdown(struct i2c_client *client)

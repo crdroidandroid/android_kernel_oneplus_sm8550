@@ -38,7 +38,6 @@
 
 #ifdef OPLUS_FEATURE_CHG_BASIC
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 19, 0))
-#include <soc/oplus/oplus_project.h>
 #include <mt-plat/charger_class.h>
 #include <mt-plat/charger_type.h>
 #else
@@ -46,7 +45,6 @@
 #include <mt-plat/v1/charger_class.h>
 #include <mt-plat/v1/charger_type.h>
 #endif
-extern unsigned int is_project(int project );
 #endif /*OPLUS_FEATURE_CHG_BASIC*/
 
 extern void set_charger_ic(int sel);
@@ -1267,18 +1265,6 @@ static int rt9471_detach_irq_handler(struct rt9471_chip *chip)
 {
 	dev_info(chip->dev, "%s\n", __func__);
 //#ifndef CONFIG_TCPC_CLASS
-#ifdef OPLUS_FEATURE_CHG_BASIC
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 19, 0))
-	if(is_project(OPLUS_19741)) {
-#else
-	if(is_project(OPLUS_19741)) {
-#endif
-		mutex_lock(&chip->bc12_lock);
-		atomic_set(&chip->vbus_gd, rt9471_is_vbusgd(chip));
-		rt9471_bc12_postprocess(chip);
-		mutex_unlock(&chip->bc12_lock);
-	}
-#endif
 //#endif
 	return 0;
 }
@@ -1367,18 +1353,6 @@ static int rt9471_vbus_gd_irq_handler(struct rt9471_chip *chip)
 {
 	dev_info(chip->dev, "%s\n", __func__);
 //#ifndef CONFIG_TCPC_CLASS
-#ifdef OPLUS_FEATURE_CHG_BASIC
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 19, 0))
-	if(is_project(OPLUS_19741)) {
-#else
-	if(is_project(OPLUS_19741)) {
-#endif
-		mutex_lock(&chip->bc12_lock);
-		atomic_set(&chip->vbus_gd, rt9471_is_vbusgd(chip));
-		rt9471_bc12_preprocess(chip);
-		mutex_unlock(&chip->bc12_lock);
-	}
-#endif
 //#endif
 	return 0;
 }
@@ -1970,16 +1944,6 @@ static int rt9471_init_setting(struct rt9471_chip *chip)
 	if (ret < 0)
 		dev_notice(chip->dev, "%s set ovp fail(%d)\n", __func__, ret);
 
-#ifdef OPLUS_FEATURE_CHG_BASIC
-	if(is_project(19741)){
-		ret = rt9471_clr_bit(chip, RT9471_REG_TOP, 0x80);
-		if (ret < 0) {
-			dev_notice(chip->dev, "%s: disable system reset fail\n",
-				__func__);
-		}
-	}
-#endif /*OPLUS_FEATURE_CHG_BASIC*/
-
 	return 0;
 }
 
@@ -2411,24 +2375,7 @@ static int rt9471_set_boost_current_limit(struct charger_device *chg_dev,
 static int rt9471_enable_chg_type_det(struct charger_device *chg_dev, bool en)
 {
 	int ret = 0;
-#ifdef CONFIG_TCPC_CLASS
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 19, 0))
-	if(is_project(OPLUS_19747)) {
-#else
-	if(is_project(OPLUS_19747)) {
-#endif
-	struct rt9471_chip *chip = dev_get_drvdata(&chg_dev->dev);
 
-	dev_info(chip->dev, "%s en = %d\n", __func__, en);
-
-	mutex_lock(&chip->bc12_lock);
-	atomic_set(&chip->vbus_gd, en);
-	ret = (en ? rt9471_bc12_preprocess : rt9471_bc12_postprocess)(chip);
-	mutex_unlock(&chip->bc12_lock);
-	if (ret < 0)
-		dev_notice(chip->dev, "%s en bc12 fail(%d)\n", __func__, ret);
-}
-#endif /* CONFIG_TCPC_CLASS */
 	return ret;
 }
 
@@ -3133,16 +3080,8 @@ static int rt9471_probe(struct i2c_client *client,
 		goto err_create_file;
 	}
 #ifdef OPLUS_FEATURE_CHG_BASIC
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 19, 0))
-	if(is_project(OPLUS_19741)) {
-#else
-	if(is_project(OPLUS_19741)) {
-#endif
-		if (strcmp(chip->desc->chg_name, "primary_chg") == 0)
-			schedule_work(&chip->init_work);
-	} else {
-		__rt9471_dump_registers(chip);
-	}
+	__rt9471_dump_registers(chip);
+
 #else
 #ifndef CONFIG_TCPC_CLASS
 	if (strcmp(chip->desc->chg_name, "primary_chg") == 0)

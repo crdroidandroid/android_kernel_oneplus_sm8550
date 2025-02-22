@@ -17,6 +17,7 @@ enum ufcs_topic_item {
 	UFCS_ITEM_BCC_MIN_CURR,
 	UFCS_ITEM_BCC_EXIT_CURR,
 	UFCS_ITEM_BCC_TEMP_RANGE,
+	UFCS_ITEM_SLOW_CHG_BATT_LIMIT,
 };
 
 enum ufcs_fastchg_type {
@@ -29,11 +30,18 @@ enum ufcs_fastchg_type {
 };
 
 enum ufcs_power_type {
-	UFCS_POWER_TYPE_UNKOWN,
-	UFCS_POWER_TYPE_THIRD = 18,
-	UFCS_POWER_TYPE_V1 = 33,
-	UFCS_POWER_TYPE_V2 = 65,
-	UFCS_POWER_TYPE_OTHER = 240,
+	UFCS_POWER_TYPE_UNKOWN = 18,
+	UFCS_POWER_TYPE_V0 = 44,
+	UFCS_POWER_TYPE_V1 = 45,
+	UFCS_POWER_TYPE_V2 = 55,
+	UFCS_POWER_TYPE_V3 = 67,
+	UFCS_POWER_TYPE_V4 = 80,
+	UFCS_POWER_TYPE_V5 = 88,
+	UFCS_POWER_TYPE_V6 = 100,
+	UFCS_POWER_TYPE_V7 = 120,
+	UFCS_POWER_TYPE_V8 = 150,
+	UFCS_POWER_TYPE_V9 = 240,
+	UFCS_POWER_TYPE_MAX = 999,
 };
 
 enum ufcs_curr_table_type {
@@ -60,8 +68,9 @@ enum ufcs_user_err_type {
 	UFCS_ERR_MAX,
 };
 
-int oplus_ufcs_current_to_level(struct oplus_mms *topic, int curr);
+int oplus_ufcs_current_to_level(struct oplus_mms *topic, int ibus_curr);
 enum fastchg_protocol_type oplus_ufcs_adapter_id_to_protocol_type(u32 id);
-int oplus_ufcs_adapter_id_to_power(u32 id);
-
+int oplus_ufcs_get_ufcs_power(struct oplus_mms *topic);
+int oplus_ufcs_get_curve_ibus(struct oplus_mms *mms);
+int oplus_ufcs_level_to_current(struct oplus_mms *mms, int cool_down);
 #endif /* __OPLUS_CHG_UFCS_H__ */

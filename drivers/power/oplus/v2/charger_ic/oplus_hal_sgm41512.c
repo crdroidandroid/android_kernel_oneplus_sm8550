@@ -822,7 +822,7 @@ static int sgm41512_disable_vbus(struct oplus_chg_ic_dev *ic_dev, bool en,
 }
 
 static void sgm41512_wired_subs_callback(struct mms_subscribe *subs,
-					 enum mms_msg_type type, u32 id)
+					 enum mms_msg_type type, u32 id, bool sync)
 {
 	struct sgm41512_chip *chip = subs->priv_data;
 

@@ -256,7 +256,7 @@
             "desc": {
                 "zh": "设置voocphy BCC电流"
             },
-            "auto_debug_code": true,
+            "auto_debug_code": false,
             "parameter_list": ["int *"],
             "parameter_desc": [
                 {
@@ -305,7 +305,7 @@
             "parameter_desc": [
                 {
                     "range": "0-1",
-                    "type": "in",
+                    "type": "out",
                     "desc": {
                         "zh": "1: 使能, 0: 关闭"
                     }
@@ -345,8 +345,40 @@
                 "write": false,
                 "overwrite": false
             }
+        },
+        {
+            "lable": "OPLUS_IC_FUNC_VOOCPHY_GET_FRAME_HEAD",
+            "desc": {
+                "zh": "获取快充帧头信息"
+            },
+            "auto_debug_code": true,
+            "parameter_list": ["int *"],
+            "parameter_desc": [
+                {
+                    "range": "0-2",
+                    "type": "out",
+                    "desc": {
+                        "zh": "0:VOOC2.0 1:VOOC3.0 2:SVOOC"
+                    }
+                }
+            ],
+            "vict": {
+                "read": {
+                    "cmd": "vict -f {id} -G vic-*",
+                    "desc": {
+                        "zh": "返回快充帧头信息"
+                    }
+                },
+                "write": false,
+                "overwrite": {
+                    "cmd": "vict -f {id} -O val vic-*",
+                    "desc": {
+                        "zh": "-O后面跟需要覆盖的帧头信息,0:VOOC2.0 1:VOOC3.0 2:SVOOC"
+                    }
+                }
+            }
         }
     ],
 
-    "version": "V3.2:16:3b3ebe5230e42ef6c5dc2db3e278857c51b20e66796d9eb78357f1bb48a3066a"
+    "version": "V3.3:17:2498c325612c5e7fe05a81d386cd1133f1698669f3a96a32c390d8753959ba8e"
 }

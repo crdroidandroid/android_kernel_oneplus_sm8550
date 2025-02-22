@@ -19,8 +19,15 @@ enum ufcs_notify_state {
 	UFCS_NOTIFY_VOL_ACC_TEST_MODE_CHANGED,
 	UFCS_NOTIFY_ERR_FLAG,
 	UFCS_NOTIFY_FIFO_OVERFLOW,
+	UFCS_NOTIFY_RESTART,
 };
 
+enum ufcs_notify_state_value {
+	UFCS_NOTIFY_EXIT_BY_CRASH = 0,
+	UFCS_NOTIFY_RESTART_FROM_CRASH,
+	UFCS_NOTIFY_FGRESET_EXIT_COMM,
+	UFCS_NOTIFY_FGRESET_RESTART_COMM,
+};
 #if IS_ENABLED(CONFIG_OPLUS_UFCS_CLASS)
 int ufcs_reg_event_notifier(struct notifier_block *nb);
 void ufcs_unreg_event_notifier(struct notifier_block *nb);

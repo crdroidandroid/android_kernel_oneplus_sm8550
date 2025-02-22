@@ -11,6 +11,7 @@
 #include <oplus_battery_log.h>
 #include <oplus_chg.h>
 #include <oplus_chg_module.h>
+#include <oplus_mms_gauge.h>
 
 static struct battery_log_dev *g_battery_log_dev;
 static struct battery_log_ops *g_ops_register_fail[BATTERY_LOG_DEVICE_ID_END];
@@ -163,7 +164,7 @@ int battery_log_ops_register(struct battery_log_ops *ops)
 
 static int oplus_battery_log_parse_dt(struct battery_log_dev *l_dev)
 {
-	struct device_node *node = l_dev->dev->of_node;
+	struct device_node *node = oplus_get_node_by_type(l_dev->dev->of_node);
 
 	l_dev->battery_log_support =
 			of_property_read_bool(node, "oplus,battery_log_support");

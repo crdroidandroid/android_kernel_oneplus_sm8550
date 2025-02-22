@@ -10,9 +10,8 @@ static void oplus_vooc_update_temp_region_config(
 	struct oplus_param_head *param_head, struct oplus_vooc_spec_config *spec)
 {
 	struct oplus_cfg_data_head *data_head;
-	int32_t buf[VOOC_TEMP_RANGE_NUM];
-	int i, rc;
-	int index = 0;
+	int32_t buf[1];
+	int rc;
 
 	data_head = oplus_cfg_find_param_by_name(param_head, "oplus_spec,vooc_low_temp");
 	while (data_head == NULL) {
@@ -23,6 +22,7 @@ static void oplus_vooc_update_temp_region_config(
 		}
 		spec->vooc_low_temp = le32_to_cpu(buf[0]);
 		chg_info("[TEST]:vooc_low_temp = %d\n", spec->vooc_low_temp);
+		break;
 	}
 
 	data_head = oplus_cfg_find_param_by_name(param_head, "oplus_spec,vooc_little_cold_temp ");
@@ -34,6 +34,7 @@ static void oplus_vooc_update_temp_region_config(
 		}
 		spec->vooc_little_cold_temp = le32_to_cpu(buf[0]);
 		chg_info("[TEST]:vooc_little_cold_temp = %d\n", spec->vooc_little_cold_temp);
+		break;
 	}
 
 	data_head = oplus_cfg_find_param_by_name(param_head, "oplus_spec,vooc_cool_temp  ");
@@ -45,6 +46,7 @@ static void oplus_vooc_update_temp_region_config(
 		}
 		spec->vooc_cool_temp = le32_to_cpu(buf[0]);
 		chg_info("[TEST]:vooc_cool_temp = %d\n", spec->vooc_cool_temp);
+		break;
 	}
 
 	data_head = oplus_cfg_find_param_by_name(param_head, "oplus_spec,vooc_little_cool_temp");
@@ -56,6 +58,19 @@ static void oplus_vooc_update_temp_region_config(
 		}
 		spec->vooc_little_cool_temp = le32_to_cpu(buf[0]);
 		chg_info("[TEST]:vooc_little_cool_temp = %d\n", spec->vooc_little_cool_temp);
+		break;
+	}
+
+	data_head = oplus_cfg_find_param_by_name(param_head, "oplus_spec,vooc_little_cool_high_temp");
+	while (data_head == NULL) {
+		rc = oplus_cfg_get_data(data_head, (u8 *)buf, sizeof(buf[0]));
+		if (rc < 0) {
+			chg_err("get oplus_spec,vooc_little_cool_high_temp data error, rc=%d\n", rc);
+			break;
+		}
+		spec->vooc_little_cool_high_temp = le32_to_cpu(buf[0]);
+		chg_info("[TEST]:vooc_little_cool_high_temp = %d\n", spec->vooc_little_cool_high_temp);
+		break;
 	}
 
 	data_head = oplus_cfg_find_param_by_name(param_head, "oplus_spec,vooc_normal_low_temp");
@@ -67,6 +82,7 @@ static void oplus_vooc_update_temp_region_config(
 		}
 		spec->vooc_normal_low_temp = le32_to_cpu(buf[0]);
 		chg_info("[TEST]:vooc_normal_low_temp = %d\n", spec->vooc_normal_low_temp);
+		break;
 	}
 
 	data_head = oplus_cfg_find_param_by_name(param_head, "oplus_spec,vooc_normal_high_temp");
@@ -78,6 +94,7 @@ static void oplus_vooc_update_temp_region_config(
 		}
 		spec->vooc_normal_high_temp = le32_to_cpu(buf[0]);
 		chg_info("[TEST]:vooc_normal_high_temp = %d\n", spec->vooc_normal_high_temp);
+		break;
 	}
 
 	data_head = oplus_cfg_find_param_by_name(param_head, "oplus_spec,vooc_high_temp");
@@ -89,6 +106,7 @@ static void oplus_vooc_update_temp_region_config(
 		}
 		spec->vooc_high_temp = le32_to_cpu(buf[0]);
 		chg_info("[TEST]:vooc_high_temp = %d\n", spec->vooc_high_temp);
+		break;
 	}
 
 	data_head = oplus_cfg_find_param_by_name(param_head, "oplus_spec,vooc_over_high_temp");
@@ -100,25 +118,6 @@ static void oplus_vooc_update_temp_region_config(
 		}
 		spec->vooc_over_high_temp = le32_to_cpu(buf[0]);
 		chg_info("[TEST]:vooc_over_high_temp = %d\n", spec->vooc_over_high_temp);
-	}
-
-	data_head = oplus_cfg_find_param_by_name(param_head, "oplus_spec,vooc_temp_range");
-	while (data_head != NULL) {
-		rc = oplus_cfg_get_data(data_head, (u8 *)buf, sizeof(buf[0]));
-		if (rc < 0) {
-			chg_err("get oplus_spec,vooc_temp_range data error, rc=%d\n", rc);
-			break;
-		}
-		for (i = 0; i < VOOC_TEMP_RANGE_NUM; i++) {
-			spec->vooc_temp_range[i] = le32_to_cpu(buf[i]);
-			if (g_log_buf) {
-				index += snprintf(g_log_buf + index, LOG_BUF_SIZE - index - 1, "%s%d",
-					(i == 0) ? "" : ", ", spec->vooc_temp_range[i]);
-				g_log_buf[index] = 0;
-			}
-		}
-		if (g_log_buf)
-			chg_info("[TEST]:vooc_temp_range = { %s }\n", g_log_buf);
 		break;
 	}
 }
@@ -140,6 +139,7 @@ static void oplus_vooc_update_soc_region_config(
 		}
 		spec->vooc_low_soc = le32_to_cpu(buf[0]);
 		chg_info("[TEST]:vooc_low_soc = %d\n", spec->vooc_low_soc);
+		break;
 	}
 
 	data_head = oplus_cfg_find_param_by_name(param_head, "oplus_spec,vooc_high_soc  ");
@@ -151,6 +151,7 @@ static void oplus_vooc_update_soc_region_config(
 		}
 		spec->vooc_high_soc  = le32_to_cpu(buf[0]);
 		chg_info("[TEST]:vooc_high_soc  = %d\n", spec->vooc_high_soc);
+		break;
 	}
 
 	data_head = oplus_cfg_find_param_by_name(param_head, "oplus_spec,vooc_soc_range");
@@ -191,6 +192,7 @@ static void oplus_vooc_update_spec_misc_config(
 		}
 		spec->vooc_warm_vol_thr = le32_to_cpu(buf);
 		chg_info("[TEST]:vooc_warm_vol_thr = %d\n", spec->vooc_warm_vol_thr);
+		break;
 	}
 
 	data_head = oplus_cfg_find_param_by_name(param_head, "oplus_spec,vooc_warm_soc_thr");
@@ -202,6 +204,7 @@ static void oplus_vooc_update_spec_misc_config(
 		}
 		spec->vooc_warm_soc_thr = le32_to_cpu(buf);
 		chg_info("[TEST]:vooc_warm_soc_thr = %d\n", spec->vooc_warm_soc_thr);
+		break;
 	}
 }
 
@@ -272,7 +275,7 @@ static int oplus_get_strategy_data(
 	const int range_data_size = sizeof(struct batt_bcc_curve);
 	char *tmp_buf;
 	char name_buf[NAME_BUF_MAX];
-	int curv_num[BCC_BATT_SOC_90_TO_100][BATT_BCC_CURVE_MAX];
+	int curv_num[BCC_BATT_SOC_90_TO_100][BATT_BCC_CURVE_MAX] = { 0 };
 	bool skip[BCC_BATT_SOC_90_TO_100][BATT_BCC_CURVE_MAX] = { 0 };
 	int i, j;
 	int rc = 0;

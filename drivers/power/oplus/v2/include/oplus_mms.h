@@ -31,6 +31,10 @@ enum oplus_mms_type {
 	OPLUS_MMS_TYPE_CPA,
 	OPLUS_MMS_TYPE_UFCS,
 	OPLUS_MMS_TYPE_PPS,
+	OPLUS_MMS_TYPE_BATT_BAL,
+	OPLUS_MMS_TYPE_LEVEL_SHIFT,
+	OPLUS_MMS_TYPE_RETENTION,
+	OPLUS_MMS_TYPE_PLC,
 };
 
 enum mms_msg_type {
@@ -83,10 +87,9 @@ struct mms_msg {
 	enum mms_msg_prio prio;
 	u32 item_id;
 	struct list_head list;
-	struct completion ack;
 	enum mms_msg_payload payload;
 	bool sync;
-	u8 buf[0];
+	u8 buf[];
 };
 
 struct mms_subscribe {
@@ -95,7 +98,8 @@ struct mms_subscribe {
 	void *priv_data;
 	struct list_head list;
 	struct list_head callback_list;
-	void (*callback)(struct mms_subscribe *, enum mms_msg_type, u32);
+	struct list_head callback_list_sync;
+	void (*callback)(struct mms_subscribe *, enum mms_msg_type, u32, bool sync);
 };
 
 struct oplus_mms_config {
@@ -119,6 +123,7 @@ struct oplus_mms_desc {
 	int update_items_num;
 	int update_interval;
 	void (*update)(struct oplus_mms *, bool publish);
+	void (*set_update_mode)(struct oplus_mms *, bool mode);
 };
 
 struct oplus_mms {
@@ -129,6 +134,7 @@ struct oplus_mms {
 	struct list_head msg_list;
 	spinlock_t subscribe_lock;
 	struct mutex msg_lock;
+	struct mutex sync_msg_lock;
 	struct delayed_work update_work;
 	struct delayed_work msg_work;
 
@@ -140,6 +146,7 @@ struct oplus_mms {
 	bool initialized;
 	bool removing;
 	atomic_t use_cnt;
+	bool force_update;
 
 #ifdef CONFIG_OPLUS_CHG_MMS_DEBUG
 	u32 debug_item_id;
@@ -179,7 +186,7 @@ int oplus_mms_analysis_ic_err_msg(char *buf, size_t buf_size, int *name_index,
 				  int *type, int *sub_type, int *msg_index);
 struct mms_subscribe *oplus_mms_subscribe(
 	struct oplus_mms *mms, void *priv_data,
-	void (*callback)(struct mms_subscribe *, enum mms_msg_type, u32),
+	void (*callback)(struct mms_subscribe *, enum mms_msg_type, u32, bool),
 	const char *format, ...);
 int oplus_mms_unsubscribe(struct mms_subscribe *subs);
 int oplus_mms_wait_topic(const char *name, mms_callback_t call, void *data);
@@ -205,5 +212,7 @@ devm_oplus_mms_register_no_ws(struct device *parent,
 		const struct oplus_mms_config *cfg);
 void oplus_mms_unregister(struct oplus_mms *mms);
 void *oplus_mms_get_drvdata(struct oplus_mms *mms);
+int oplus_mms_set_update_mode(struct oplus_mms *mms, bool update);
+int oplus_mms_get_update_mode(struct oplus_mms *mms);
 
 #endif /* __OPLUS_MMS_H__ */

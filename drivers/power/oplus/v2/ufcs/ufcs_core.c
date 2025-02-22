@@ -23,6 +23,10 @@
 #include "ufcs_msg.h"
 #include "ufcs_policy_engine.h"
 
+#if IS_ENABLED(CONFIG_OPLUS_UFCS_CLASS_DEBUG)
+#include "ufcs_debug.h"
+#endif
+
 int ufcs_log_level = LOG_LEVEL_INFO;
 module_param(ufcs_log_level, int, 0644);
 MODULE_PARM_DESC(ufcs_log_level, "ufcs log level");
@@ -80,13 +84,216 @@ static ssize_t err_flag_show(struct device *dev, struct device_attribute *attr,
 }
 static DEVICE_ATTR_RO(err_flag);
 
+#if IS_ENABLED(CONFIG_OPLUS_UFCS_CLASS_DEBUG)
+static ssize_t test_mode_show(struct device *dev, struct device_attribute *attr,
+	char *buf)
+{
+	struct ufcs_dev *ufcs = dev_get_drvdata(dev);
+	struct ufcs_class *class;
+
+	if (ufcs == NULL)
+		return -ENODEV;
+	class = ufcs->class;
+	if (class == NULL)
+		return -ENODEV;
+
+	return snprintf(buf, PAGE_SIZE, "%d\n", class->test_mode);
+}
+
+static ssize_t test_mode_store(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t count)
+{
+	int val = 0;
+	struct ufcs_dev *ufcs = dev_get_drvdata(dev);
+	struct ufcs_class *class;
+
+	if (ufcs == NULL)
+		return -ENODEV;
+	class = ufcs->class;
+	if (class == NULL)
+		return -ENODEV;
+
+	if (kstrtos32(buf, 0, &val)) {
+		ufcs_err("buf error\n");
+		return -EINVAL;
+	}
+
+	class->debug.test_mode = !!val;
+
+	return count;
+}
+static DEVICE_ATTR_RW(test_mode);
+
+static ssize_t recv_msg_store(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct ufcs_dev *ufcs = dev_get_drvdata(dev);
+	struct ufcs_class *class;
+	int rc;
+
+	if (ufcs == NULL)
+		return -ENODEV;
+	class = ufcs->class;
+	if (class == NULL)
+		return -ENODEV;
+
+	rc = ufcs_debug_set_recv_msg(class, buf, count);
+	if (rc < 0)
+		return rc;
+
+	return count;
+}
+static DEVICE_ATTR_WO(recv_msg);
+
+static ssize_t test_request_store(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct ufcs_dev *ufcs = dev_get_drvdata(dev);
+	struct ufcs_class *class;
+	char *tmp_buf;
+	int rc;
+
+	if (ufcs == NULL)
+		return -ENODEV;
+	class = ufcs->class;
+	if (class == NULL)
+		return -ENODEV;
+
+	tmp_buf = devm_kzalloc(dev, count + 1, GFP_KERNEL);
+	if (tmp_buf == NULL) {
+		ufcs_err("alloc tmp_buf error\n");
+		return -ENOMEM;
+	}
+	memcpy(tmp_buf, buf, count);
+	if (tmp_buf[count - 1] == '\n')
+		tmp_buf[count - 1] = 0;
+	rc = ufcs_debug_set_test_request(class, tmp_buf, count);
+	if (rc < 0) {
+		devm_kfree(dev, tmp_buf);
+		return rc;
+	}
+
+	return count;
+}
+static DEVICE_ATTR_WO(test_request);
+
+static ssize_t refuse_store(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct ufcs_dev *ufcs = dev_get_drvdata(dev);
+	struct ufcs_class *class;
+	char *tmp_buf;
+	int rc;
+
+	if (ufcs == NULL)
+		return -ENODEV;
+	class = ufcs->class;
+	if (class == NULL)
+		return -ENODEV;
+
+	tmp_buf = devm_kzalloc(dev, count + 1, GFP_KERNEL);
+	if (tmp_buf == NULL) {
+		ufcs_err("alloc tmp_buf error\n");
+		return -ENOMEM;
+	}
+	memcpy(tmp_buf, buf, count);
+	if (tmp_buf[count - 1] == '\n')
+		tmp_buf[count - 1] = 0;
+	rc = ufcs_debug_set_refuse_info(class, tmp_buf, count);
+	if (rc < 0) {
+		devm_kfree(dev, tmp_buf);
+		return rc;
+	}
+
+	return count;
+}
+static DEVICE_ATTR_WO(refuse);
+
+static ssize_t nck_store(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct ufcs_dev *ufcs = dev_get_drvdata(dev);
+	struct ufcs_class *class;
+	char *tmp_buf;
+	int rc;
+
+	if (ufcs == NULL)
+		return -ENODEV;
+	class = ufcs->class;
+	if (class == NULL)
+		return -ENODEV;
+
+	tmp_buf = devm_kzalloc(dev, count + 1, GFP_KERNEL);
+	if (tmp_buf == NULL) {
+		ufcs_err("alloc tmp_buf error\n");
+		return -ENOMEM;
+	}
+	memcpy(tmp_buf, buf, count);
+	if (tmp_buf[count - 1] == '\n')
+		tmp_buf[count - 1] = 0;
+	rc = ufcs_debug_set_nck_info(class, tmp_buf, count);
+	if (rc < 0) {
+		devm_kfree(dev, tmp_buf);
+		return rc;
+	}
+
+	return count;
+}
+static DEVICE_ATTR_WO(nck);
+
+static ssize_t recv_invaild_msg_store(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct ufcs_dev *ufcs = dev_get_drvdata(dev);
+	struct ufcs_class *class;
+	u8 msg_type;
+	int rc;
+
+	if (ufcs == NULL)
+		return -ENODEV;
+	class = ufcs->class;
+	if (class == NULL)
+		return -ENODEV;
+	if (count != 1)
+		return -EINVAL;
+
+	if (buf[0] == '0')
+		msg_type = UFCS_CTRL_MSG;
+	else if (buf[0] == '1')
+		msg_type = UFCS_DATA_MSG;
+	else
+		return -EINVAL;
+
+	rc = ufcs_debug_set_recv_invalid_msg(class, msg_type);
+	if (rc < 0) {
+		ufcs_err("set recv invalid msg error, rc=%d", rc);
+		return rc;
+	}
+
+	return count;
+}
+static DEVICE_ATTR_WO(recv_invaild_msg);
+#endif /* CONFIG_OPLUS_UFCS_CLASS_DEBUG */
+
 static struct device_attribute *ufcs_ic_attributes[] = {
 	&dev_attr_pdo,
 	&dev_attr_err_flag,
+#if IS_ENABLED(CONFIG_OPLUS_UFCS_CLASS_DEBUG)
+	&dev_attr_test_mode,
+	&dev_attr_recv_msg,
+	&dev_attr_test_request,
+	&dev_attr_refuse,
+	&dev_attr_nck,
+	&dev_attr_recv_invaild_msg,
+#endif
 	NULL
 };
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0))
+static int ufcs_uevent(const struct device *dev, struct kobj_uevent_env *env)
+#else
 static int ufcs_uevent(struct device *dev, struct kobj_uevent_env *env)
+#endif
 {
 	return 0;
 }
@@ -98,7 +305,9 @@ ATTRIBUTE_GROUPS(ufcs);
 
 static struct class g_ufcs_class = {
 	.name = "ufcs",
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 6, 0))
 	.owner = THIS_MODULE,
+#endif
 	.dev_uevent = ufcs_uevent,
 	.dev_groups = ufcs_groups,
 };

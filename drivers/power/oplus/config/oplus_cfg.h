@@ -22,6 +22,10 @@ enum oplus_param_type {
 	OPLUS_CHG_VOOC_NORMAL_PARAM,
 	OPLUS_CHG_VOOCPHY_PARAM,
 	OPLUS_CHG_PPS_PARAM,
+	OPLUS_CHG_UFCS_PARAM,
+	OPLUS_CHG_CPA_PARAM,
+	OPLUS_CHG_IMP_PARAM,
+	OPLUS_BATT_BAL_PARAM,
 	OPLUS_CFG_PARAM_MAX,
 };
 
@@ -30,7 +34,7 @@ struct oplus_cfg_head {
 	u32 head_size;
 	u32 size;
 	u8 signature[512];
-	u8 buf[0];
+	u8 buf[];
 } __attribute__ ((packed));
 
 struct oplus_cfg_check_info {
@@ -41,21 +45,21 @@ struct oplus_cfg_check_info {
 struct oplus_cfg_param_info {
 	u32 magic;
 	u32 param_num;
-	u32 param_index[0];
+	u32 param_index[];
 } __attribute__ ((packed));
 
 struct oplus_param_head {
 	u32 magic;
 	u32 size;
 	u32 type;
-	u8 data[0];
+	u8 data[];
 } __attribute__ ((packed));
 
 struct oplus_cfg_data_head {
 	u32 magic;
 	u32 data_index;
 	u32 size;
-	u8 data[0];
+	u8 data[];
 } __attribute__ ((packed));
 
 struct oplus_cfg {

@@ -20,6 +20,7 @@
 #include <linux/workqueue.h>
 #include <linux/kobject.h>
 #include <linux/platform_device.h>
+#include <linux/pinctrl/consumer.h>
 #include <asm/atomic.h>
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 4, 0))
 #include <linux/xlog.h>
@@ -725,7 +726,11 @@ static int chargepump_gpio_init(struct chip_chargepump *chip)
 	return rc;
 }
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0))
+static int chargepump_driver_probe(struct i2c_client *client)
+#else
 static int chargepump_driver_probe(struct i2c_client *client, const struct i2c_device_id *id)
+#endif
 {
 	int ret = 0;
 	struct chip_chargepump *chg_ic;
@@ -755,13 +760,19 @@ static int chargepump_driver_probe(struct i2c_client *client, const struct i2c_d
 
 static struct i2c_driver chargepump_i2c_driver;
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0))
+static void chargepump_driver_remove(struct i2c_client *client)
+#else
 static int chargepump_driver_remove(struct i2c_client *client)
+#endif
 {
 	int ret=0;
 
 	//ret = i2c_del_driver(&chargepump_i2c_driver);
 	chg_debug( "  ret = %d\n", ret);
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0))
 	return 0;
+#endif
 }
 
 static unsigned long suspend_tm_sec = 0;

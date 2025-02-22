@@ -144,6 +144,7 @@ int oplus_short_c_batt_feature_hw_status_init(void)
 	return short_c_feature_hw_status;
 }
 
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0))
 static struct short_c_batt_item short_c_batt_items[] =  {
 	/*batt chging cycle*/
 	{
@@ -261,6 +262,7 @@ static struct short_c_batt_item short_c_batt_items[] =  {
 		.value = 0
 	},
 };
+#endif
 
 #ifdef CONFIG_OPLUS_CHARGER_MTK
 static bool oplus_is_power_off_chg(struct oplus_chg_chip *chip)
@@ -299,6 +301,7 @@ extern void sort(void *base, size_t num, size_t size,
 	int (*cmp_func)(const void *, const void *),
 	void (*swap_func)(void *, void *, int size));
 
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0))
 static int oplus_digit_num_len(const char *str)
 {
 	int len = 0;
@@ -313,6 +316,7 @@ static int oplus_digit_num_len(const char *str)
 	}
 	return len;
 }
+#endif
 
 static int oplus_cmpint(const void *a, const void *b)
 {
@@ -390,6 +394,7 @@ static bool oplus_short_c_batt_data_is_mounted(void)
 
 static int oplus_short_c_batt_read_file(struct oplus_chg_chip *chip)
 {
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0))
 	struct file *fp;
 	mm_segment_t old_fs;
 	loff_t pos;
@@ -487,6 +492,7 @@ static int oplus_short_c_batt_read_file(struct oplus_chg_chip *chip)
 
 err:
 	kfree(buf);
+#endif
 	return 0;
 }
 
@@ -534,6 +540,7 @@ static bool oplus_is_algorithm_parameters_valid(struct oplus_chg_chip *chip)
 static int oplus_short_c_batt_write_err_code(int err_code,
 		int temp1,int temp2, int vbatt1_mv, int vbatt2_mv, int timer_counts)
 {
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0))
 	struct file *fp;
 	mm_segment_t old_fs;
 	loff_t pos;
@@ -565,6 +572,9 @@ static int oplus_short_c_batt_write_err_code(int err_code,
 	set_fs(old_fs);
 
 	return len;
+#else
+	return 0;
+#endif
 }
 
 #define INVALID_CODE								INVALID_DATA
@@ -583,6 +593,7 @@ static int oplus_short_c_batt_write_err_code(int err_code,
 static int oplus_short_c_batt_write_exit_code(int exit_code,
 		int temp1, int temp2, int vbatt1, int vbatt2)
 {
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0))
 	struct file *fp;
 	mm_segment_t old_fs;
 	loff_t pos;
@@ -614,11 +625,15 @@ static int oplus_short_c_batt_write_exit_code(int exit_code,
 	set_fs(old_fs);
 
 	return len;
+#else
+	return 0;
+#endif
 }
 
 static int oplus_short_c_batt_write_chg_data(int current_ma, int volt_mv,
 		int lower_count, int low_count, int high_count)
 {
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0))
 	struct file *fp;
 	mm_segment_t old_fs;
 	loff_t pos;
@@ -660,6 +675,9 @@ static int oplus_short_c_batt_write_chg_data(int current_ma, int volt_mv,
 	set_fs(old_fs);
 
 	return len;
+#else
+	return 0;
+#endif
 }
 
 #define SHORT_C_BATT_UPDATE_RESET		0

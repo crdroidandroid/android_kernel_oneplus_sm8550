@@ -29,6 +29,7 @@
 #include <linux/power_supply.h>
 #include <linux/proc_fs.h>
 #include <linux/regmap.h>
+#include <linux/pinctrl/consumer.h>
 #include <linux/regulator/driver.h>
 #include <linux/regulator/machine.h>
 #include <linux/regulator/of_regulator.h>
@@ -1522,7 +1523,11 @@ static void register_ufcs_devinfo(void)
 #endif
 }
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0))
+static int nu2112a_driver_probe(struct i2c_client *client)
+#else
 static int nu2112a_driver_probe(struct i2c_client *client, const struct i2c_device_id *id)
+#endif
 {
 	struct oplus_voocphy_manager *chip;
 	int ret;
@@ -1601,16 +1606,26 @@ static const struct dev_pm_ops nu2112a_pm_ops = {
 	.suspend = nu2112a_pm_suspend,
 };
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0))
+static void nu2112a_driver_remove(struct i2c_client *client)
+#else
 static int nu2112a_driver_remove(struct i2c_client *client)
+#endif
 {
 	struct oplus_voocphy_manager *chip = i2c_get_clientdata(client);
 
 	if (chip == NULL)
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0))
+		return;
+#else
 		return -ENODEV;
+#endif
 
 	devm_kfree(&client->dev, chip);
 
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0))
 	return 0;
+#endif
 }
 
 static void nu2112a_shutdown(struct i2c_client *client)

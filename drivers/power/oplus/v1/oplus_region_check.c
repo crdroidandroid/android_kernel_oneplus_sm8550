@@ -21,6 +21,8 @@ struct region_list {
 enum region_list_index {
 	PPS_SUPPORT_REGION,
 	PPS_PRIORITY_REGION,
+	SVOOC_LIMIT_CURRENT_REGION,
+	PPS_COMM_CHG_SUPPORT_REGION,
 	REGION_INDEX_MAX,
 };
 
@@ -31,10 +33,13 @@ static const char *const dts_region_id_list[REGION_INDEX_MAX] = {
 	[PPS_SUPPORT_REGION] = "oplus,pps_region_list",
 	/* pd_svooc adapter works preferentially in pps mode, EU */
 	[PPS_PRIORITY_REGION] = "oplus,pps_priority_list",
+	[SVOOC_LIMIT_CURRENT_REGION] = "oplus,limit_svooc_current_area_list",
+	[PPS_COMM_CHG_SUPPORT_REGION] = "oplus,pps_common_chg_region_list",
 };
 
 static struct region_list region_list_arrry[REGION_INDEX_MAX] =
 {
+	{0, {0x00}},
 	{0, {0x00}},
 	{0, {0x00}},
 };
@@ -63,7 +68,7 @@ static bool get_regionid_from_cmdline(void)
 				region_id = temp_region & 0xFF;
 			else
 				region_id = 0x00;
-			chg_err("oplus_region=0x%02x\n", region_id);
+			chg_info("oplus_region=0x%02x\n", region_id);
 			return true;
 		}
 	}
@@ -96,7 +101,7 @@ static void oplus_parse_pps_region_list(struct oplus_chg_chip *chip)
 		}
 		region_list_arrry[i].elem_count = len;
 		for (len = 0; len < region_list_arrry[i].elem_count; len++)
-			chg_err("%s[%d]=0x%02x", dts_region_id_list[i], len,
+			chg_info("%s[%d]=0x%02x", dts_region_id_list[i], len,
 					region_list_arrry[i].pps_region_list[len]);
 	}
 }
@@ -121,7 +126,7 @@ static bool find_id_in_region_list(u8 id, enum region_list_index list_index)
 
 	while (index < list_length) {
 		region_id_tmp = id_list[index] & 0xFF;
-		chg_err("pps_list[%d]=0x%x", index, id_list[index]);
+		chg_info("pps_list[%d]=0x%x", index, id_list[index]);
 		if (id == region_id_tmp) {
 			return true;
 		}
@@ -129,6 +134,17 @@ static bool find_id_in_region_list(u8 id, enum region_list_index list_index)
 	}
 
 	return false;
+}
+
+bool third_pps_supported_comm_chg_nvid(void)
+{
+	int region_temp = 0;
+	if (dbg_nvid != 0)
+		region_temp = dbg_nvid;
+	else
+		region_temp = region_id;
+
+	return find_id_in_region_list(region_temp, PPS_COMM_CHG_SUPPORT_REGION);
 }
 
 bool third_pps_supported_from_nvid(void)
@@ -139,7 +155,23 @@ bool third_pps_supported_from_nvid(void)
 	else
 		region_temp = region_id;
 
+	/* all region support pps if only one 0xFFFF configed in dtsi */
+	if (region_list_arrry[PPS_SUPPORT_REGION].pps_region_list[0] == 0xFFFF
+		&& region_list_arrry[PPS_SUPPORT_REGION].elem_count == 1)
+		return true;
+
 	return find_id_in_region_list(region_temp, PPS_SUPPORT_REGION);
+}
+
+bool oplus_limit_svooc_current(void)
+{
+	int region_temp = 0;
+	if (dbg_nvid != 0)
+		region_temp = dbg_nvid;
+	else
+		region_temp = region_id;
+
+	return find_id_in_region_list(region_temp, SVOOC_LIMIT_CURRENT_REGION);
 }
 
 bool third_pps_priority_than_svooc(void)

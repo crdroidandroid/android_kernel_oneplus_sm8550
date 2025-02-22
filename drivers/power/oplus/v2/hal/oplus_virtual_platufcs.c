@@ -921,6 +921,33 @@ static int oplus_chg_vpu_is_vol_acc_test_mode(struct oplus_chg_ic_dev *ic_dev, b
 	return rc;
 }
 
+static int oplus_chg_vpu_config_sm_period(struct oplus_chg_ic_dev *ic_dev, u16 time_ms)
+{
+	struct oplus_virtual_ufcs_ic *vpu;
+	int rc = 0;
+	int i;
+
+	if (ic_dev == NULL) {
+		chg_err("oplus_chg_ic_dev is NULL");
+		return -ENODEV;
+	}
+
+	vpu = oplus_chg_ic_get_drvdata(ic_dev);
+	for (i = 0; i < vpu->child_num; i++) {
+		if (!func_is_support(&vpu->child_list[i],
+				     OPLUS_IC_FUNC_UFCS_SET_SM_PERIOD)) {
+			rc = (rc == 0) ? -ENOTSUPP : rc;
+			continue;
+		}
+		rc = oplus_chg_ic_func(vpu->child_list[i].ic_dev,
+			OPLUS_IC_FUNC_UFCS_SET_SM_PERIOD, time_ms);
+		if (rc < 0)
+			chg_err("child ic[%d] config_sm_period error, rc=%d\n", i, rc);
+	}
+
+	return rc;
+}
+
 static void *oplus_chg_vpu_get_func(struct oplus_chg_ic_dev *ic_dev, enum oplus_chg_ic_func func_id)
 {
 	void *func = NULL;
@@ -1015,6 +1042,10 @@ static void *oplus_chg_vpu_get_func(struct oplus_chg_ic_dev *ic_dev, enum oplus_
 	case OPLUS_IC_FUNC_UFCS_IS_VOL_ACC_TEST_MODE:
 		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_UFCS_IS_VOL_ACC_TEST_MODE,
 			oplus_chg_vpu_is_vol_acc_test_mode);
+		break;
+	case OPLUS_IC_FUNC_UFCS_SET_SM_PERIOD:
+		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_UFCS_SET_SM_PERIOD,
+			oplus_chg_vpu_config_sm_period);
 		break;
 	default:
 		chg_err("this func(=%d) is not supported\n", func_id);

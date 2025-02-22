@@ -102,6 +102,7 @@ typedef enum {
     FP_POWER_MODE_GPIO,
     FP_POWER_MODE_AUTO,
     FP_POWER_MODE_WL2868C,
+    FP_POWER_MODE_DIO8018,
 } fp_power_mode_t;
 
 typedef struct {

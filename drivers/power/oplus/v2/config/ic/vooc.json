@@ -461,7 +461,7 @@
             "desc": {
                 "zh": "获取VOOC通讯最终使用的物理IC的ic_dev结构体"
             },
-            "auto_debug_code": true,
+            "auto_debug_code": false,
             "parameter_list": ["struct oplus_chg_ic_dev **"],
             "parameter_desc": [
                 {

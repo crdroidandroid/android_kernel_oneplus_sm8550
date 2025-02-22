@@ -21,6 +21,11 @@
 #include <net/sock.h>
 #include <net/netlink.h>
 #include "fp_driver.h"
+#include <linux/kconfig.h>
+#if (IS_ENABLED(CONFIG_OPLUS_FEATURE_BSP_DRV_VND_INJECT_TEST) || IS_ENABLED(CONFIG_FP_INJECT_ENABLE))
+#include "include/fp_fault_inject.h"
+#endif  // CONFIG_OPLUS_FEATURE_BSP_DRV_VND_INJECT_TEST || CONFIG_FP_INJECT_ENABLE
+
 #define MAX_KERNEL_TO_USER_MSGSIZE 272 // fingerprint_message_t max size is 256+16
 #define MAX_USER_TO_KERNEL_MSGSIZE 100 // only recv len = 3(it can define any size in HAL),only to make sure the msgsend is ok.
 
@@ -77,9 +82,20 @@ void fp_sendnlmsg(int module, int event, void *data, unsigned int size)
     struct fingerprint_message_t g_fingerprint_msg;
     int len = NLMSG_SPACE(MAX_KERNEL_TO_USER_MSGSIZE);
     int ret = 0;
+    int need_report = 0;
 
     memset(&g_fingerprint_msg, 0, sizeof(g_fingerprint_msg));
     write_fingerprint_msg(&g_fingerprint_msg, module, event, data, size);
+    need_report = 1; /* default for need_report */
+
+    /* fault_inject_fp_msg_hook for kernel-HAL msg block */
+#if (IS_ENABLED(CONFIG_OPLUS_FEATURE_BSP_DRV_VND_INJECT_TEST) || IS_ENABLED(CONFIG_FP_INJECT_ENABLE))
+    fault_inject_fp_msg_hook(&g_fingerprint_msg, &need_report);
+#endif  // CONFIG_OPLUS_FEATURE_BSP_DRV_VND_INJECT_TEST || CONFIG_FP_INJECT_ENABLE
+    if (!need_report) {
+        return;
+    }
+
     if (!nl_sk || !g_pid) {
         pr_err("%s, nl_sk is null or g_pid:%d\n", __func__, g_pid);
         return;

@@ -718,14 +718,20 @@ fail:
 
 static struct i2c_driver chargepump_i2c_driver;
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0))
+static void chargepump_driver_remove(struct i2c_client *client)
+#else
 static int chargepump_driver_remove(struct i2c_client *client)
+#endif
 {
 	struct chip_chargepump *chip = i2c_get_clientdata(client);;
 
 	sysfs_remove_group(&client->dev.kobj, &chargepump_attr_group);
 	if (gpio_is_valid(chip->chargepump_en_gpio))
 		gpio_free(chip->chargepump_en_gpio);
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0))
 	return 0;
+#endif
 }
 
 static unsigned long suspend_tm_sec;

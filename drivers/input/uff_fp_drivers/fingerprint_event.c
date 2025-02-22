@@ -12,9 +12,10 @@
 #include <asm/uaccess.h>
 #include <linux/uaccess.h>
 #include <linux/version.h>
-#ifdef CONFIG_FP_INJECT_ENABLE
+#include <linux/kconfig.h>
+#if (IS_ENABLED(CONFIG_OPLUS_FEATURE_BSP_DRV_VND_INJECT_TEST) || IS_ENABLED(CONFIG_FP_INJECT_ENABLE))
 #include "include/fp_fault_inject.h"
-#endif // CONFIG_FP_INJECT_ENABLE
+#endif  // CONFIG_OPLUS_FEATURE_BSP_DRV_VND_INJECT_TEST || CONFIG_FP_INJECT_ENABLE
 
 static struct fingerprint_message_t g_fingerprint_msg = {0};
 int g_fp_driver_event_type = FP_DRIVER_INTERRUPT;
@@ -150,9 +151,9 @@ int send_fingerprint_msg(int module, int event, void *data,
         pr_info("unknow module, ignored");
         break;
     }
-#ifdef CONFIG_FP_INJECT_ENABLE
+#if (IS_ENABLED(CONFIG_OPLUS_FEATURE_BSP_DRV_VND_INJECT_TEST) || IS_ENABLED(CONFIG_FP_INJECT_ENABLE))
     fault_inject_fp_msg_hook(&g_fingerprint_msg, &need_report);
-#endif // CONFIG_FP_INJECT_ENABLE
+#endif  // CONFIG_OPLUS_FEATURE_BSP_DRV_VND_INJECT_TEST || CONFIG_FP_INJECT_ENABLE
     pr_debug("%s, event_change:%d - %d, out_size:%d\n", __func__, event, g_fingerprint_msg.event, g_fingerprint_msg.out_size);
     pr_info("%s, module:%d, event:%d\n", __func__, g_fingerprint_msg.module, g_fingerprint_msg.event);
     if (need_report) {
