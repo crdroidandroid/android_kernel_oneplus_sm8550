@@ -8921,7 +8921,7 @@ static int oplus_chg_wls_entry_rx_mode(struct oplus_chg_wls *wls_dev, enum oplus
 	}
 
 	if (rx_mode == OPLUS_CHG_WLS_RX_MODE_UNKNOWN &&
-	    wls_dev->wls_status.wls_type == OPLUS_CHG_WLS_RX_MODE_BPP) {
+	    wls_dev->wls_status.wls_type == OPLUS_CHG_WLS_BPP) {
 		cancel_delayed_work(&wls_dev->rx_mode_check_work);
 		oplus_chg_wls_rx_set_rx_mode_safety(wls_dev, OPLUS_CHG_WLS_RX_MODE_UNKNOWN);
 		if (wls_dev->wls_status.rx_present) {
@@ -8932,7 +8932,7 @@ static int oplus_chg_wls_entry_rx_mode(struct oplus_chg_wls *wls_dev, enum oplus
 			vote(wls_dev->rx_disable_votable, WLS_CAMERA_MODE_VOTER, false, 1, false);
 		}
 	} else if (rx_mode == OPLUS_CHG_WLS_RX_MODE_BPP &&
-		   wls_dev->wls_status.wls_type != OPLUS_CHG_WLS_RX_MODE_BPP) {
+		   wls_dev->wls_status.wls_type != OPLUS_CHG_WLS_BPP) {
 		if (wls_dev->wls_status.rx_present) {
 			wls_dev->wls_status.online_keep = true;
 			oplus_chg_wls_set_status_keep(wls_dev->wls_topic, WLS_SK_BY_FORCE_BPP);
