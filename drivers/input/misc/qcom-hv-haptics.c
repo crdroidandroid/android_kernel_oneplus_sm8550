@@ -495,6 +495,7 @@ enum wa_flags {
 	SLEEP_CLK_32K_SCALE = BIT(2),
 	TOGGLE_EN_TO_FLUSH_FIFO = BIT(3),
 	RECOVER_SWR_SLAVE = BIT(4),
+	TOGGLE_MODULE_EN = BIT(5),
 };
 
 static const char * const src_str[] = {
@@ -742,6 +743,7 @@ struct haptics_chip {
 	u32				clamped_vmax_mv;
 	u32				wa_flags;
 	u32				primitive_duration;
+	u8				cfg_rev1;
 	u8				cfg_revision;
 	u8				ptn_revision;
 	u8				hpwr_intf_ctl;
@@ -3639,6 +3641,9 @@ static int haptics_config_wa(struct haptics_chip *chip)
 			TOGGLE_EN_TO_FLUSH_FIFO | RECOVER_SWR_SLAVE;
 		break;
 	case HAP520_MV:
+		chip->wa_flags |= SLEEP_CLK_32K_SCALE;
+		if (!chip->cfg_rev1)
+			chip->wa_flags |= TOGGLE_MODULE_EN;
 		break;
 	case HAP525_HV:
 		if (chip->hbst_revision == HAP_BOOST_V0P1)
