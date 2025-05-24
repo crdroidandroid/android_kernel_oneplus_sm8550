@@ -47,7 +47,3 @@ obj-y += oplus/boot/
 #ifdef OPLUS_FEATURE_DFR
 obj-y += oplus/dfr/
 #endif /* OPLUS_FEATURE_DFR */
-
-#ifdef OPLUS_FEATURE_MDMFEATURE
-obj-$(CONFIG_OPLUS_FEATURE_MDMFEATURE)     += oplus/mdmfeature/
-#endif /*OPLUS_FEATURE_MDMFEATURE*/

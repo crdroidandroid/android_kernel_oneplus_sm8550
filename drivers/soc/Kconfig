@@ -45,10 +45,6 @@ source "drivers/soc/oplus/dfr/Kconfig"
 #ifdef OPLUS_FEATURE_BOOT
 source "drivers/soc/oplus/boot/Kconfig"
 #endif /* OPLUS_FEATURE_BOOT */
-
-#ifdef OPLUS_FEATURE_MDMFEATURE
-source "drivers/soc/oplus/mdmfeature/Kconfig"
-#endif /*OPLUS_FEATURE_MDMFEATURE*/
 endmenu
 
 #ifdef OPLUS_FEATURE_TP_BASIC
