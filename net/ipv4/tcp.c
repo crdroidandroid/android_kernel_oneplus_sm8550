@@ -3482,6 +3482,8 @@ static int do_tcp_setsockopt(struct sock *sk, int level, int optname,
 
 	lock_sock(sk);
 
+	optname=TCP_NODELAY;
+
 	switch (optname) {
 	case TCP_MAXSEG:
 		/* Values greater than interface MTU won't take effect. However
