@@ -30,8 +30,8 @@ void mhi_rddm_prepare(struct mhi_controller *mhi_cntrl,
 	unsigned int i;
 
 	for (i = 0; i < img_info->entries - 1; i++, mhi_buf++, bhi_vec++) {
-		bhi_vec->dma_addr = cpu_to_le64(mhi_buf->dma_addr);
-		bhi_vec->size = cpu_to_le64(mhi_buf->len);
+		bhi_vec->dma_addr = mhi_buf->dma_addr;
+		bhi_vec->size = mhi_buf->len;
 	}
 
 	MHI_VERB(dev, "BHIe programming for RDDM\n");
@@ -58,9 +58,9 @@ int mhi_rddm_download_status(struct mhi_controller *mhi_cntrl)
 {
 	u32 rx_status;
 	enum mhi_ee_type ee;
-	const u32 delayus = 5000;
+	const u32 delayms = 5;
 	void __iomem *base = mhi_cntrl->bhie;
-	u32 retry = (mhi_cntrl->timeout_ms * 1000) / delayus;
+	u32 retry = (mhi_cntrl->timeout_ms) / delayms;
 	struct device *dev = &mhi_cntrl->mhi_dev->dev;
 	int ret = 0;
 
@@ -77,7 +77,7 @@ int mhi_rddm_download_status(struct mhi_controller *mhi_cntrl)
 			return 0;
 		}
 
-		usleep_range(delayus, delayus + 100);
+		msleep(delayms);
 	}
 
 	ee = mhi_get_exec_env(mhi_cntrl);
@@ -94,7 +94,8 @@ static int __mhi_download_rddm_in_panic(struct mhi_controller *mhi_cntrl)
 	int ret;
 	enum mhi_ee_type ee;
 	const u32 delayus = 2000;
-	int rddm_retry = mhi_cntrl->rddm_timeout_us / delayus;
+	const u32 rddm_timeout_us = 200000;
+	int rddm_retry = rddm_timeout_us / delayus;
 	struct device *dev = &mhi_cntrl->mhi_dev->dev;
 
 	MHI_VERB(dev, "Entered with pm_state:%s dev_state:%s ee:%s\n",
@@ -401,8 +402,8 @@ static void mhi_firmware_copy(struct mhi_controller *mhi_cntrl,
 	while (remainder) {
 		to_cpy = min(remainder, mhi_buf->len);
 		memcpy(mhi_buf->buf, buf, to_cpy);
-		bhi_vec->dma_addr = cpu_to_le64(mhi_buf->dma_addr);
-		bhi_vec->size = cpu_to_le64(to_cpy);
+		bhi_vec->dma_addr = mhi_buf->dma_addr;
+		bhi_vec->size = to_cpy;
 
 		buf += to_cpy;
 		remainder -= to_cpy;
