@@ -630,7 +630,9 @@ struct dwc3_msm {
 	enum dp_lane		dp_state;
 	bool			dynamic_disable;
 	bool			wcd_usbss;
+#ifdef OPLUS_FEATURE_CHG_BASIC
 	bool			force_disconnect;
+#endif
 	bool			read_u1u2;
 
 	struct gpio_desc	*oc_gpiod;
@@ -6567,6 +6569,9 @@ static int dwc3_msm_probe(struct platform_device *pdev)
 		dwc3_ext_event_notify(mdwc);
 
 	mdwc->force_disconnect = false;
+#ifndef OPLUS_FEATURE_CHG_BASIC
+	dwc3_ext_event_notify(mdwc);
+#endif
 	return 0;
 
 put_dwc3:
@@ -7255,6 +7260,12 @@ static int dwc3_otg_start_peripheral(struct dwc3_msm *mdwc, int on)
 		}
 		mdwc->force_disconnect = false;
 
+#ifdef OPLUS_FEATURE_CHG_BASIC
+		if (mdwc->force_disconnect) {
+			usb_gadget_connect(dwc->gadget);
+			mdwc->force_disconnect = false;
+		}
+#endif
 	} else {
 		dev_dbg(mdwc->dev, "%s: turn off gadget\n", __func__);
 		msm_dwc3_perf_vote_enable(mdwc, false);
@@ -7300,6 +7311,18 @@ static int dwc3_otg_start_peripheral(struct dwc3_msm *mdwc, int on)
 			mdwc->force_disconnect = true;
 		}
 
+#ifdef OPLUS_FEATURE_CHG_BASIC
+		if ((dwc->connected) && (timeout == 0)) {
+			usb_gadget_disconnect(dwc->gadget);
+			timeout = 10;
+			while (timeout && !pm_runtime_suspended(dwc->dev)) {
+				msleep(20);
+				timeout--;
+			}
+			mdwc->force_disconnect = true;
+			dbg_event(0xFF, "Force Disconnect", mdwc->force_disconnect);
+		}
+#endif
 		/* wait for LPM, to ensure h/w is reset after stop_peripheral */
 		set_bit(WAIT_FOR_LPM, &mdwc->inputs);
 
