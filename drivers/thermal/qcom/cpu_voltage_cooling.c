@@ -345,6 +345,7 @@ static int cc_init_single_cluster(struct device_node *np, int cpu)
 			   &cc_cdev->cc_qos_req[0], FREQ_QOS_MAX,
 			   cc_cdev->map_freq[0].frequency[0]);
 	cpufreq_cpu_put(policy);
+	policy = NULL;
 	if (ret < 0) {
 		pr_err("CPU%d Failed to add freq constraint (%d)\n",
 				cc_cdev->cpu_map[0], ret);
@@ -364,9 +365,11 @@ static int cc_init_single_cluster(struct device_node *np, int cpu)
 cc_err_exit:;
 	if (policy)
 		cpufreq_cpu_put(policy);
-	freq_qos_remove_request(&cc_cdev->cc_qos_req[0]);
-	kfree(cc_cdev->map_freq);
-	kfree(cc_cdev);
+	if (cc_cdev) {
+		freq_qos_remove_request(&cc_cdev->cc_qos_req[0]);
+		kfree(cc_cdev->map_freq);
+		kfree(cc_cdev);
+	}
 
 	return ret;
 }
